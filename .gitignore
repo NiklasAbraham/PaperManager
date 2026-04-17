@@ -209,3 +209,6 @@ __marimo__/
 # Google Drive OAuth credentials — never commit
 backend/credentials.json
 backend/token.json
+
+# Application logs
+logs/

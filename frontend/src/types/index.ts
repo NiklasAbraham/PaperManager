@@ -11,12 +11,6 @@ export interface Paper {
   created_at: string;
 }
 
-export interface T_IngestOut extends Paper {
-  drive_url?: string;
-  authors: string[];
-  topics_auto_added: string[];
-}
-
 export interface Person {
   id: string;
   name: string;
@@ -66,6 +60,40 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface Reference {
+  id?: string;
+  title: string;
+  year?: number;
+  doi?: string;
+  arxiv_id?: string;
+  authors?: string[];
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface GraphLink {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  links: GraphLink[];
+}
+
+export interface Stats {
+  counts: { papers: number; authors: number; topics: number; tags: number; projects: number };
+  papers_by_year: { year: number; count: number }[];
+  top_topics: { name: string; count: number }[];
+  recent_papers: (Paper & { authors: string[] })[];
+}
+
 export interface ParsedMeta {
   title: string;
   authors: string[];
@@ -75,4 +103,11 @@ export interface ParsedMeta {
   venue?: string;
   citation_count?: number;
   metadata_source: string;
+}
+
+export interface T_IngestOut extends Paper {
+  drive_url?: string;
+  authors: string[];
+  topics_auto_added: string[];
+  references_found: Reference[];
 }

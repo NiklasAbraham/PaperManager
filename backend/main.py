@@ -1,28 +1,41 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from logger import setup_logging
+setup_logging()
+
 from config import settings
 from db.connection import get_driver, close_driver
 from db.schema import run_schema_setup
 from models.schemas import HealthResponse
+
+log = logging.getLogger(__name__)
 from routers import papers
 from routers.people import people_router, papers_router as people_papers_router
-from routers.tags import tags_router, papers_router as tags_papers_router
+from routers.tags import tags_router, papers_router as tags_papers_router, seed_default_tags
 from routers.topics import topics_router, papers_router as topics_papers_router
 from routers.projects import router as projects_router
 from routers.search import router as search_router
+from routers.graph import router as graph_router
+from routers.stats import router as stats_router
+from routers.cypher import router as cypher_router
+from routers.export import router as export_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: verify Neo4j is reachable, then ensure schema exists
+    log.info("PaperManager backend starting up")
     get_driver().verify_connectivity()
+    log.info("Neo4j connection verified")
     run_schema_setup(get_driver())
+    log.info("Schema ready")
+    seed_default_tags(get_driver())
+    log.info("Default tags ready")
     yield
-    # Driver intentionally left open; the process exit cleans it up.
-    # Explicit close would break test suites that reuse the singleton.
+    log.info("PaperManager backend shutting down")
 
 
 app = FastAPI(title="PaperManager API", lifespan=lifespan)
@@ -45,6 +58,10 @@ app.include_router(topics_router)
 app.include_router(topics_papers_router)
 app.include_router(projects_router)
 app.include_router(search_router)
+app.include_router(graph_router)
+app.include_router(stats_router)
+app.include_router(cypher_router)
+app.include_router(export_router)
 
 
 @app.get("/health", response_model=HealthResponse)

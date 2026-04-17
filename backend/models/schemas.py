@@ -119,6 +119,27 @@ class IngestOut(PaperOut):
     drive_url: str | None = None
     authors: list[str] = []
     topics_auto_added: list[str] = []
+    references_found: list[dict] = []
+
+
+class IngestFromUrlBody(BaseModel):
+    url: str
+    project_id: str | None = None
+
+
+# ── References ─────────────────────────────────────────────────────────────────
+
+class ReferenceOut(BaseModel):
+    id: str | None = None
+    title: str
+    year: int | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    authors: list[str] = []
+
+
+class ReferencesBody(BaseModel):
+    references: list[dict]
 
 
 # ── Chat ───────────────────────────────────────────────────────────────────────
@@ -131,6 +152,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = []
+    model: str = "claude"  # "claude" | "ollama"
 
 
 class ChatResponse(BaseModel):

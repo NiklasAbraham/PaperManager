@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from db.connection import get_driver
 from db.queries.people import (
-    create_person, get_person, list_people,
+    create_person, get_person, list_people, delete_person,
     link_author, link_involves, link_specializes,
+    unlink_author, unlink_involves,
     get_papers_by_person, get_specialties,
 )
+from models.schemas import PersonCreate as PersonUpdate
 from db.queries.topics import get_or_create_topic
 from models.schemas import PersonCreate, PersonOut, AuthorLink, InvolvesLink, SpecialtyLink
 
@@ -33,6 +35,26 @@ def get_one(person_id: str):
     return {**person, "papers": papers, "specialties": specialties}
 
 
+@people_router.patch("/{person_id}", response_model=PersonOut)
+def update_person(person_id: str, body: PersonUpdate):
+    person = get_person(get_driver(), person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    with get_driver().session() as session:
+        data = {k: v for k, v in body.model_dump().items() if v is not None}
+        result = session.run(
+            "MATCH (p:Person {id: $id}) SET p += $props RETURN p",
+            id=person_id, props=data
+        ).single()
+    return dict(result["p"]) if result else person
+
+
+@people_router.delete("/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_person(person_id: str):
+    if not delete_person(get_driver(), person_id):
+        raise HTTPException(status_code=404, detail="Person not found")
+
+
 @people_router.post("/{person_id}/specialties", status_code=status.HTTP_201_CREATED)
 def add_specialty(person_id: str, body: SpecialtyLink):
     if not get_person(get_driver(), person_id):
@@ -52,3 +74,13 @@ def add_author(paper_id: str, body: AuthorLink):
 def add_involves(paper_id: str, body: InvolvesLink):
     link_involves(get_driver(), paper_id, body.person_id, body.role)
     return {"paper_id": paper_id, "person_id": body.person_id, "role": body.role}
+
+
+@papers_router.delete("/{paper_id}/authors/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_author(paper_id: str, person_id: str):
+    unlink_author(get_driver(), paper_id, person_id)
+
+
+@papers_router.delete("/{paper_id}/involves/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_involves(paper_id: str, person_id: str, role: str | None = Query(None)):
+    unlink_involves(get_driver(), paper_id, person_id, role)

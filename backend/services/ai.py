@@ -1,4 +1,4 @@
-"""Claude AI services — summarization and chat."""
+"""Claude and Ollama AI services — summarization and chat."""
 from __future__ import annotations
 
 from typing import Any
@@ -85,3 +85,56 @@ def chat_with_paper(
         messages=messages,
     )
     return response.content[0].text
+
+
+def chat_with_paper_work(
+    paper_text: str,
+    paper_title: str,
+    question: str,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    """Answer *question* using the work/Foundry Anthropic gateway."""
+    if not settings.anthropic_work_api_key:
+        raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
+
+    kwargs: dict[str, Any] = {"api_key": settings.anthropic_work_api_key}
+    if settings.anthropic_work_base_url:
+        kwargs["base_url"] = settings.anthropic_work_base_url
+
+    client = anthropic.Anthropic(**kwargs)
+
+    messages: list[dict[str, Any]] = list(history or [])
+    messages.append({"role": "user", "content": question})
+
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=1024,
+        system=_CHAT_SYSTEM.format(
+            title=paper_title or "(unknown)",
+            text=paper_text[:60000],
+        ),
+        messages=messages,
+    )
+    return response.content[0].text
+
+
+def chat_with_paper_ollama(
+    paper_text: str,
+    paper_title: str,
+    question: str,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    """Answer *question* about a paper using Ollama (local LLM)."""
+    import ollama
+
+    system = _CHAT_SYSTEM.format(
+        title=paper_title or "(unknown)",
+        text=paper_text[:12000],  # smaller context window for local models
+    )
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    for msg in (history or []):
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": question})
+
+    response = ollama.chat(model=settings.ollama_model, messages=messages)
+    return response["message"]["content"].strip()
