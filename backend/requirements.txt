@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+neo4j
+python-dotenv
+pydantic
+pydantic-settings
+python-multipart
+pypdf
+anthropic
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+mcp[cli]
+ollama
+httpx
+pytest
+pytest-asyncio
