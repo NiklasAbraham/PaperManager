@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "paperManager": {
+      "command": "/Users/M350238/miniforge3/envs/papermanager/bin/python",
+      "args": ["backend/mcp_server.py"],
+      "cwd": "/Users/M350238/Desktop/PaperManager"
+    }
+  }
+}
