@@ -42,8 +42,20 @@ def get_person(driver: Driver, person_id: str) -> dict | None:
 
 def list_people(driver: Driver) -> list[dict]:
     with driver.session() as session:
-        result = session.run("MATCH (p:Person) RETURN p ORDER BY p.name")
-        return [dict(r["p"]) for r in result]
+        result = session.run(
+            """
+            MATCH (p:Person)
+            OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
+            RETURN p, count(DISTINCT paper) AS paper_count
+            ORDER BY p.name
+            """
+        )
+        rows = []
+        for r in result:
+            d = dict(r["p"])
+            d["paper_count"] = r["paper_count"]
+            rows.append(d)
+        return rows
 
 
 def delete_person(driver: Driver, person_id: str) -> bool:
@@ -78,6 +90,28 @@ def link_involves(driver: Driver, paper_id: str, person_id: str, role: str):
             peid=person_id,
             role=role,
         )
+
+
+def unlink_author(driver: Driver, paper_id: str, person_id: str):
+    with driver.session() as session:
+        session.run(
+            "MATCH (paper:Paper {id: $pid})-[r:AUTHORED_BY]->(person:Person {id: $peid}) DELETE r",
+            pid=paper_id, peid=person_id,
+        )
+
+
+def unlink_involves(driver: Driver, paper_id: str, person_id: str, role: str | None = None):
+    with driver.session() as session:
+        if role:
+            session.run(
+                "MATCH (paper:Paper {id: $pid})-[r:INVOLVES {role: $role}]->(person:Person {id: $peid}) DELETE r",
+                pid=paper_id, peid=person_id, role=role,
+            )
+        else:
+            session.run(
+                "MATCH (paper:Paper {id: $pid})-[r:INVOLVES]->(person:Person {id: $peid}) DELETE r",
+                pid=paper_id, peid=person_id,
+            )
 
 
 def link_specializes(driver: Driver, person_id: str, topic_id: str):

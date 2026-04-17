@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@keyframes slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slide-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 body {
   margin: 0;
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;

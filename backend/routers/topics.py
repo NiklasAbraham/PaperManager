@@ -1,7 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, status
 from db.connection import get_driver
 from db.queries.topics import (
-    list_topics, link_paper_topic, unlink_paper_topic,
+    get_or_create_topic, list_topics, link_paper_topic, unlink_paper_topic,
     papers_by_topic, link_related_topics,
 )
 from models.schemas import TopicBody, PaperOut
@@ -15,9 +15,33 @@ def list_all():
     return list_topics(get_driver())
 
 
+@topics_router.post("", status_code=status.HTTP_201_CREATED)
+def create_topic(body: TopicBody):
+    return get_or_create_topic(get_driver(), body.name)
+
+
 @topics_router.get("/{name}/papers", response_model=list[PaperOut])
 def papers(name: str):
     return papers_by_topic(get_driver(), name)
+
+
+@topics_router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_topic(name: str):
+    with get_driver().session() as session:
+        session.run("MATCH (t:Topic {name: $name}) DETACH DELETE t", name=name)
+
+
+@topics_router.patch("/{name}")
+def rename_topic(name: str, body: dict):
+    new_name = body.get("name", "").strip()
+    if not new_name:
+        return {"error": "name required"}
+    with get_driver().session() as session:
+        result = session.run(
+            "MATCH (t:Topic {name: $old}) SET t.name = $new RETURN t",
+            old=name, new=new_name
+        ).single()
+    return dict(result["t"]) if result else {}
 
 
 @topics_router.post("/{name_a}/related/{name_b}", status_code=201)

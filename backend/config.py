@@ -23,8 +23,12 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_drive_folder_id: str = ""
 
-    # Anthropic
+    # Anthropic (personal)
     anthropic_api_key: str = ""
+
+    # Anthropic (work / Foundry enterprise gateway)
+    anthropic_work_api_key: str = ""
+    anthropic_work_base_url: str = ""
 
     # App
     backend_port: int = 8000
@@ -32,6 +36,10 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_model: str = "llama3.2:3b"
+
+    # SSL — set SSL_VERIFY=false or point SSL_CA_BUNDLE to corporate CA cert
+    ssl_verify: bool = True
+    ssl_ca_bundle: str = ""  # path to .pem file, e.g. /etc/ssl/certs/corporate.pem
 
 
 settings = Settings()

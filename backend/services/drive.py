@@ -8,7 +8,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 
 from config import settings
 
@@ -53,6 +53,18 @@ def upload_pdf(pdf_bytes: bytes, filename: str) -> str:
 def get_file_url(file_id: str) -> str:
     """Return a browser-viewable URL for the given Drive file ID."""
     return f"https://drive.google.com/file/d/{file_id}/view"
+
+
+def download_pdf(file_id: str) -> bytes:
+    """Download a Drive file and return its raw bytes."""
+    service = get_drive_service()
+    buf = io.BytesIO()
+    request = service.files().get_media(fileId=file_id)
+    downloader = MediaIoBaseDownload(buf, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buf.getvalue()
 
 
 def delete_file(file_id: str) -> None:

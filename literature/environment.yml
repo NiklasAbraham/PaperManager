@@ -1,0 +1,21 @@
+name: llm
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - biopython
+      - pandas
+      - requests
+      - sentence-transformers
+      - torch
+      - torchvision
+      - torchaudio
+      - numpy==1.26.4
+      - ipykernel
+      - matplotlib
+      - seaborn
+
+
+prefix: /Users/karinhrovatin/miniforge3/envs/llm

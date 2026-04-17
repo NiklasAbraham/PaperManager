@@ -1,8 +1,15 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 import Library from "./pages/Library";
 import PaperDetail from "./pages/PaperDetail";
 import People from "./pages/People";
 import Projects from "./pages/Projects";
+import Settings from "./pages/Settings";
+import { SettingsProvider } from "./contexts/SettingsContext";
+
+// Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
+const Graph  = lazy(() => import("./pages/Graph"));
+const Cypher = lazy(() => import("./pages/Cypher"));
 
 function NavBar() {
   const cls = ({ isActive }: { isActive: boolean }) =>
@@ -17,6 +24,9 @@ function NavBar() {
       <NavLink to="/" end className={cls}>Library</NavLink>
       <NavLink to="/people" className={cls}>People</NavLink>
       <NavLink to="/projects" className={cls}>Projects</NavLink>
+      <NavLink to="/graph" className={cls}>Graph</NavLink>
+      <NavLink to="/cypher" className={cls}>Cypher</NavLink>
+      <NavLink to="/settings" className={cls}>Settings</NavLink>
     </nav>
   );
 }
@@ -24,15 +34,20 @@ function NavBar() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50">
-        <NavBar />
-        <Routes>
-          <Route path="/" element={<Library />} />
-          <Route path="/paper/:id" element={<PaperDetail />} />
-          <Route path="/people" element={<People />} />
-          <Route path="/projects" element={<Projects />} />
-        </Routes>
-      </div>
+      <SettingsProvider>
+        <div className="min-h-screen bg-gray-50">
+          <NavBar />
+          <Routes>
+            <Route path="/" element={<Library />} />
+            <Route path="/paper/:id" element={<PaperDetail />} />
+            <Route path="/people" element={<People />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/graph"   element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading graph…</div>}><Graph /></Suspense>} />
+            <Route path="/cypher" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Cypher /></Suspense>} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </div>
+      </SettingsProvider>
     </BrowserRouter>
   );
 }
