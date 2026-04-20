@@ -5,22 +5,38 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 from db.connection import get_driver
-from db.queries.papers import create_paper, merge_paper_by_doi, get_paper, list_papers, update_paper, delete_paper
+from db.queries.papers import create_paper, merge_paper_by_doi, get_paper, list_papers, update_paper, delete_paper, find_duplicate
 from db.queries.notes import get_paper_note, upsert_note, set_mentions
 from db.queries.people import get_or_create_person, link_author
 from db.queries.topics import get_or_create_topic, link_paper_topic
 from db.queries.tags import tag_paper
 from db.queries.projects import add_paper_to_project
 from db.queries.references import create_or_link_reference, get_references, get_cited_by
+from db.queries.figures import list_figures, delete_figures_for_paper
 from services.note_parser import parse_mentions
 from services.pdf_parser import extract_metadata
 from services.metadata_from_url import resolve_url
 from services.drive import upload_pdf, get_file_url, delete_file, download_pdf
-from services.ai import summarize_paper, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama
+from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama
 from services.references import extract_references
+from services.figure_extractor import extract_figures
+from services.drive import upload_image
+from db.queries.figures import create_figure
 from models.schemas import PaperCreate, PaperUpdate, PaperOut, NoteBody, NoteOut, IngestOut, IngestFromUrlBody, ChatRequest, ChatResponse, ReferencesBody
 
 router = APIRouter(prefix="/papers", tags=["papers"])
+
+
+@router.get("/check-duplicate")
+def check_duplicate(doi: Optional[str] = None, title: Optional[str] = None):
+    """Return {duplicate: paper | null} — used by the frontend before confirming upload."""
+    if not doi and not title:
+        return {"duplicate": None}
+    existing = find_duplicate(get_driver(), doi=doi or None, title=title or None)
+    if existing:
+        existing.pop("raw_text", None)
+        return {"duplicate": existing}
+    return {"duplicate": None}
 
 
 @router.post("/parse")
@@ -43,6 +59,8 @@ async def upload(
     file: UploadFile = File(...),
     title_override: Optional[str] = Form(None),
     project_id: Optional[str] = Form(None),
+    caption_method: Optional[str] = Form("ollama"),
+    summary_instructions: Optional[str] = Form(None),
 ):
     """Full ingestion pipeline: PDF → metadata → Drive → summary → Neo4j."""
     pdf_bytes = await file.read()
@@ -67,24 +85,75 @@ async def upload(
     # Step 5: Summarize (best-effort — don't fail if Claude is down)
     summary = None
     try:
-        summary = summarize_paper(raw_text, meta.get("title", ""))
+        summary = summarize_paper(raw_text, meta.get("title", ""), custom_instructions=summary_instructions or None)
         log.info("Summary generated | title=%.60s", meta.get("title"))
     except Exception as exc:
         log.warning("Summary failed (non-fatal) | %s", exc)
 
-    # Step 6: Save paper to Neo4j
+    # Step 6: Save paper to Neo4j — deduplicate by DOI then by title
     driver = get_driver()
-    paper = create_paper(driver, {
-        "title": meta.get("title", ""),
-        "year": meta.get("year"),
-        "doi": meta.get("doi"),
-        "abstract": meta.get("abstract"),
-        "summary": summary,
-        "drive_file_id": drive_file_id,
-        "citation_count": meta.get("citation_count"),
-        "metadata_source": meta.get("metadata_source", "heuristic"),
-        "raw_text": raw_text,
-    })
+    import json as _json
+
+    existing = find_duplicate(driver, doi=meta.get("doi"), title=meta.get("title", ""))
+    if existing:
+        if existing.get("drive_file_id"):
+            # Full paper already in library — block duplicate
+            raise HTTPException(
+                status_code=409,
+                detail=_json.dumps({
+                    "message": "Paper already exists in your library",
+                    "existing_id": existing["id"],
+                    "existing_title": existing.get("title", ""),
+                }),
+            )
+        # Stub (no PDF yet) — enrich it with the new upload data
+        log.info("Enriching stub paper %s with uploaded PDF", existing["id"])
+        paper = merge_paper_by_doi(driver, {
+            "title": meta.get("title", ""),
+            "year": meta.get("year"),
+            "doi": meta.get("doi") or existing.get("doi"),
+            "abstract": meta.get("abstract"),
+            "summary": summary,
+            "drive_file_id": drive_file_id,
+            "citation_count": meta.get("citation_count"),
+            "metadata_source": meta.get("metadata_source", "heuristic"),
+            "raw_text": raw_text,
+        }) if meta.get("doi") or existing.get("doi") else create_paper(driver, {
+            "title": meta.get("title", ""),
+            "year": meta.get("year"),
+            "doi": meta.get("doi"),
+            "abstract": meta.get("abstract"),
+            "summary": summary,
+            "drive_file_id": drive_file_id,
+            "citation_count": meta.get("citation_count"),
+            "metadata_source": meta.get("metadata_source", "heuristic"),
+            "raw_text": raw_text,
+        })
+    elif meta.get("doi"):
+        # No existing paper but DOI known — use merge to future-proof against race conditions
+        paper = merge_paper_by_doi(driver, {
+            "title": meta.get("title", ""),
+            "year": meta.get("year"),
+            "doi": meta.get("doi"),
+            "abstract": meta.get("abstract"),
+            "summary": summary,
+            "drive_file_id": drive_file_id,
+            "citation_count": meta.get("citation_count"),
+            "metadata_source": meta.get("metadata_source", "heuristic"),
+            "raw_text": raw_text,
+        })
+    else:
+        paper = create_paper(driver, {
+            "title": meta.get("title", ""),
+            "year": meta.get("year"),
+            "doi": meta.get("doi"),
+            "abstract": meta.get("abstract"),
+            "summary": summary,
+            "drive_file_id": drive_file_id,
+            "citation_count": meta.get("citation_count"),
+            "metadata_source": meta.get("metadata_source", "heuristic"),
+            "raw_text": raw_text,
+        })
 
     log.info("Paper saved | id=%s | title=%.60s", paper["id"], paper.get("title"))
 
@@ -109,6 +178,21 @@ async def upload(
         link_paper_topic(driver, paper["id"], topic["id"])
         topics_added.append(topic_name)
 
+    # Step 8b: AI topic suggestion (best-effort, supplements Semantic Scholar topics)
+    try:
+        ai_topics = suggest_topics(
+            title=meta.get("title", ""),
+            abstract=meta.get("abstract", "") or "",
+            summary=summary or "",
+        )
+        for topic_name in ai_topics:
+            if topic_name and topic_name not in topics_added:
+                link_paper_topic(driver, paper["id"], topic_name)
+                topics_added.append(topic_name)
+        log.info("AI topics added | count=%d | paper_id=%s", len(ai_topics), paper["id"])
+    except Exception as exc:
+        log.warning("AI topic suggestion failed (non-fatal) | %s", exc)
+
     # Step 9: Link to project if provided
     if project_id:
         try:
@@ -123,6 +207,23 @@ async def upload(
         log.info("References extracted | count=%d | paper_id=%s", len(references_found), paper["id"])
     except Exception as exc:
         log.warning("Reference extraction failed (non-fatal) | %s", exc)
+
+    # Step 11: Extract figures (best-effort)
+    try:
+        figs = extract_figures(pdf_bytes, caption_method=caption_method or "ollama")
+        for i, fig in enumerate(figs):
+            fig_filename = f"{paper['id']}_p{fig['page_number']}_{i+1}.png"
+            fig_drive_id = upload_image(fig["image_bytes"], fig_filename)
+            create_figure(driver, {
+                "paper_id": paper["id"],
+                "figure_number": fig["figure_number"],
+                "caption": fig["caption"],
+                "drive_file_id": fig_drive_id,
+                "page_number": fig["page_number"],
+            })
+        log.info("Figures extracted | count=%d | paper_id=%s", len(figs), paper["id"])
+    except Exception as exc:
+        log.warning("Figure extraction failed (non-fatal) | %s", exc)
 
     return {
         **paper,
@@ -186,6 +287,20 @@ def ingest_from_url(body: IngestFromUrlBody):
         link_paper_topic(driver, paper["id"], topic["id"])
         topics_added.append(topic_name)
 
+    # AI topic suggestion (best-effort)
+    try:
+        ai_topics = suggest_topics(
+            title=meta.get("title", ""),
+            abstract=meta.get("abstract", "") or "",
+            summary=summary or "",
+        )
+        for topic_name in ai_topics:
+            if topic_name and topic_name not in topics_added:
+                link_paper_topic(driver, paper["id"], topic_name)
+                topics_added.append(topic_name)
+    except Exception as exc:
+        log.warning("AI topic suggestion failed (non-fatal) | %s", exc)
+
     if body.project_id:
         try:
             add_paper_to_project(driver, body.project_id, paper["id"])
@@ -225,17 +340,39 @@ def update(paper_id: str, body: PaperUpdate):
 
 @router.delete("/{paper_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete(paper_id: str):
-    paper = get_paper(get_driver(), paper_id)
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    # Remove from Google Drive (best-effort)
+
+    # Delete figure images from Drive, then figure nodes from Neo4j
+    figs = list_figures(driver, paper_id)
+    for fig in figs:
+        if fig.get("drive_file_id"):
+            try:
+                delete_file(fig["drive_file_id"])
+            except Exception as exc:
+                log.warning("Figure Drive delete failed (non-fatal) | %s", exc)
+    if figs:
+        delete_figures_for_paper(driver, paper_id)
+        log.info("Figures deleted | count=%d | paper_id=%s", len(figs), paper_id)
+
+    # Delete the note attached to this paper
+    with driver.session() as session:
+        session.run(
+            "MATCH (n:Note)-[:ABOUT]->(p:Paper {id: $id}) DETACH DELETE n",
+            id=paper_id,
+        )
+
+    # Delete PDF from Drive (best-effort)
     if paper.get("drive_file_id"):
         try:
             delete_file(paper["drive_file_id"])
             log.info("Drive file deleted | file_id=%s", paper["drive_file_id"])
         except Exception as exc:
             log.warning("Drive delete failed (non-fatal) | %s", exc)
-    delete_paper(get_driver(), paper_id)
+
+    delete_paper(driver, paper_id)
     log.info("Paper deleted | id=%s | title=%.60s", paper_id, paper.get("title"))
 
 

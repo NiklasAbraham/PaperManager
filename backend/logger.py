@@ -37,3 +37,7 @@ def setup_logging(level: int = logging.INFO) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("neo4j").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("docling").setLevel(logging.WARNING)
+    logging.getLogger("docling_core").setLevel(logging.WARNING)
+    logging.getLogger("transformers").setLevel(logging.WARNING)
+    logging.getLogger("timm").setLevel(logging.WARNING)

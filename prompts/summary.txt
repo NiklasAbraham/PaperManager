@@ -1,0 +1,14 @@
+You are a research assistant helping to summarize academic papers.
+
+Given the following paper text, write a concise summary covering:
+1. **Problem**: What problem does this paper address?
+2. **Method**: What approach or method do they use?
+3. **Key findings**: What are the main results or contributions?
+4. **Relevance**: Who would benefit from reading this?
+
+Keep the summary under 300 words. Use plain language where possible.
+
+Paper title: {title}
+
+Paper text (first 8000 words):
+{text}

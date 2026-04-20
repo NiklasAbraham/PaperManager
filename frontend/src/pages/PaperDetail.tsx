@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag } from "../api/client";
+import ReactMarkdown from "react-markdown";
+import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
-import type { Paper, Person, Topic, Tag, Reference } from "../types";
+import EditPaperModal from "../components/EditPaperModal";
+import { useAppSettings } from "../contexts/SettingsContext";
+import type { Paper, Person, Topic, Tag, Reference, Figure } from "../types";
 
 interface PaperFull extends Paper {
   authors?: Person[];
@@ -22,7 +25,18 @@ export default function PaperDetail() {
   const [newTag, setNewTag]   = useState("");
   const [newTopic, setNewTopic] = useState("");
   const [tab, setTab]           = useState<RightTab>("notes");
-  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf">("abstract");
+  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures">("abstract");
+  // Figures
+  const [figures, setFigures]         = useState<Figure[]>([]);
+  const [figuresLoaded, setFiguresLoaded] = useState(false);
+  const [figuresExtracting, setFiguresExtracting] = useState(false);
+  const [figuresExtractStep, setFiguresExtractStep] = useState(0);
+  const [selectedFigure, setSelectedFigure] = useState<Figure | null>(null);
+  const [figureQuestion, setFigureQuestion] = useState("");
+  const [figureAnswer, setFigureAnswer]     = useState<string | null>(null);
+  const [figureAnswering, setFigureAnswering] = useState(false);
+  const [figureModel, setFigureModel]       = useState<"claude" | "claude-work">("claude");
+  const { settings } = useAppSettings();
   const [metaOpen, setMetaOpen] = useState(true);
   const [rightWidth, setRightWidth] = useState(320);
   const dragging = useRef(false);
@@ -39,6 +53,10 @@ export default function PaperDetail() {
   const [selectedSugTags, setSelectedSugTags]     = useState<Set<string>>(new Set());
   const [newTagDraft, setNewTagDraft] = useState("");
   const [tagSuggestOpen, setTagSuggestOpen] = useState(false);
+  const [suggestingTopics, setSuggestingTopics] = useState(false);
+  const [suggestedTopics, setSuggestedTopics] = useState<string[]>([]);
+  const [selectedSugTopics, setSelectedSugTopics] = useState<Set<string>>(new Set());
+  const [topicSuggestOpen, setTopicSuggestOpen] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -51,6 +69,62 @@ export default function PaperDetail() {
       .then(({ references, cited_by }) => { setReferences(references); setCitedBy(cited_by); })
       .catch(() => {});
   }, [id]);
+
+  // Load figures lazily when left tab is first opened
+  useEffect(() => {
+    if (leftTab === "figures" && id && !figuresLoaded) {
+      fetchFigures(id).then((figs) => { setFigures(figs); setFiguresLoaded(true); }).catch(() => setFiguresLoaded(true));
+    }
+  }, [leftTab, id, figuresLoaded]);
+
+  const [figuresExtractMsg, setFiguresExtractMsg] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const EXTRACT_STEPS = ["Loading model…", "Rendering pages…", "Detecting figures…", "Saving images…"];
+
+  useEffect(() => {
+    if (!figuresExtracting) { setFiguresExtractStep(0); return; }
+    setFiguresExtractStep(0);
+    const id = setInterval(() => {
+      setFiguresExtractStep((s) => (s + 1) % EXTRACT_STEPS.length);
+    }, 3500);
+    return () => clearInterval(id);
+  }, [figuresExtracting]);
+
+  const handleExtractFigures = async () => {
+    if (!id) return;
+    setFiguresExtracting(true);
+    setSelectedFigure(null);
+    setFigureAnswer(null);
+    setFiguresExtractMsg(null);
+    try {
+      const res = await extractFiguresForPaper(id, settings.figureCaptionMethod);
+      const figs = await fetchFigures(id);
+      setFigures(figs);
+      setFiguresLoaded(true);
+      setFiguresExtractMsg(`${res.extracted} figure${res.extracted !== 1 ? "s" : ""} extracted`);
+    } catch (e) {
+      setFiguresExtractMsg(e instanceof Error ? e.message : "Extraction failed");
+    } finally {
+      setFiguresExtracting(false);
+    }
+  };
+
+  const handleFigureChat = async () => {
+    if (!id || !selectedFigure || !figureQuestion.trim()) return;
+    setFigureAnswering(true);
+    setFigureAnswer(null);
+    try {
+      const res = await chatWithFigure(id, selectedFigure.id, figureQuestion.trim(), figureModel);
+      setFigureAnswer(res.answer);
+    } catch (e) {
+      setFigureAnswer(`Error: ${e instanceof Error ? e.message : "Chat failed"}`);
+    } finally {
+      setFigureAnswering(false);
+    }
+  };
 
   const handleExtract = async () => {
     if (!id) return;
@@ -94,6 +168,38 @@ export default function PaperDetail() {
     setSelectedSugTags(new Set());
   };
 
+  const handleSuggestTopics = async () => {
+    if (!id) return;
+    setSuggestingTopics(true);
+    setTopicSuggestOpen(true);
+    try {
+      const res = await suggestTopics(id);
+      const existing = topics.map((t) => t.name);
+      const fresh = res.topics.filter((t) => !existing.includes(t));
+      setSuggestedTopics(res.topics);
+      setSelectedSugTopics(new Set(fresh));
+    } finally {
+      setSuggestingTopics(false);
+    }
+  };
+
+  const applyTopicSuggestions = async () => {
+    if (!id) return;
+    const existing = topics.map((t) => t.name);
+    for (const name of selectedSugTopics) {
+      if (!existing.includes(name)) {
+        await apiFetch(`/papers/${id}/topics`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+      }
+    }
+    setTopics(await apiFetch<Topic[]>(`/papers/${id}/topics`));
+    setTopicSuggestOpen(false);
+    setSelectedSugTopics(new Set());
+  };
+
   const handlePullReference = async (doi: string) => {
     setPullingDoi(doi);
     try {
@@ -119,6 +225,19 @@ export default function PaperDetail() {
       setCitedBy(cited_by);
     }
     setPendingRefs(null);
+  };
+
+  const handleDeletePaper = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      await deletePaper(id);
+      navigate("/");
+    } catch (e) {
+      setDeleting(false);
+      setConfirmDelete(false);
+      alert(e instanceof Error ? e.message : "Delete failed");
+    }
   };
 
   const addTag = async () => {
@@ -172,7 +291,12 @@ export default function PaperDetail() {
       <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shrink-0">
         <Link to="/" className="text-sm text-violet-600 hover:underline">← Library</Link>
         <h1 className="text-sm font-medium text-gray-700 truncate max-w-md">{paper.title}</h1>
-        <div className="w-24" />{/* spacer to keep title centred */}
+        <button
+          onClick={() => setEditOpen(true)}
+          className="w-24 text-right text-xs text-gray-400 hover:text-violet-600 transition-colors"
+        >
+          Edit metadata
+        </button>
       </div>
 
       {/* Main two-column layout */}
@@ -204,6 +328,16 @@ export default function PaperDetail() {
                 PDF
               </button>
             )}
+            <button
+              onClick={() => setLeftTab("figures")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "figures"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {figuresLoaded && figures.length > 0 ? `Figures (${figures.length})` : "Figures"}
+            </button>
             {driveUrl && (
               <a
                 href={driveUrl}
@@ -244,7 +378,9 @@ export default function PaperDetail() {
                 {paper.summary && (
                   <div className="bg-violet-50 border border-violet-100 rounded-xl p-5">
                     <p className="text-xs font-semibold text-violet-400 uppercase tracking-wide mb-2">AI Summary</p>
-                    <p className="text-sm text-gray-700 leading-relaxed">{paper.summary}</p>
+                    <div className="prose prose-sm max-w-none text-gray-700 prose-headings:text-gray-800 prose-a:text-violet-600">
+                      <ReactMarkdown>{paper.summary}</ReactMarkdown>
+                    </div>
                   </div>
                 )}
 
@@ -254,6 +390,39 @@ export default function PaperDetail() {
                     {paper.citation_count != null && ` · ${paper.citation_count.toLocaleString()} citations`}
                   </p>
                 )}
+
+                {/* Delete */}
+                <div className="pt-4 border-t border-gray-100">
+                  {!confirmDelete ? (
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      Delete this paper…
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                      <p className="text-xs text-red-700 flex-1">
+                        This will permanently delete the paper, its PDF, all figures, and its note.
+                        People, tags, and topics are kept.
+                      </p>
+                      <button
+                        onClick={() => setConfirmDelete(false)}
+                        disabled={deleting}
+                        className="shrink-0 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDeletePaper}
+                        disabled={deleting}
+                        className="shrink-0 text-xs font-medium bg-red-600 text-white px-3 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {deleting ? "Deleting…" : "Delete"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -266,6 +435,134 @@ export default function PaperDetail() {
               allow="autoplay"
               title="PDF viewer"
             />
+          )}
+
+          {/* Figures tab */}
+          {leftTab === "figures" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-5 space-y-5">
+
+                {/* Toolbar */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleExtractFigures}
+                    disabled={figuresExtracting}
+                    className="text-xs px-3 py-1.5 bg-violet-50 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 font-medium"
+                  >
+                    {figures.length > 0 ? "Re-extract" : "Extract figures"}
+                  </button>
+                  {figuresExtracting ? (
+                    <span className="flex items-center gap-1.5 text-xs text-violet-500">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+                      {EXTRACT_STEPS[figuresExtractStep]}
+                    </span>
+                  ) : figuresExtractMsg ? (
+                    <span className="text-xs text-gray-400">{figuresExtractMsg}</span>
+                  ) : figures.length > 0 ? (
+                    <span className="text-xs text-gray-400">{figures.length} figure{figures.length !== 1 ? "s" : ""}</span>
+                  ) : null}
+                </div>
+
+                {/* Empty state */}
+                {figuresLoaded && figures.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-12">
+                    No figures extracted yet.<br />
+                    <span className="text-xs">Click "Extract figures" to start.</span>
+                  </p>
+                )}
+
+                {/* Figures — vertical stack */}
+                {figures.length > 0 && (
+                  <div className="space-y-6">
+                    {figures.map((fig) => {
+                      const isOpen = selectedFigure?.id === fig.id;
+                      return (
+                        <div key={fig.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                          {/* Image */}
+                          {fig.drive_file_id ? (
+                            <img
+                              src={`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/papers/${id}/figures/${fig.id}/image`}
+                              alt={fig.caption ?? "Figure"}
+                              className="w-full object-contain bg-gray-50"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                          ) : (
+                            <div className="w-full h-40 bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No preview</div>
+                          )}
+
+                          {/* Caption + ask button */}
+                          <div className="px-4 py-3 bg-white border-t border-gray-100">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-semibold text-gray-500">
+                                  {fig.figure_number ? `Figure ${fig.figure_number}` : `Page ${fig.page_number}`}
+                                </p>
+                                {fig.caption && (
+                                  <p className="text-sm text-gray-700 mt-0.5 leading-relaxed">{fig.caption}</p>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setSelectedFigure(isOpen ? null : fig);
+                                  setFigureAnswer(null);
+                                  setFigureQuestion("");
+                                }}
+                                className="shrink-0 text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 transition-colors"
+                              >
+                                {isOpen ? "Close" : "Ask"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Inline chat — shown when expanded */}
+                          {isOpen && (
+                            <div className="px-4 py-4 space-y-3 border-t border-violet-100 bg-violet-50">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ask about this figure</p>
+                                <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
+                                  {(["claude", "claude-work"] as const).map((m) => (
+                                    <button
+                                      key={m}
+                                      onClick={() => setFigureModel(m)}
+                                      className={`px-2.5 py-1 ${figureModel === m ? "bg-violet-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}
+                                    >
+                                      {m === "claude" ? "Claude" : "Work"}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={figureQuestion}
+                                  onChange={(e) => setFigureQuestion(e.target.value)}
+                                  onKeyDown={(e) => e.key === "Enter" && handleFigureChat()}
+                                  placeholder="What does this figure show?"
+                                  disabled={figureAnswering}
+                                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50"
+                                />
+                                <button
+                                  onClick={handleFigureChat}
+                                  disabled={figureAnswering || !figureQuestion.trim()}
+                                  className="px-4 py-2 bg-violet-600 text-white text-sm rounded-lg hover:bg-violet-700 disabled:opacity-50"
+                                >
+                                  {figureAnswering ? "…" : "Ask"}
+                                </button>
+                              </div>
+                              {figureAnswer && (
+                                <div className="prose prose-sm max-w-none bg-white border border-gray-100 rounded-xl p-4">
+                                  <ReactMarkdown>{figureAnswer}</ReactMarkdown>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
@@ -300,6 +597,48 @@ export default function PaperDetail() {
                     ))}
                   </div>
                   <InlineAdd value={newTopic} onChange={setNewTopic} onAdd={addTopic} placeholder="Add topic…" />
+                  <button
+                    onClick={handleSuggestTopics}
+                    disabled={suggestingTopics}
+                    className="mt-1.5 w-full text-xs py-1 px-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 disabled:opacity-50 flex items-center justify-center gap-1"
+                  >
+                    {suggestingTopics ? "Asking Claude…" : "✦ Suggest topics with AI"}
+                  </button>
+
+                  {topicSuggestOpen && !suggestingTopics && (
+                    <div className="mt-2 border border-blue-200 rounded-lg overflow-hidden">
+                      <div className="bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 flex justify-between">
+                        <span>Topic suggestions</span>
+                        <button onClick={() => setTopicSuggestOpen(false)} className="text-blue-400 hover:text-blue-700">×</button>
+                      </div>
+                      <div className="p-3 space-y-2">
+                        <div className="flex flex-wrap gap-1">
+                          {suggestedTopics.map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setSelectedSugTopics((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; })}
+                              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                                topics.map((x) => x.name).includes(t)
+                                  ? "border-gray-200 text-gray-400 cursor-default"
+                                  : selectedSugTopics.has(t)
+                                  ? "bg-blue-600 text-white border-blue-600"
+                                  : "border-dashed border-blue-400 text-blue-600 hover:bg-blue-50"
+                              }`}
+                            >
+                              {topics.map((x) => x.name).includes(t) ? "✓ " : "+ "}{t}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={applyTopicSuggestions}
+                          disabled={selectedSugTopics.size === 0}
+                          className="w-full text-xs py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          Apply {selectedSugTopics.size} topic{selectedSugTopics.size !== 1 ? "s" : ""}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </MetaSection>
 
                 {/* Tags */}
@@ -545,9 +884,18 @@ export default function PaperDetail() {
                 )}
               </div>
             )}
+
           </div>
         </div>
       </div>
+
+      {editOpen && (
+        <EditPaperModal
+          paper={paper}
+          onSaved={(updated) => { setPaper((p) => p ? { ...p, ...updated } : p); setEditOpen(false); }}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
     </div>
   );
 }

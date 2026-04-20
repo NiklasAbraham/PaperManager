@@ -74,3 +74,19 @@ chat_with_paper
 - Concise communication
 - Discuss design before coding
 - Use conda for env management (papermanager env, Python 3.12)
+
+## Backfill rule (IMPORTANT — always follow)
+When adding any AI enrichment feature (topics, summaries, tags, authors, etc.),
+ALWAYS ask the user: "Do you want to apply this to existing papers too?"
+If yes: add a `POST /backfill/{operation}` endpoint in `routers/backfill.py`
+and a corresponding row in the Library Maintenance section of Settings.tsx.
+Backfill logic: skip papers that already have the data, process the rest,
+return `{processed, skipped, errors}`.
+
+## Backfill operations (routers/backfill.py, prefix /backfill)
+- POST /backfill/topics  — suggest_topics() on papers with 0 topics
+- POST /backfill/summary — summarize_paper() on papers with raw_text but no summary
+
+## Session logs
+- `memory/session-2026-04-18.md` — stats fix, work account fix, MD rendering,
+  prompts folder, auto topics, backfill pattern

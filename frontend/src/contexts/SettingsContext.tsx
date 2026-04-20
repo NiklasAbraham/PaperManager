@@ -1,11 +1,31 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 
+export const DEFAULT_SUMMARY_INSTRUCTIONS = `You are a research assistant helping to summarize academic papers.
+
+Given the following paper text, write a concise summary covering:
+1. **Problem**: What problem does this paper address?
+2. **Method**: What approach or method do they use?
+3. **Key findings**: What are the main results or contributions?
+4. **Relevance**: Who would benefit from reading this?
+
+Keep the summary under 300 words. Use plain language where possible.`;
+
 export interface AppSettings {
   // Library
   defaultView: "grid" | "list";
   defaultSort: "date_desc" | "date_asc" | "year_desc" | "year_asc" | "title_asc";
   showAbstractPreview: boolean;
   papersPerPage: 20 | 50 | 100 | 0; // 0 = all
+
+  // Upload workflow
+  showSourceStep: boolean;
+  showSummaryPromptStep: boolean;
+  autoSaveReferences: boolean;
+  showTagsStep: boolean;
+  defaultSummaryInstructions: string;
+
+  // Figures
+  figureCaptionMethod: "docling" | "ollama" | "claude-vision";
 
   // Graph
   defaultGraphMode: "full" | "papers";
@@ -19,6 +39,12 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   defaultSort: "date_desc",
   showAbstractPreview: true,
   papersPerPage: 50,
+  showSourceStep: true,
+  showSummaryPromptStep: true,
+  autoSaveReferences: false,
+  showTagsStep: true,
+  defaultSummaryInstructions: DEFAULT_SUMMARY_INSTRUCTIONS,
+  figureCaptionMethod: "docling",
   defaultGraphMode: "full",
   graphNodeSize: 16,
   graphShowNodeLabels: true,

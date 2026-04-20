@@ -1,11 +1,30 @@
 import { useState } from "react";
-import { useAppSettings, type AppSettings } from "../contexts/SettingsContext";
+import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
 import { apiFetch } from "../api/client";
+
+type BackfillResult = { processed: number; skipped: number; errors: number };
+type BackfillOp = "topics" | "summary" | "figures";
+type BackfillState = { status: "idle" | "running" | "done" | "error"; result?: BackfillResult };
 
 export default function Settings() {
   const { settings, update, reset } = useAppSettings();
   const [confirmReset, setConfirmReset] = useState(false);
   const [exporting, setExporting] = useState<"bibtex" | "json" | null>(null);
+  const [backfill, setBackfill] = useState<Record<BackfillOp, BackfillState>>({
+    topics:  { status: "idle" },
+    summary: { status: "idle" },
+    figures: { status: "idle" },
+  });
+
+  const runBackfill = async (op: BackfillOp) => {
+    setBackfill((s) => ({ ...s, [op]: { status: "running" } }));
+    try {
+      const result = await apiFetch<BackfillResult>(`/backfill/${op}`, { method: "POST" });
+      setBackfill((s) => ({ ...s, [op]: { status: "done", result } }));
+    } catch {
+      setBackfill((s) => ({ ...s, [op]: { status: "error" } }));
+    }
+  };
 
   const exportBibtex = async () => {
     setExporting("bibtex");
@@ -78,6 +97,72 @@ export default function Settings() {
             onChange={(v) => update({ showAbstractPreview: v })}
           />
         </Row>
+
+        <Row label="Figure caption method" description="How figures are detected and captioned at upload time. Docling uses a neural layout model (best quality).">
+          <ToggleGroup
+            value={settings.figureCaptionMethod}
+            options={[
+              { value: "docling", label: "Docling (AI layout)" },
+              { value: "ollama", label: "Ollama (text)" },
+              { value: "claude-vision", label: "Claude Vision" },
+            ]}
+            onChange={(v) => update({ figureCaptionMethod: v as AppSettings["figureCaptionMethod"] })}
+          />
+        </Row>
+      </Section>
+
+      {/* ── Upload Workflow ── */}
+      <Section title="Upload Workflow" description="Control which steps appear when you upload a paper.">
+        <Row label="Source step" description='"How did you get this paper?" — track people or channels that shared it.'>
+          <Toggle
+            value={settings.showSourceStep}
+            onChange={(v) => update({ showSourceStep: v })}
+          />
+        </Row>
+
+        <Row label="Summary prompt step" description="Show and optionally edit the AI summary prompt before uploading.">
+          <Toggle
+            value={settings.showSummaryPromptStep}
+            onChange={(v) => update({ showSummaryPromptStep: v })}
+          />
+        </Row>
+
+        <Row label="Auto-save all references" description="Skip the references review step and save every found reference automatically.">
+          <Toggle
+            value={settings.autoSaveReferences}
+            onChange={(v) => update({ autoSaveReferences: v })}
+          />
+        </Row>
+
+        <Row label="Tags step" description="Show the tag suggestion step after upload.">
+          <Toggle
+            value={settings.showTagsStep}
+            onChange={(v) => update({ showTagsStep: v })}
+          />
+        </Row>
+
+        <div className="px-5 py-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-800">Default summary instructions</p>
+              <p className="text-xs text-gray-400 mt-0.5">Pre-filled in the summary prompt step on every upload.</p>
+            </div>
+            {settings.defaultSummaryInstructions !== DEFAULT_SUMMARY_INSTRUCTIONS && (
+              <button
+                onClick={() => update({ defaultSummaryInstructions: DEFAULT_SUMMARY_INSTRUCTIONS })}
+                className="shrink-0 text-xs text-gray-400 hover:text-violet-600 transition-colors ml-4"
+              >
+                ↺ Reset
+              </button>
+            )}
+          </div>
+          <textarea
+            value={settings.defaultSummaryInstructions}
+            onChange={(e) => update({ defaultSummaryInstructions: e.target.value })}
+            rows={8}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"
+          />
+        </div>
       </Section>
 
       {/* ── Graph ── */}
@@ -139,6 +224,28 @@ export default function Settings() {
         </Row>
       </Section>
 
+      {/* ── Library Maintenance ── */}
+      <Section title="Library Maintenance" description="Apply AI enrichment to papers already in your library. Skips papers that already have the data.">
+        <BackfillRow
+          label="Suggest topics"
+          description="Run AI topic suggestion on papers that have no topics yet."
+          state={backfill.topics}
+          onRun={() => runBackfill("topics")}
+        />
+        <BackfillRow
+          label="Generate summaries"
+          description="Generate AI summaries for papers with extracted text but no summary yet."
+          state={backfill.summary}
+          onRun={() => runBackfill("summary")}
+        />
+        <BackfillRow
+          label="Extract figures"
+          description="Extract figures from PDFs for papers that have no figures yet."
+          state={backfill.figures}
+          onRun={() => runBackfill("figures")}
+        />
+      </Section>
+
       {/* ── Data ── */}
       <Section title="Data" description="Danger zone — these actions cannot be undone.">
         <Row label="Reset settings" description="Restore all settings to their default values.">
@@ -185,6 +292,38 @@ function download(content: string, filename: string, mime: string) {
 }
 
 // ── Layout components ────────────────────────────────────────────────────────
+
+function BackfillRow({ label, description, state, onRun }: {
+  label: string;
+  description: string;
+  state: BackfillState;
+  onRun: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-6 px-5 py-4">
+      <div>
+        <p className="text-sm font-medium text-gray-800">{label}</p>
+        <p className="text-xs text-gray-400 mt-0.5">{description}</p>
+        {state.status === "done" && state.result && (
+          <p className="text-xs text-green-600 mt-1">
+            Done — {state.result.processed} processed, {state.result.skipped} skipped
+            {state.result.errors > 0 && `, ${state.result.errors} errors`}
+          </p>
+        )}
+        {state.status === "error" && (
+          <p className="text-xs text-red-500 mt-1">Failed — check backend logs</p>
+        )}
+      </div>
+      <button
+        onClick={onRun}
+        disabled={state.status === "running"}
+        className="shrink-0 px-4 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+      >
+        {state.status === "running" ? "Running…" : state.status === "done" ? "Run again" : "Run"}
+      </button>
+    </div>
+  );
+}
 
 function Section({ title, description, children }: {
   title: string;

@@ -23,6 +23,9 @@ from routers.graph import router as graph_router
 from routers.stats import router as stats_router
 from routers.cypher import router as cypher_router
 from routers.export import router as export_router
+from routers.backfill import router as backfill_router
+from routers.knowledge_chat import router as knowledge_chat_router
+from routers.figures import router as figures_router
 
 
 @asynccontextmanager
@@ -62,6 +65,9 @@ app.include_router(graph_router)
 app.include_router(stats_router)
 app.include_router(cypher_router)
 app.include_router(export_router)
+app.include_router(backfill_router)
+app.include_router(knowledge_chat_router)
+app.include_router(figures_router)
 
 
 @app.get("/health", response_model=HealthResponse)

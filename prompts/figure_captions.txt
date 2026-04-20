@@ -1,0 +1,17 @@
+This is text extracted from page {page} of an academic PDF paper.
+Your task is to find all figure captions on this page.
+Figure captions usually start with "Figure X:", "Fig. X:", "FIGURE X", or similar patterns.
+They describe a chart, graph, diagram, illustration, or image in the paper.
+
+Return ONLY valid JSON in exactly this format:
+{{"figures": [{{"number": 1, "caption": "Full caption text here"}}]}}
+
+Rules:
+- "number" should be the integer figure number (e.g. 1 for "Figure 1")
+- "caption" should be the complete caption text, including the "Figure X:" prefix
+- If you cannot determine the number, use null
+- If no figure captions are found on this page, return {{"figures": []}}
+- Do not include table captions (Table X:) — only figure captions
+
+Page text:
+{page_text}

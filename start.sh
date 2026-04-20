@@ -40,7 +40,9 @@ fi
 # ── Backend ───────────────────────────────────────────────────────────────────
 info "Starting backend..."
 cd "$BACKEND"
-"$PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload &>/tmp/papermanager-backend.log &
+# Process substitution: logs go to terminal AND the log file simultaneously
+"$PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload \
+  > >(tee /tmp/papermanager-backend.log) 2>&1 &
 BACKEND_PID=$!
 
 # Wait until backend is accepting connections (max 15s)
@@ -56,6 +58,7 @@ done
 # ── Frontend ──────────────────────────────────────────────────────────────────
 info "Starting frontend..."
 cd "$FRONTEND"
+# Frontend (Vite) logs to file only — terminal stays readable for backend logs
 npm run dev &>/tmp/papermanager-frontend.log &
 FRONTEND_PID=$!
 

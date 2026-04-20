@@ -157,3 +157,52 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+
+
+# ── Knowledge Chat ──────────────────────────────────────────────────────────────
+
+class KnowledgeChatRequest(BaseModel):
+    question: str
+    history: list[ChatMessage] = []
+    model: str = "claude"
+    conversation_id: str | None = None
+
+
+class ConversationOut(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    compacted: bool = False
+    message_count: int = 0
+
+
+class MessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    tokens_used: int | None = None
+    created_at: str
+    paper_refs: list[str] = []
+
+
+# ── Figures ──────────────────────────────────────────────────────────────────
+
+class FigureOut(BaseModel):
+    id: str
+    paper_id: str
+    figure_number: int | None = None
+    caption: str | None = None
+    drive_file_id: str
+    drive_url: str | None = None
+    page_number: int
+    created_at: str
+
+
+class FigureChatRequest(BaseModel):
+    question: str
+    model: str = "claude"
+
+
+class FigureExtractRequest(BaseModel):
+    caption_method: str = "ollama"  # "ollama" | "claude-vision"

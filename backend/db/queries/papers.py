@@ -1,6 +1,55 @@
+import re
 import uuid
 from datetime import datetime, timezone
 from neo4j import Driver
+
+
+def _normalize_title(title: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace for fuzzy title matching."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", title.lower())).strip()
+
+
+def find_duplicate(
+    driver: Driver,
+    doi: str | None = None,
+    title: str | None = None,
+) -> dict | None:
+    """
+    Return an existing Paper that matches by DOI (exact) or normalized title.
+    Returns None if no match found.
+    """
+    if doi:
+        with driver.session() as session:
+            rec = session.run(
+                "MATCH (p:Paper {doi: $doi}) RETURN p LIMIT 1", doi=doi
+            ).single()
+            if rec:
+                return dict(rec["p"])
+
+    if title:
+        norm = _normalize_title(title)
+        if not norm:
+            return None
+        # Case-insensitive exact match first
+        with driver.session() as session:
+            rows = session.run(
+                "MATCH (p:Paper) WHERE toLower(p.title) = toLower($title) RETURN p LIMIT 5",
+                title=title,
+            ).data()
+        for row in rows:
+            return dict(row["p"])
+
+        # Normalized match (strips punctuation) — compare in Python against a
+        # small window of recently added papers to avoid full-scan in huge libraries
+        with driver.session() as session:
+            rows = session.run(
+                "MATCH (p:Paper) RETURN p ORDER BY p.created_at DESC LIMIT 2000"
+            ).data()
+        for row in rows:
+            if _normalize_title(row["p"].get("title", "")) == norm:
+                return dict(row["p"])
+
+    return None
 
 
 def _now() -> str:

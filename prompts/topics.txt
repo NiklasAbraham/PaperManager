@@ -1,0 +1,12 @@
+You are helping organise an academic research library.
+
+Given the paper below, return 3 to 6 research topics that best describe it.
+Topics should be concise, formal research-area names (e.g. "Protein Structure Prediction", "Graph Neural Networks", "Drug Discovery").
+Use title case. Be specific — prefer "Contrastive Self-Supervised Learning" over "Machine Learning".
+
+Paper title: {title}
+
+{context}
+
+Return ONLY valid JSON: {{"topics": ["Topic One", "Topic Two", ...]}}
+No explanation, no markdown, just JSON.
