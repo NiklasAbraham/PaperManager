@@ -495,7 +495,7 @@ function Dashboard({ stats, onTopicClick, onEntityClick }: {
   return (
     <div className="space-y-6">
       {/* Stat cards */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard value={counts.papers}    label="Papers"     color="violet" onClick={() => onEntityClick("papers")}   />
         <StatCard value={counts.authors}   label="Authors"    color="blue"   onClick={() => onEntityClick("authors")}  />
         <StatCard value={counts.topics}    label="Topics"     color="green"  onClick={() => onEntityClick("topics")}   />

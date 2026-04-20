@@ -538,8 +538,7 @@ def paper_bibtex(paper_id: str):
     lines.append("}")
 
     content = "\n".join(lines) + "\n"
-    safe_title = "".join(c for c in (paper.get("title") or "paper")[:40] if c.isalnum() or c in " _-").strip()
-    filename = f"{safe_title or key}.bib"
+    filename = f"{_safe_filename(paper.get('title') or key)}.bib"
     return Response(
         content,
         media_type="text/plain; charset=utf-8",
@@ -549,3 +548,8 @@ def paper_bibtex(paper_id: str):
 
 def _bib_escape(s: str) -> str:
     return s.replace("{", "\\{").replace("}", "\\}")
+
+
+def _safe_filename(title: str, max_len: int = 40) -> str:
+    """Return a filesystem-safe version of *title*, stripped to *max_len* chars."""
+    return "".join(c for c in title[:max_len] if c.isalnum() or c in " _-").strip()
