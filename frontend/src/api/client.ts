@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, Figure } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -25,12 +25,16 @@ export async function parsePdf(file: File): Promise<ParsedMeta> {
 export async function uploadPdf(
   file: File,
   titleOverride?: string,
-  projectId?: string
+  projectId?: string,
+  captionMethod?: string,
+  summaryInstructions?: string,
 ): Promise<T_IngestOut> {
   const form = new FormData();
   form.append("file", file);
   if (titleOverride) form.append("title_override", titleOverride);
   if (projectId) form.append("project_id", projectId);
+  if (captionMethod) form.append("caption_method", captionMethod);
+  if (summaryInstructions) form.append("summary_instructions", summaryInstructions);
   const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form });
   if (!res.ok) {
     const detail = await res.text();
@@ -116,6 +120,10 @@ export async function deleteTag(name: string): Promise<void> {
   await apiFetch(`/tags/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
+export async function suggestTopics(paperId: string): Promise<{ topics: string[] }> {
+  return apiFetch(`/papers/${paperId}/topics/suggest`, { method: "POST" });
+}
+
 export async function createStandaloneTopic(name: string): Promise<void> {
   await apiFetch(`/topics`, {
     method: "POST",
@@ -134,6 +142,26 @@ export async function renameTopic(oldName: string, newName: string): Promise<voi
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: newName }),
   });
+}
+
+export async function getOrCreatePerson(name: string): Promise<{id: string; name: string; affiliation?: string}> {
+  return apiFetch("/people/get-or-create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, affiliation: "" }),
+  });
+}
+
+export async function linkPersonInvolves(paperId: string, personId: string, role: string): Promise<void> {
+  await apiFetch(`/papers/${paperId}/involves`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ person_id: personId, role }),
+  });
+}
+
+export async function listPeople(): Promise<{id: string; name: string; affiliation?: string}[]> {
+  return apiFetch("/people");
 }
 
 export async function deletePerson(personId: string): Promise<void> {
@@ -172,4 +200,85 @@ export async function listReferences(
   paperId: string
 ): Promise<{ references: Reference[]; cited_by: Reference[] }> {
   return apiFetch(`/papers/${paperId}/references`);
+}
+
+// ── Knowledge Chat ────────────────────────────────────────────────────────────
+
+export async function listConversations(): Promise<Conversation[]> {
+  return apiFetch("/knowledge-chat/conversations");
+}
+
+export async function getConversationMessages(id: string): Promise<KnowledgeMessage[]> {
+  return apiFetch(`/knowledge-chat/conversations/${id}/messages`);
+}
+
+export async function compactConversation(id: string): Promise<void> {
+  await apiFetch(`/knowledge-chat/conversations/${id}/compact`, { method: "POST" });
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  await apiFetch(`/knowledge-chat/conversations/${id}`, { method: "DELETE" });
+}
+
+export async function* streamKnowledgeChat(body: {
+  question: string;
+  history: { role: string; content: string }[];
+  model: string;
+  conversation_id?: string;
+}): AsyncGenerator<SseEvent> {
+  const res = await fetch(`${BASE}/knowledge-chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error(`API ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          yield JSON.parse(line.slice(6)) as SseEvent;
+        } catch { /* skip malformed */ }
+      }
+    }
+  }
+}
+
+// ── Figures ───────────────────────────────────────────────────────────────────
+
+export async function fetchFigures(paperId: string): Promise<Figure[]> {
+  return apiFetch(`/papers/${paperId}/figures`);
+}
+
+export async function extractFiguresForPaper(
+  paperId: string,
+  captionMethod = "ollama",
+): Promise<{ extracted: number }> {
+  return apiFetch(`/papers/${paperId}/figures/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ caption_method: captionMethod }),
+  });
+}
+
+export async function chatWithFigure(
+  paperId: string,
+  figureId: string,
+  question: string,
+  model = "claude",
+): Promise<{ answer: string }> {
+  return apiFetch(`/papers/${paperId}/figures/${figureId}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, model }),
+  });
 }

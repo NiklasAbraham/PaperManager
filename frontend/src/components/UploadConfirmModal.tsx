@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { uploadPdf, saveReferences, suggestTags, applyTags, createStandaloneTag } from "../api/client";
-import type { ParsedMeta, T_IngestOut, Reference } from "../types";
+import { useState, useEffect, useRef } from "react";
+import { uploadPdf, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople } from "../api/client";
+import { useAppSettings } from "../contexts/SettingsContext";
+import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   semantic_scholar: { label: "Semantic Scholar", color: "bg-green-100 text-green-700" },
@@ -17,6 +18,8 @@ interface Props {
 }
 
 export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }: Props) {
+  const { settings } = useAppSettings();
+
   const [title, setTitle]       = useState(meta.title || "");
   const [authors, setAuthors]   = useState((meta.authors ?? []).join(", "));
   const [year, setYear]         = useState(meta.year?.toString() ?? "");
@@ -24,9 +27,24 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
   const [abstract, setAbstract] = useState(meta.abstract ?? "");
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<Paper | null>(null);
+  const dupCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [step, setStep]                   = useState<1 | 2 | 3>(1);
+  const [step, setStep]                   = useState<0 | 1 | 2 | 3 | 4>(settings.showSourceStep ? 0 : 1);
   const [uploadedPaper, setUploadedPaper] = useState<T_IngestOut | null>(null);
+
+  // Step 2: summary prompt
+  const [summaryInstructions, setSummaryInstructions] = useState(settings.defaultSummaryInstructions);
+
+  // Step 0: source
+  const [sourceType, setSourceType]     = useState<"person" | "source" | null>(null);
+  const [sourcePerson, setSourcePerson] = useState<{id: string; name: string} | null>(null);
+  const [sourceTag, setSourceTag]       = useState<string | null>(null);
+  const [personQuery, setPersonQuery]   = useState("");
+  const [allPeople, setAllPeople]       = useState<{id: string; name: string; affiliation?: string}[]>([]);
+  const [peopleLoaded, setPeopleLoaded] = useState(false);
+  const [creatingPerson, setCreatingPerson] = useState(false);
+  const [showPersonDrop, setShowPersonDrop] = useState(false);
 
   // Step 2: refs
   const [checkedRefs, setCheckedRefs] = useState<boolean[]>([]);
@@ -42,11 +60,77 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
 
   const source = SOURCE_LABELS[meta.metadata_source] ?? { label: meta.metadata_source, color: "bg-gray-100 text-gray-500" };
 
+  // Debounced duplicate check whenever DOI or title changes
+  useEffect(() => {
+    if (dupCheckTimer.current) clearTimeout(dupCheckTimer.current);
+    setDuplicate(null);
+    dupCheckTimer.current = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams();
+        if (doi.trim()) params.set("doi", doi.trim());
+        else if (title.trim()) params.set("title", title.trim());
+        else return;
+        const res = await apiFetch<{ duplicate: Paper | null }>(`/papers/check-duplicate?${params}`);
+        setDuplicate(res.duplicate);
+      } catch { /* silent */ }
+    }, 600);
+    return () => { if (dupCheckTimer.current) clearTimeout(dupCheckTimer.current); };
+  }, [doi, title]);
+
+  // Load people for autocomplete when person tab is opened
+  useEffect(() => {
+    if (sourceType === "person" && !peopleLoaded) {
+      listPeople()
+        .then((people) => { setAllPeople(people); setPeopleLoaded(true); })
+        .catch(() => setPeopleLoaded(true));
+    }
+  }, [sourceType, peopleLoaded]);
+
+  const filteredPeople = allPeople.filter((p) =>
+    personQuery.trim() && p.name.toLowerCase().includes(personQuery.toLowerCase())
+  );
+  const showCreateOption = personQuery.trim().length > 1 &&
+    !allPeople.some((p) => p.name.toLowerCase() === personQuery.toLowerCase());
+
+  const handleSelectPerson = (person: {id: string; name: string}) => {
+    setSourcePerson(person);
+    setPersonQuery(person.name);
+    setShowPersonDrop(false);
+  };
+
+  const handleCreatePerson = async () => {
+    if (!personQuery.trim()) return;
+    setCreatingPerson(true);
+    try {
+      const person = await getOrCreatePerson(personQuery.trim());
+      setAllPeople((prev) => prev.find((p) => p.id === person.id) ? prev : [...prev, person]);
+      handleSelectPerson(person);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create person");
+    } finally {
+      setCreatingPerson(false);
+    }
+  };
+
+  // Apply source link/tag after upload
+  const applySource = async (paperId: string) => {
+    if (sourceType === "person" && sourcePerson) {
+      try { await linkPersonInvolves(paperId, sourcePerson.id, "shared_by"); } catch { /* best-effort */ }
+      try { await applyTags(paperId, ["from-colleague"]); } catch { /* best-effort */ }
+    } else if (sourceType === "source" && sourceTag) {
+      try { await applyTags(paperId, [sourceTag]); } catch { /* best-effort */ }
+    }
+  };
+
   // ── Advance to tag step ────────────────────────────────────────────────────
 
   const goToTagStep = async (paper: T_IngestOut) => {
     setUploadedPaper(paper);
-    setStep(3);
+    if (!settings.showTagsStep) {
+      onConfirmed(paper);
+      return;
+    }
+    setStep(4);
     setLoadingTags(true);
     try {
       const result = await suggestTags(paper.title, (paper as any).abstract ?? meta.abstract ?? undefined);
@@ -54,7 +138,6 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
       setSelectedTags(new Set(result.existing));
       setPendingNew(result.new);
     } catch {
-      // fallback: just show all tags with nothing pre-selected
       setAllTags([]);
     } finally {
       setLoadingTags(false);
@@ -68,16 +151,36 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
     setSaving(true);
     setError(null);
     try {
-      const paper = await uploadPdf(file, title.trim());
-      if (paper.references_found && paper.references_found.length > 0) {
+      const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
+      const paper = await uploadPdf(file, title.trim(), undefined, undefined, isDefault ? undefined : summaryInstructions);
+      await applySource(paper.id);
+      const hasRefs = paper.references_found && paper.references_found.length > 0;
+      if (hasRefs && !settings.autoSaveReferences) {
         setUploadedPaper(paper);
         setCheckedRefs(paper.references_found.map(() => true));
-        setStep(2);
+        setStep(3);
       } else {
+        // Auto-save all refs if setting is on, then go to tags
+        if (hasRefs && settings.autoSaveReferences) {
+          try { await saveReferences(paper.id, paper.references_found as Reference[]); } catch { /* best-effort */ }
+        }
         await goToTagStep(paper);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      const msg = e instanceof Error ? e.message : "Upload failed";
+      // 409 = duplicate detected server-side
+      if (msg.includes("409")) {
+        try {
+          const detail = JSON.parse(msg.replace(/^API 409: /, ""));
+          setError(`Duplicate: "${detail.existing_title}" already exists. Go to paper or upload anyway below.`);
+          // Try to set duplicate info so banner appears
+          setDuplicate({ id: detail.existing_id, title: detail.existing_title, created_at: "" });
+        } catch {
+          setError(msg);
+        }
+      } else {
+        setError(msg);
+      }
     } finally {
       setSaving(false);
     }
@@ -132,14 +235,197 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
     onConfirmed(uploadedPaper);
   };
 
-  // ── Render: Step 2 ─────────────────────────────────────────────────────────
+  // ── Render: Step 0 (source) ────────────────────────────────────────────────
 
-  if (step === 2 && uploadedPaper) {
+  const SOURCE_OPTIONS = [
+    { tag: "from-linkedin",       label: "LinkedIn",        icon: "in" },
+    { tag: "from-twitter",        label: "Twitter / X",     icon: "𝕏"  },
+    { tag: "from-email",          label: "Email",           icon: "✉"  },
+    { tag: "from-conference",     label: "Conference",      icon: "🎤" },
+    { tag: "from-newsletter",     label: "Newsletter",      icon: "📰" },
+    { tag: "from-google-scholar", label: "Google Scholar",  icon: "𝓖"  },
+  ];
+
+  if (step === 0) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
+          <ModalHeader step={0} title="How did you get this paper?" subtitle="Optionally track where you found it — helps build your knowledge graph." />
+
+          <div className="px-6 py-5 space-y-4">
+            {/* Mode tabs */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setSourceType("person"); setSourceTag(null); }}
+                className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors ${sourceType === "person" ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"}`}
+              >
+                From a person
+              </button>
+              <button
+                onClick={() => { setSourceType("source"); setSourcePerson(null); setPersonQuery(""); }}
+                className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors ${sourceType === "source" ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"}`}
+              >
+                From a source
+              </button>
+            </div>
+
+            {/* Person autocomplete */}
+            {sourceType === "person" && (
+              <div className="relative">
+                <input
+                  autoFocus
+                  value={personQuery}
+                  onChange={(e) => {
+                    setPersonQuery(e.target.value);
+                    setSourcePerson(null);
+                    setShowPersonDrop(true);
+                  }}
+                  onFocus={() => setShowPersonDrop(true)}
+                  placeholder="Search or create a person…"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+                {sourcePerson && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-violet-600 text-xs font-medium">✓ {sourcePerson.name}</span>
+                )}
+                {showPersonDrop && (filteredPeople.length > 0 || showCreateOption) && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {filteredPeople.map((p) => (
+                      <button
+                        key={p.id}
+                        onMouseDown={() => handleSelectPerson(p)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 flex items-center gap-2"
+                      >
+                        <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs flex items-center justify-center font-medium shrink-0">
+                          {p.name[0]?.toUpperCase()}
+                        </span>
+                        <span>{p.name}</span>
+                        {p.affiliation && <span className="text-xs text-gray-400 ml-auto">{p.affiliation}</span>}
+                      </button>
+                    ))}
+                    {showCreateOption && (
+                      <button
+                        onMouseDown={handleCreatePerson}
+                        disabled={creatingPerson}
+                        className="w-full text-left px-3 py-2 text-sm text-violet-600 hover:bg-violet-50 flex items-center gap-2 border-t border-gray-100"
+                      >
+                        <span className="w-6 h-6 rounded-full border-2 border-dashed border-violet-400 text-violet-500 text-xs flex items-center justify-center shrink-0">+</span>
+                        {creatingPerson ? "Creating…" : `Create "${personQuery.trim()}"`}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Source grid */}
+            {sourceType === "source" && (
+              <div className="grid grid-cols-3 gap-2">
+                {SOURCE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.tag}
+                    onClick={() => setSourceTag(sourceTag === opt.tag ? null : opt.tag)}
+                    className={`py-2.5 px-3 rounded-lg border text-sm font-medium flex flex-col items-center gap-1 transition-colors ${
+                      sourceTag === opt.tag
+                        ? "bg-violet-600 border-violet-600 text-white"
+                        : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"
+                    }`}
+                  >
+                    <span className="text-base leading-none">{opt.icon}</span>
+                    <span className="text-xs">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Nothing selected yet — placeholder */}
+            {!sourceType && (
+              <p className="text-xs text-gray-400 text-center py-2">Select an option above, or skip to continue.</p>
+            )}
+
+            {error && (
+              <p className="text-xs text-red-600">{error}</p>
+            )}
+          </div>
+
+          <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => { setSourceType(null); setSourcePerson(null); setSourceTag(null); setStep(1); }}
+              className="px-4 py-2 text-sm text-gray-500 hover:text-gray-800"
+            >
+              Skip
+            </button>
+            <button
+              onClick={() => setStep(1)}
+              disabled={
+                (sourceType === "person" && !sourcePerson) ||
+                (sourceType === "source" && !sourceTag)
+              }
+              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Step 2 (summary prompt) ────────────────────────────────────────
+
+  if (step === 2) {
+    const isModified = summaryInstructions.trim() !== settings.defaultSummaryInstructions.trim();
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+          <ModalHeader step={2} title="AI Summary Prompt" subtitle="Customize the summary instructions for this paper. Change your default in Settings." />
+
+          <div className="px-6 py-4">
+            <textarea
+              value={summaryInstructions}
+              onChange={(e) => setSummaryInstructions(e.target.value)}
+              rows={10}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"
+            />
+            {isModified && (
+              <button
+                onClick={() => setSummaryInstructions(settings.defaultSummaryInstructions)}
+                className="mt-1.5 text-xs text-gray-400 hover:text-violet-600 transition-colors"
+              >
+                ↺ Reset to saved default
+              </button>
+            )}
+            <p className="mt-2 text-xs text-gray-400">
+              The paper title and full text are appended automatically — no need to include them in the prompt.
+            </p>
+          </div>
+
+          <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
+            <button onClick={() => setStep(1)} disabled={saving} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50">← Back</button>
+            <button onClick={confirm} disabled={saving || !title.trim()}
+              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2">
+              {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
+              {saving ? "Uploading…" : "Upload →"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Step 3 (refs) ───────────────────────────────────────────────────
+
+  if (step === 3 && uploadedPaper) {
     const refs = uploadedPaper.references_found;
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-          <ModalHeader step={2} title="Save references?" subtitle={`Found ${refs.length} reference${refs.length !== 1 ? "s" : ""} — uncheck any to skip.`} />
+          <ModalHeader step={3} title="Save references?" subtitle={`Found ${refs.length} reference${refs.length !== 1 ? "s" : ""} — uncheck any to skip.`} />
           <div className="px-6 py-3 max-h-[55vh] overflow-y-auto space-y-1">
             {refs.map((ref, i) => (
               <label key={i} className="flex items-start gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 py-1">
@@ -165,13 +451,13 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
     );
   }
 
-  // ── Render: Step 3 ─────────────────────────────────────────────────────────
+  // ── Render: Step 4 (tags) ──────────────────────────────────────────────────
 
-  if (step === 3 && uploadedPaper) {
+  if (step === 4 && uploadedPaper) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-          <ModalHeader step={3} title="Add tags" subtitle="Ollama suggested tags based on the abstract. Click to toggle, or add your own." />
+          <ModalHeader step={4} title="Add tags" subtitle="Ollama suggested tags based on the abstract. Click to toggle, or add your own." />
 
           <div className="px-6 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
             {loadingTags ? (
@@ -293,16 +579,40 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
           <Field label="Abstract">
             <textarea value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={4} className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
           </Field>
+          {duplicate && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs">
+              <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-amber-800">Possible duplicate — </span>
+                <span className="text-amber-700">"{duplicate.title}" is already in your library.</span>
+              </div>
+              <a
+                href={`/paper/${duplicate.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 text-amber-700 underline hover:text-amber-900 font-medium"
+              >
+                View →
+              </a>
+            </div>
+          )}
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
 
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
           <button onClick={onCancel} disabled={saving} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50">Cancel</button>
-          <button onClick={confirm} disabled={saving || !title.trim()}
-            className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2">
-            {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
-            {saving ? "Uploading…" : "Upload · Next →"}
-          </button>
+          {settings.showSummaryPromptStep ? (
+            <button onClick={() => setStep(2)} disabled={!title.trim()}
+              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
+              Next →
+            </button>
+          ) : (
+            <button onClick={confirm} disabled={saving || !title.trim()}
+              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2">
+              {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
+              {saving ? "Uploading…" : "Upload →"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -326,7 +636,7 @@ function ModalHeader({ step, title, subtitle }: { step: number; title: string; s
 function StepDots({ current }: { current: number }) {
   return (
     <div className="flex gap-1 items-center">
-      {[1, 2, 3].map((n) => (
+      {[0, 1, 2, 3, 4].map((n) => (
         <span key={n} className={`w-1.5 h-1.5 rounded-full transition-colors ${n === current ? "bg-violet-600" : n < current ? "bg-violet-300" : "bg-gray-200"}`} />
       ))}
     </div>

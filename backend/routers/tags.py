@@ -12,6 +12,8 @@ papers_router = APIRouter(prefix="/papers", tags=["tags"])
 DEFAULT_TAGS = [
     # ── Source / ingestion method (applied automatically) ─────────────────────
     "pdf-upload", "from-url", "from-references",
+    "from-linkedin", "from-twitter", "from-email",
+    "from-conference", "from-newsletter", "from-google-scholar",
 
     # ── Workflow & personal status ─────────────────────────────────────────────
     "to-read", "reading", "read", "important", "revisit",
@@ -208,8 +210,9 @@ Title: {body.title}
 {abstract_block}
 
 Task:
-1. From the available tags above, pick the 3–6 most relevant ones for this paper.
-2. If there are important concepts not covered by any existing tag, suggest up to 2 short new tag names (lowercase, hyphen-separated, max 20 chars each).
+1. From the available tags above, pick the most relevant ones for this paper (as many as fit well, ideally 3–6).
+2. Count how many existing tags you picked. If the total is fewer than 5, suggest enough additional NEW tag names so the combined total reaches at least 5. New tags must NOT appear in the available list above.
+   New tags: lowercase, hyphen-separated, max 20 characters each.
 
 Return ONLY valid JSON with exactly these two keys:
   "existing": [list of chosen tags from the available list]
@@ -226,7 +229,17 @@ No explanation, no markdown fences, just JSON."""
         raw = json.loads(response["message"]["content"])
         # Sanitise: only return tags that actually exist in the library
         valid_existing = [t for t in (raw.get("existing") or []) if t in existing_tags]
-        new_tags = [t.lower().replace(" ", "-")[:20] for t in (raw.get("new") or [])]
+        # Filter new tags: must not already exist, clean format
+        existing_set = set(existing_tags)
+        new_tags = [
+            t.lower().replace(" ", "-")[:20]
+            for t in (raw.get("new") or [])
+            if t and t.lower().replace(" ", "-")[:20] not in existing_set
+        ]
+        # Pad with more new suggestions if total still under 5
+        total = len(valid_existing) + len(new_tags)
+        if total < 5:
+            log.debug("Only %d tags suggested; total below 5", total)
         return {"existing": valid_existing, "new": new_tags, "all_tags": existing_tags}
     except Exception as e:
         log.warning("Tag suggestion failed | %s", e)

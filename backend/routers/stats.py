@@ -8,27 +8,34 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 @router.get("")
 def get_stats(driver: Driver = Depends(get_driver)):
     with driver.session() as session:
-        # Separate count queries — the chained WITH approach returns 0 in Neo4j
-        papers   = session.run("MATCH (n:Paper)   RETURN count(n) AS c").single()["c"]
+        # Exclude stub papers pulled in via reference scanning
+        papers   = session.run("""
+            MATCH (n:Paper) WHERE NOT (n)-[:TAGGED]->(:Tag {name: 'from-references'})
+            RETURN count(n) AS c
+        """).single()["c"]
         authors  = session.run("MATCH (n:Person)  RETURN count(n) AS c").single()["c"]
         topics   = session.run("MATCH (n:Topic)   RETURN count(n) AS c").single()["c"]
         tags     = session.run("MATCH (n:Tag)     RETURN count(n) AS c").single()["c"]
         projects = session.run("MATCH (n:Project) RETURN count(n) AS c").single()["c"]
 
         by_year = session.run("""
-            MATCH (p:Paper) WHERE p.year IS NOT NULL
+            MATCH (p:Paper)
+            WHERE p.year IS NOT NULL
+              AND NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
             RETURN p.year AS year, count(p) AS count
             ORDER BY year ASC
         """).data()
 
         top_topics = session.run("""
             MATCH (t:Topic)<-[:ABOUT]-(p:Paper)
+            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
             RETURN t.name AS name, count(p) AS count
             ORDER BY count DESC LIMIT 8
         """).data()
 
         recent = session.run("""
             MATCH (p:Paper)
+            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
             OPTIONAL MATCH (p)<-[:AUTHORED]-(a:Person)
             WITH p, collect(a.name) AS authors
             ORDER BY p.created_at DESC LIMIT 6

@@ -67,6 +67,53 @@ def download_pdf(file_id: str) -> bytes:
     return buf.getvalue()
 
 
+_figures_folder_id: str | None = None
+
+
+def _get_figures_folder() -> str:
+    """Return (creating if needed) the Drive subfolder id for figures."""
+    global _figures_folder_id
+    if _figures_folder_id:
+        return _figures_folder_id
+    service = get_drive_service()
+    # Search for an existing "figures" folder inside the main folder
+    q = (
+        f"name = 'figures' "
+        f"and mimeType = 'application/vnd.google-apps.folder' "
+        f"and '{settings.google_drive_folder_id}' in parents "
+        f"and trashed = false"
+    )
+    res = service.files().list(q=q, fields="files(id)", pageSize=1).execute()
+    files = res.get("files", [])
+    if files:
+        _figures_folder_id = files[0]["id"]
+    else:
+        folder = service.files().create(
+            body={
+                "name": "figures",
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [settings.google_drive_folder_id],
+            },
+            fields="id",
+        ).execute()
+        _figures_folder_id = folder["id"]
+    return _figures_folder_id
+
+
+def upload_image(image_bytes: bytes, filename: str) -> str:
+    """Upload PNG image bytes to the figures subfolder and return the file ID."""
+    service = get_drive_service()
+    folder_id = _get_figures_folder()
+    file_metadata = {"name": filename, "parents": [folder_id]}
+    media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype="image/png", resumable=False)
+    result = (
+        service.files()
+        .create(body=file_metadata, media_body=media, fields="id")
+        .execute()
+    )
+    return result["id"]
+
+
 def delete_file(file_id: str) -> None:
     """Move a Drive file to trash (soft delete)."""
     service = get_drive_service()

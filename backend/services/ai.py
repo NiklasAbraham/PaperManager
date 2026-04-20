@@ -1,62 +1,92 @@
 """Claude and Ollama AI services — summarization and chat."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+import httpx
 import anthropic
 from config import settings
 
-_SUMMARY_PROMPT = """\
-You are a research assistant helping to summarize academic papers.
-
-Given the following paper text, write a concise summary covering:
-1. **Problem**: What problem does this paper address?
-2. **Method**: What approach or method do they use?
-3. **Key findings**: What are the main results or contributions?
-4. **Relevance**: Who would benefit from reading this?
-
-Keep the summary under 300 words. Use plain language where possible.
-
-Paper title: {title}
-
-Paper text (first 8000 words):
-{text}"""
+# Prompts live in <project_root>/prompts/ — loaded fresh on every call so
+# you can edit them without restarting the backend.
+_PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 
-def summarize_paper(text: str, title: str = "") -> str:
+def _load_prompt(filename: str) -> str:
+    path = _PROMPTS_DIR / filename
+    return path.read_text(encoding="utf-8")
+
+
+def _ssl_verify():
+    """Return the httpx SSL verify value based on settings."""
+    if not settings.ssl_verify:
+        return False
+    if settings.ssl_ca_bundle:
+        return settings.ssl_ca_bundle
+    return True
+
+
+def summarize_paper(text: str, title: str = "", custom_instructions: str | None = None) -> str:
     """Return a markdown summary of *text* using Claude.
 
+    If *custom_instructions* is provided it replaces the instructional section of
+    the default prompt while still appending the paper title and text automatically.
     Falls back to a short notice if text is empty.
     """
     if not text or not text.strip():
         return "_No text could be extracted from this paper._"
 
+    if custom_instructions and custom_instructions.strip():
+        prompt = (
+            f"{custom_instructions.strip()}\n\n"
+            f"Paper title: {title or '(unknown)'}\n\n"
+            f"Paper text (first 8000 words):\n{text[:40000]}"
+        )
+    else:
+        prompt = _load_prompt("summary.txt").format(
+            title=title or "(unknown)",
+            text=text[:40000],
+        )
+
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     message = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": _SUMMARY_PROMPT.format(
-                    title=title or "(unknown)",
-                    text=text[:40000],
-                ),
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
     )
     return message.content[0].text
 
 
-_CHAT_SYSTEM = """\
-You are a research assistant helping to understand a specific academic paper.
-Answer questions about this paper based on its content.
-If the answer is not in the paper, say so clearly.
+def suggest_topics(title: str, abstract: str = "", summary: str = "") -> list[str]:
+    """Return a list of research topic names for a paper using Claude Haiku."""
+    import json, re
 
-Paper title: {title}
+    if not title and not abstract and not summary:
+        return []
 
-Paper text:
-{text}"""
+    context_parts = []
+    if abstract:
+        context_parts.append(f"Abstract:\n{abstract[:3000]}")
+    if summary:
+        context_parts.append(f"Summary:\n{summary[:2000]}")
+    context = "\n\n".join(context_parts) or "(no abstract or summary available — infer from title only)"
+
+    prompt = _load_prompt("topics.txt").format(title=title or "(unknown)", context=context)
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=256,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = message.content[0].text.strip()
+    # Extract JSON even if Claude wraps it in markdown fences
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if not match:
+        return []
+    raw = json.loads(match.group())
+    return [t.strip() for t in (raw.get("topics") or []) if t.strip()]
 
 
 def chat_with_paper(
@@ -65,11 +95,11 @@ def chat_with_paper(
     question: str,
     history: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Answer *question* about a paper using its full text as context.
-
-    *history* is a list of ``{"role": "user"|"assistant", "content": str}``
-    dicts representing prior turns in the conversation.
-    """
+    """Answer *question* about a paper using its full text as context."""
+    system = _load_prompt("chat_system.txt").format(
+        title=paper_title or "(unknown)",
+        text=paper_text[:60000],
+    )
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     messages: list[dict[str, Any]] = list(history or [])
@@ -78,10 +108,7 @@ def chat_with_paper(
     response = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=1024,
-        system=_CHAT_SYSTEM.format(
-            title=paper_title or "(unknown)",
-            text=paper_text[:60000],
-        ),
+        system=system,
         messages=messages,
     )
     return response.content[0].text
@@ -97,7 +124,10 @@ def chat_with_paper_work(
     if not settings.anthropic_work_api_key:
         raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
 
-    kwargs: dict[str, Any] = {"api_key": settings.anthropic_work_api_key}
+    kwargs: dict[str, Any] = {
+        "api_key": settings.anthropic_work_api_key,
+        "http_client": httpx.Client(verify=_ssl_verify()),
+    }
     if settings.anthropic_work_base_url:
         kwargs["base_url"] = settings.anthropic_work_base_url
 
@@ -106,13 +136,14 @@ def chat_with_paper_work(
     messages: list[dict[str, Any]] = list(history or [])
     messages.append({"role": "user", "content": question})
 
+    system = _load_prompt("chat_system.txt").format(
+        title=paper_title or "(unknown)",
+        text=paper_text[:60000],
+    )
     response = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=1024,
-        system=_CHAT_SYSTEM.format(
-            title=paper_title or "(unknown)",
-            text=paper_text[:60000],
-        ),
+        system=system,
         messages=messages,
     )
     return response.content[0].text
@@ -127,7 +158,7 @@ def chat_with_paper_ollama(
     """Answer *question* about a paper using Ollama (local LLM)."""
     import ollama
 
-    system = _CHAT_SYSTEM.format(
+    system = _load_prompt("chat_system.txt").format(
         title=paper_title or "(unknown)",
         text=paper_text[:12000],  # smaller context window for local models
     )
@@ -138,3 +169,55 @@ def chat_with_paper_ollama(
 
     response = ollama.chat(model=settings.ollama_model, messages=messages)
     return response["message"]["content"].strip()
+
+
+# ── Knowledge Chat (cross-library, streaming) ─────────────────────────────────
+
+CONTEXT_WINDOW = 200_000  # Claude Opus 4.6 token limit
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token."""
+    return max(1, len(text) // 4)
+
+
+def knowledge_chat_stream(
+    question: str,
+    history: list[dict[str, Any]],
+    papers: list[dict[str, Any]],
+    model: str = "claude",
+) -> Any:
+    """Stream a knowledge-chat response as an anthropic MessageStream.
+
+    *papers* is a list of dicts with keys: id, title, abstract, summary.
+    Caller is responsible for building the system prompt via _load_prompt.
+    Returns the anthropic stream context manager (use with `with` statement).
+    """
+    papers_block = "\n\n".join(
+        f"### {p.get('title', 'Untitled')}\n"
+        + (f"Abstract: {p['abstract']}\n" if p.get("abstract") else "")
+        + (f"Summary: {p['summary']}" if p.get("summary") else "")
+        for p in papers
+    )
+    system = _load_prompt("knowledge_chat_system.txt").format(papers_block=papers_block)
+
+    messages: list[dict[str, Any]] = list(history)
+    messages.append({"role": "user", "content": question})
+
+    if model == "claude-work":
+        if not settings.anthropic_work_api_key:
+            raise ValueError("Work API key not configured.")
+        client = anthropic.Anthropic(
+            api_key=settings.anthropic_work_api_key,
+            base_url=settings.anthropic_work_base_url or None,
+            http_client=httpx.Client(verify=_ssl_verify()),
+        )
+    else:
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+    return client.messages.stream(
+        model="claude-opus-4-6",
+        max_tokens=2048,
+        system=system,
+        messages=messages,
+    )

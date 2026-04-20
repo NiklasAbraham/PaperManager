@@ -20,6 +20,13 @@ def create(body: PersonCreate):
     return create_person(get_driver(), body.model_dump())
 
 
+@people_router.post("/get-or-create", response_model=PersonOut)
+def get_or_create(body: PersonCreate):
+    """Return existing person matched by name (case-insensitive) or create a new one."""
+    from db.queries.people import get_or_create_person
+    return get_or_create_person(get_driver(), body.name)
+
+
 @people_router.get("", response_model=list[PersonOut])
 def list_all():
     return list_people(get_driver())

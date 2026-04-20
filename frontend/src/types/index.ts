@@ -111,3 +111,59 @@ export interface T_IngestOut extends Paper {
   topics_auto_added: string[];
   references_found: Reference[];
 }
+
+// ── Figures ───────────────────────────────────────────────────────────────────
+
+export interface Figure {
+  id: string;
+  paper_id: string;
+  figure_number: number | null;
+  caption: string | null;
+  drive_file_id: string;
+  drive_url: string | null;
+  page_number: number;
+  created_at: string;
+}
+
+// ── Knowledge Chat ────────────────────────────────────────────────────────────
+
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  compacted: boolean;
+  message_count: number;
+}
+
+export interface KnowledgeMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  tokens_used?: number;
+  created_at: string;
+  paper_refs: string[];
+}
+
+export interface ContextPaper {
+  id: string;
+  title: string;
+  tokens: number;
+  color: string;
+}
+
+export interface TokenTotals {
+  system: number;
+  papers: number;
+  history: number;
+  question: number;
+  total: number;
+  limit: number;
+}
+
+export type SseEvent =
+  | { type: "step"; description: string; cypher?: string; count?: number }
+  | { type: "context"; papers: ContextPaper[]; token_totals: TokenTotals }
+  | { type: "token"; text: string }
+  | { type: "done"; conversation_id: string; message_id: string }
+  | { type: "error"; message: string };

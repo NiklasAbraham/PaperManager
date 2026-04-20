@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @keyframes slide-in {
   from { transform: translateX(100%); }
