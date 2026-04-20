@@ -11,6 +11,10 @@ def search_papers(
     topic: str | None = None,
     project_id: str | None = None,
     person_id: str | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    reading_status: str | None = None,
+    bookmarked: bool | None = None,
     skip: int = 0,
     limit: int = 20,
 ) -> dict:
@@ -25,9 +29,13 @@ def search_papers(
     results: list[dict] = []
 
     if q:
-        results = _fulltext_search(driver, q, tag, topic, project_id, person_id, skip, limit)
+        results = _fulltext_search(driver, q, tag, topic, project_id, person_id,
+                                   year_min, year_max, reading_status, bookmarked,
+                                   skip, limit)
     else:
-        results = _filter_search(driver, tag, topic, project_id, person_id, skip, limit)
+        results = _filter_search(driver, tag, topic, project_id, person_id,
+                                 year_min, year_max, reading_status, bookmarked,
+                                 skip, limit)
 
     return {"results": results, "total": len(results)}
 
@@ -41,6 +49,10 @@ def _fulltext_search(
     topic: str | None,
     project_id: str | None,
     person_id: str | None,
+    year_min: int | None,
+    year_max: int | None,
+    reading_status: str | None,
+    bookmarked: bool | None,
     skip: int,
     limit: int,
 ) -> list[dict]:
@@ -57,11 +69,17 @@ def _fulltext_search(
               AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {name: $topic}))
               AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {id: $pid}))
               AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {id: $person}))
+              AND ($year_min IS NULL  OR p.year >= $year_min)
+              AND ($year_max IS NULL  OR p.year <= $year_max)
+              AND ($status IS NULL    OR p.reading_status = $status)
+              AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
             RETURN p, score, "paper" AS matched_in
             ORDER BY score DESC
             SKIP $skip LIMIT $limit
             """,
             q=q, tag=tag, topic=topic, pid=project_id, person=person_id,
+            year_min=year_min, year_max=year_max,
+            status=reading_status, bookmarked=bookmarked,
             skip=skip, limit=limit,
         )
         for r in result:
@@ -81,11 +99,17 @@ def _fulltext_search(
               AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {name: $topic}))
               AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {id: $pid}))
               AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {id: $person}))
+              AND ($year_min IS NULL  OR p.year >= $year_min)
+              AND ($year_max IS NULL  OR p.year <= $year_max)
+              AND ($status IS NULL    OR p.reading_status = $status)
+              AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
             RETURN p, score, "note" AS matched_in
             ORDER BY score DESC
             SKIP $skip LIMIT $limit
             """,
             q=q, tag=tag, topic=topic, pid=project_id, person=person_id,
+            year_min=year_min, year_max=year_max,
+            status=reading_status, bookmarked=bookmarked,
             skip=skip, limit=limit,
         )
         for r in result:
@@ -105,6 +129,10 @@ def _filter_search(
     topic: str | None,
     project_id: str | None,
     person_id: str | None,
+    year_min: int | None,
+    year_max: int | None,
+    reading_status: str | None,
+    bookmarked: bool | None,
     skip: int,
     limit: int,
 ) -> list[dict]:
@@ -117,11 +145,17 @@ def _filter_search(
               AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {name: $topic}))
               AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {id: $pid}))
               AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {id: $person}))
+              AND ($year_min IS NULL  OR p.year >= $year_min)
+              AND ($year_max IS NULL  OR p.year <= $year_max)
+              AND ($status IS NULL    OR p.reading_status = $status)
+              AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
             RETURN p, 0.0 AS score, "filter" AS matched_in
             ORDER BY p.created_at DESC
             SKIP $skip LIMIT $limit
             """,
             tag=tag, topic=topic, pid=project_id, person=person_id,
+            year_min=year_min, year_max=year_max,
+            status=reading_status, bookmarked=bookmarked,
             skip=skip, limit=limit,
         )
         rows = []
