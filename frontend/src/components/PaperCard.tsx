@@ -37,6 +37,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
+  const currentStatus = paper.reading_status ?? "unread";
   const summaryPreview = paper.summary?.split("\n").slice(0, 2).join(" ") ?? "";
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -72,8 +73,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
   const cycleStatus = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const cycle: Array<Paper["reading_status"]> = ["unread", "reading", "read"];
-    const current = paper.reading_status ?? "unread";
-    const next = cycle[(cycle.indexOf(current) + 1) % cycle.length];
+    const next = cycle[(cycle.indexOf(currentStatus) + 1) % cycle.length];
     const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -165,9 +165,9 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
           <button
             onClick={cycleStatus}
             title="Click to cycle reading status"
-            className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${STATUS_STYLES[paper.reading_status ?? "unread"]}`}
+            className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${STATUS_STYLES[currentStatus]}`}
           >
-            {STATUS_LABELS[paper.reading_status ?? "unread"]}
+            {STATUS_LABELS[currentStatus]}
           </button>
 
           {/* Bookmark */}

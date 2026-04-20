@@ -79,9 +79,9 @@ def register(mcp: FastMCP):
 
     @mcp.tool()
     def rate_paper(paper_id: str, rating: int) -> dict:
-        """Rate a paper from 1 to 5 stars. Pass 0 to clear the rating."""
+        """Rate a paper from 1 to 5 stars. Pass 0 to clear the rating (0 is a special clear value, not a valid star rating)."""
         if rating not in range(0, 6):
-            return {"error": "rating must be between 0 and 5"}
+            return {"error": "rating must be between 0 (clear) and 5 (stars)"}
         paper = update_paper(get_driver(), paper_id, {"rating": rating if rating > 0 else None})
         if not paper:
             return {"error": f"Paper {paper_id} not found"}
