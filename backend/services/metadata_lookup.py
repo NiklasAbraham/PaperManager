@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 _SS_BASE = "https://api.semanticscholar.org/graph/v1/paper"
 _CR_BASE = "https://api.crossref.org/works"
-_FIELDS = "title,authors,year,venue,abstract,externalIds,citationCount"
+_FIELDS = "title,authors,authors.affiliations,year,venue,abstract,externalIds,citationCount"
 
 
 def _ssl():
@@ -19,6 +19,23 @@ def _ssl():
 
 def _title_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+
+
+def _parse_s2_authors(raw: list) -> tuple[list[str], list[dict]]:
+    """Return (name_list, detail_list) from a S2 authors array.
+    detail_list entries: {name, affiliation} — affiliation may be None.
+    """
+    names = []
+    detail = []
+    for a in raw:
+        name = a.get("name", "").strip()
+        if not name:
+            continue
+        affiliations = a.get("affiliations") or []
+        aff = affiliations[0].get("name") if affiliations else None
+        names.append(name)
+        detail.append({"name": name, "affiliation": aff})
+    return names, detail
 
 
 def search_semantic_scholar_by_title(title: str) -> dict | None:
@@ -37,6 +54,7 @@ def search_semantic_scholar_by_title(title: str) -> dict | None:
             candidate_title = (data.get("title") or "").strip()
             if _title_similarity(title, candidate_title) >= 0.85:
                 doi = (data.get("externalIds") or {}).get("DOI") or title
+                names, detail = _parse_s2_authors(data.get("authors") or [])
                 return {
                     "title": candidate_title,
                     "year": data.get("year"),
@@ -44,7 +62,8 @@ def search_semantic_scholar_by_title(title: str) -> dict | None:
                     "abstract": data.get("abstract"),
                     "doi": doi,
                     "citation_count": data.get("citationCount"),
-                    "authors": [a.get("name", "") for a in (data.get("authors") or [])],
+                    "authors": names,
+                    "authors_detail": detail,
                     "topics": [],
                     "metadata_source": "semantic_scholar",
                 }
@@ -67,6 +86,7 @@ def lookup_semantic_scholar(doi: str) -> dict | None:
             log.warning("S2 lookup failed | id=%s | status=%d | body=%.120s", s2_id, r.status_code, r.text)
             return None
         data = r.json()
+        names, detail = _parse_s2_authors(data.get("authors") or [])
         return {
             "title": (data.get("title") or "").strip(),
             "year": data.get("year"),
@@ -74,9 +94,8 @@ def lookup_semantic_scholar(doi: str) -> dict | None:
             "abstract": data.get("abstract"),
             "doi": doi,
             "citation_count": data.get("citationCount"),
-            "authors": [
-                a.get("name", "") for a in (data.get("authors") or [])
-            ],
+            "authors": names,
+            "authors_detail": detail,
             "topics": [],
             "metadata_source": "semantic_scholar",
         }
@@ -98,6 +117,14 @@ def lookup_crossref(doi: str) -> dict | None:
             f"{a.get('given', '')} {a.get('family', '')}".strip()
             for a in authors_raw
         ]
+        authors_detail = []
+        for a in authors_raw:
+            name = f"{a.get('given', '')} {a.get('family', '')}".strip()
+            if not name:
+                continue
+            affs = a.get("affiliation") or []
+            aff = affs[0].get("name") if affs else None
+            authors_detail.append({"name": name, "affiliation": aff})
         container = msg.get("container-title", [])
         year = None
         pub = msg.get("published", {}).get("date-parts", [[]])
@@ -111,6 +138,7 @@ def lookup_crossref(doi: str) -> dict | None:
             "doi": doi,
             "citation_count": None,
             "authors": authors,
+            "authors_detail": authors_detail,
             "topics": [],
             "metadata_source": "crossref",
         }

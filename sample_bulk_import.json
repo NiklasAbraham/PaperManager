@@ -1,0 +1,32 @@
+{
+  "fetch_pdf": true,
+  "papers": [
+    {"_comment": "── Nobel Prize in Physics ─────────────────────────────"},
+    {"title": "Gravitational waves from binary black hole merger", "doi": "10.1103/PhysRevLett.116.061102"},
+    {"title": "Observation of Higgs boson at the LHC", "doi": "10.1016/j.physletb.2012.08.021"},
+    {"doi": "10.1103/PhysRevLett.45.494"},
+    {"title": "Bose-Einstein condensation in an alkali gas"},
+
+    {"_comment": "── Nobel Prize in Chemistry ───────────────────────────"},
+    {"doi": "10.1038/s41586-018-0302-x"},
+    {"title": "CRISPR-Cas9 genome editing tool"},
+    {"title": "AlphaFold: Highly accurate protein structure prediction"},
+
+    {"_comment": "── Nobel Prize in Physiology/Medicine ────────────────"},
+    {"title": "Induced pluripotent stem cells from adult mouse fibroblasts"},
+    {"doi": "10.1016/j.cell.2006.07.024"},
+    {"title": "Discovery of RNA interference gene silencing"},
+
+    {"_comment": "── Landmark AI/ML papers (arXiv) ─────────────────────"},
+    {"arxiv": "1706.03762"},
+    {"arxiv": "1810.04805"},
+    {"arxiv": "1512.03385"},
+    {"arxiv": "1406.2661"},
+    {"url": "https://arxiv.org/abs/2005.14165"},
+
+    {"_comment": "── Mix of URL formats ────────────────────────────────"},
+    {"url": "https://pubmed.ncbi.nlm.nih.gov/17431187/"},
+    {"url": "https://doi.org/10.1038/nature14539"},
+    {"url": "https://www.biorxiv.org/content/10.1101/2021.10.04.463034"}
+  ]
+}

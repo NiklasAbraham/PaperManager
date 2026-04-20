@@ -26,6 +26,7 @@ from routers.export import router as export_router
 from routers.backfill import router as backfill_router
 from routers.knowledge_chat import router as knowledge_chat_router
 from routers.figures import router as figures_router
+from routers.bulk_import import router as bulk_import_router
 
 
 @asynccontextmanager
@@ -68,6 +69,7 @@ app.include_router(export_router)
 app.include_router(backfill_router)
 app.include_router(knowledge_chat_router)
 app.include_router(figures_router)
+app.include_router(bulk_import_router)
 
 
 @app.get("/health", response_model=HealthResponse)

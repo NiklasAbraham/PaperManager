@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, Figure } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -176,6 +176,15 @@ export async function updatePerson(personId: string, data: { name?: string; affi
   });
 }
 
+export async function removeAuthor(paperId: string, personId: string): Promise<void> {
+  const res = await fetch(`${BASE}/papers/${paperId}/authors/${personId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Remove author failed ${res.status}`);
+}
+
+export async function listProjects(): Promise<{id: string; name: string; description?: string}[]> {
+  return apiFetch("/projects");
+}
+
 export async function deleteProject(projectId: string): Promise<void> {
   await apiFetch(`/projects/${projectId}`, { method: "DELETE" });
 }
@@ -247,6 +256,40 @@ export async function* streamKnowledgeChat(body: {
       if (line.startsWith("data: ")) {
         try {
           yield JSON.parse(line.slice(6)) as SseEvent;
+        } catch { /* skip malformed */ }
+      }
+    }
+  }
+}
+
+// ── Bulk import ───────────────────────────────────────────────────────────────
+
+export async function* bulkImport(
+  body: { papers: object[]; project_id?: string | null; fetch_pdf?: boolean },
+  signal?: AbortSignal,
+): AsyncGenerator<BulkSseEvent> {
+  const res = await fetch(`${BASE}/papers/bulk-import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`API ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          yield JSON.parse(line.slice(6)) as BulkSseEvent;
         } catch { /* skip malformed */ }
       }
     }

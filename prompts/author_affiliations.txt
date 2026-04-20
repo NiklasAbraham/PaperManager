@@ -1,0 +1,14 @@
+Extract the institutional affiliations for the following authors from the text below.
+The text is the first part of an academic paper where affiliations typically appear near author names.
+
+Authors to find affiliations for:
+{author_names}
+
+Return ONLY valid JSON in this exact format:
+{{"affiliations": [{{"name": "Author Name", "affiliation": "University or Institution Name"}}]}}
+
+If you cannot find an affiliation for an author, set "affiliation" to null.
+Use the full institution name (e.g. "Massachusetts Institute of Technology" not "MIT").
+
+Paper text:
+{text}
