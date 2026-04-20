@@ -8,11 +8,19 @@ interface Props {
   onClose: () => void;
 }
 
+const PAPER_COLORS = [
+  "", "#ef4444", "#f97316", "#eab308", "#22c55e",
+  "#06b6d4", "#6366f1", "#ec4899", "#8b5cf6", "#14b8a6",
+];
+
 export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
-  const [title,    setTitle]    = useState(paper.title);
-  const [year,     setYear]     = useState(paper.year?.toString() ?? "");
-  const [doi,      setDoi]      = useState(paper.doi ?? "");
-  const [abstract, setAbstract] = useState(paper.abstract ?? "");
+  const [title,          setTitle]          = useState(paper.title);
+  const [year,           setYear]           = useState(paper.year?.toString() ?? "");
+  const [doi,            setDoi]            = useState(paper.doi ?? "");
+  const [abstract,       setAbstract]       = useState(paper.abstract ?? "");
+  const [venue,          setVenue]          = useState(paper.venue ?? "");
+  const [reading_status, setReadingStatus]  = useState<Paper["reading_status"]>(paper.reading_status ?? "unread");
+  const [color,          setColor]          = useState(paper.color ?? "");
   const [saving,   setSaving]   = useState(false);
   const [error,    setError]    = useState<string | null>(null);
 
@@ -22,10 +30,13 @@ export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
     setError(null);
     try {
       const updated = await updatePaper(paper.id, {
-        title:    title.trim(),
-        year:     year ? parseInt(year) : null,
-        doi:      doi.trim() || null,
-        abstract: abstract.trim() || null,
+        title:          title.trim(),
+        year:           year ? parseInt(year) : null,
+        doi:            doi.trim() || null,
+        abstract:       abstract.trim() || null,
+        venue:          venue.trim() || null,
+        reading_status: reading_status ?? null,
+        color:          color || null,
       });
       onSaved(updated);
     } catch (e: unknown) {
@@ -67,6 +78,14 @@ export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
             </Field>
           </div>
 
+          <Field label="Venue / Journal">
+            <input
+              type="text" value={venue} onChange={(e) => setVenue(e.target.value)}
+              placeholder="NeurIPS, ICML, Nature…"
+              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </Field>
+
           <Field label="Abstract">
             <textarea
               value={abstract} onChange={(e) => setAbstract(e.target.value)}
@@ -74,6 +93,37 @@ export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
               className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"
             />
           </Field>
+
+          <div className="flex gap-3">
+            <Field label="Reading status" className="flex-1">
+              <select
+                value={reading_status ?? "unread"}
+                onChange={(e) => setReadingStatus(e.target.value as Paper["reading_status"])}
+                className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+              >
+                <option value="unread">📚 Unread</option>
+                <option value="reading">📖 Reading</option>
+                <option value="read">✅ Read</option>
+              </select>
+            </Field>
+
+            <Field label="Label color">
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {PAPER_COLORS.map((c) => (
+                  <button
+                    key={c || "none"}
+                    type="button"
+                    onClick={() => setColor(c)}
+                    title={c || "No color"}
+                    className={`w-5 h-5 rounded-full border-2 transition-all ${
+                      color === c ? "border-violet-500 scale-125" : "border-gray-200 hover:scale-110"
+                    }`}
+                    style={{ backgroundColor: c || "#f3f4f6" }}
+                  />
+                ))}
+              </div>
+            </Field>
+          </div>
 
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
