@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper } from "../api/client";
+import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
@@ -359,12 +359,33 @@ export default function PaperDetail() {
               <div className="max-w-2xl mx-auto px-8 py-10 space-y-6">
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 leading-snug">{paper.title}</h2>
-                  {authors.length > 0 && (
-                    <p className="text-sm text-gray-500 mt-1">
-                      {authors.map((a) => a.name).join(", ")}
-                      {paper.year ? ` · ${paper.year}` : ""}
-                      {(paper as any).venue ? ` · ${(paper as any).venue}` : ""}
+                  {paper.year || (paper as any).venue ? (
+                    <p className="text-xs text-gray-400 mt-1">
+                      {paper.year}{(paper as any).venue ? ` · ${(paper as any).venue}` : ""}
                     </p>
+                  ) : null}
+                  {authors.length > 0 && (
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
+                      {authors.map((a) => (
+                        <span key={a.id} className="group flex items-center gap-1 text-sm text-gray-600">
+                          <Link to={`/people`} className="hover:text-violet-600 transition-colors">
+                            {a.name}
+                          </Link>
+                          {a.affiliation && (
+                            <span className="text-xs text-gray-400">({a.affiliation})</span>
+                          )}
+                          <button
+                            onClick={async () => {
+                              if (!id) return;
+                              await removeAuthor(id, a.id);
+                              setAuthors((prev) => prev.filter((p) => p.id !== a.id));
+                            }}
+                            title="Remove from paper"
+                            className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-xs leading-none"
+                          >×</button>
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
 
@@ -483,16 +504,16 @@ export default function PaperDetail() {
                             <img
                               src={`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/papers/${id}/figures/${fig.id}/image`}
                               alt={fig.caption ?? "Figure"}
-                              className="w-full object-contain bg-gray-50"
+                              className="w-3/4 mx-auto block object-contain bg-gray-50"
                               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                             />
                           ) : (
-                            <div className="w-full h-40 bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No preview</div>
+                            <div className="w-3/4 mx-auto h-40 bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No preview</div>
                           )}
 
-                          {/* Caption + ask button */}
+                          {/* Caption + ask button  also just 3/4*/}
                           <div className="px-4 py-3 bg-white border-t border-gray-100">
-                            <div className="flex items-start justify-between gap-3">
+                            <div className="w-3/4 mx-auto flex items-start justify-between gap-3">
                               <div>
                                 <p className="text-xs font-semibold text-gray-500">
                                   {fig.figure_number ? `Figure ${fig.figure_number}` : `Page ${fig.page_number}`}

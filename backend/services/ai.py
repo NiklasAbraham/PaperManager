@@ -221,3 +221,36 @@ def knowledge_chat_stream(
         system=system,
         messages=messages,
     )
+
+
+def extract_affiliations_with_ollama(author_names: list[str], text: str) -> dict[str, str | None]:
+    """Use Ollama to extract institutional affiliations for authors from paper text.
+    Returns {author_name: affiliation_or_None}.
+    """
+    import json as _json
+    import ollama
+
+    if not author_names:
+        return {}
+
+    prompt = _load_prompt("author_affiliations.txt").format(
+        author_names="\n".join(f"- {n}" for n in author_names),
+        text=text[:4000],  # first 4000 chars — affiliations are always in the header
+    )
+    try:
+        response = ollama.chat(
+            model=settings.ollama_model,
+            messages=[{"role": "user", "content": prompt}],
+            format="json",
+        )
+        raw = _json.loads(response["message"]["content"])
+        result: dict[str, str | None] = {}
+        for entry in raw.get("affiliations") or []:
+            name = entry.get("name", "").strip()
+            aff = entry.get("affiliation") or None
+            if name:
+                result[name] = aff
+        return result
+    except Exception as exc:
+        log.warning("Ollama affiliation extraction failed: %s", exc)
+        return {}

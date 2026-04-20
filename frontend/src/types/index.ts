@@ -167,3 +167,9 @@ export type SseEvent =
   | { type: "token"; text: string }
   | { type: "done"; conversation_id: string; message_id: string }
   | { type: "error"; message: string };
+
+export type BulkSseEvent =
+  | { done?: false; index: number; total: number; status: "success"; title: string; id: string; has_pdf: boolean }
+  | { done?: false; index: number; total: number; status: "skipped"; title: string; id: string; reason: string }
+  | { done?: false; index: number; total: number; status: "error"; input: string; error: string }
+  | { done: true; imported: number; skipped: number; errors: number };

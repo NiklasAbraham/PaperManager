@@ -7,7 +7,7 @@ log = logging.getLogger(__name__)
 from db.connection import get_driver
 from db.queries.papers import create_paper, merge_paper_by_doi, get_paper, list_papers, update_paper, delete_paper, find_duplicate
 from db.queries.notes import get_paper_note, upsert_note, set_mentions
-from db.queries.people import get_or_create_person, link_author
+from db.queries.people import get_or_create_person, get_or_create_person_with_affiliation, link_author
 from db.queries.topics import get_or_create_topic, link_paper_topic
 from db.queries.tags import tag_paper
 from db.queries.projects import add_paper_to_project
@@ -17,7 +17,7 @@ from services.note_parser import parse_mentions
 from services.pdf_parser import extract_metadata
 from services.metadata_from_url import resolve_url
 from services.drive import upload_pdf, get_file_url, delete_file, download_pdf
-from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama
+from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama, extract_affiliations_with_ollama
 from services.references import extract_references
 from services.figure_extractor import extract_figures
 from services.drive import upload_image
@@ -160,12 +160,25 @@ async def upload(
     # Step 6b: Apply source tag
     tag_paper(driver, paper["id"], "pdf-upload")
 
-    # Step 7: Link authors
+    # Step 7: Link authors (with affiliations)
+    authors_detail = meta.get("authors_detail") or []
+    aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+
+    # Ollama fallback for any author still missing an affiliation
+    missing = [n for n in meta.get("authors", []) if n and not aff_map.get(n)]
+    if missing and raw_text:
+        try:
+            ollama_affs = extract_affiliations_with_ollama(missing, raw_text)
+            aff_map.update(ollama_affs)
+            log.info("Ollama affiliations extracted | count=%d", len(ollama_affs))
+        except Exception as exc:
+            log.warning("Ollama affiliation extraction failed (non-fatal) | %s", exc)
+
     authors_saved = []
     for name in meta.get("authors", []):
         if not name:
             continue
-        person = get_or_create_person(driver, name)
+        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
 
@@ -271,11 +284,14 @@ def ingest_from_url(body: IngestFromUrlBody):
     # Apply source tag
     tag_paper(driver, paper["id"], "from-url")
 
+    authors_detail = meta.get("authors_detail") or []
+    aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+
     authors_saved = []
     for name in meta.get("authors", []):
         if not name:
             continue
-        person = get_or_create_person(driver, name)
+        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
 

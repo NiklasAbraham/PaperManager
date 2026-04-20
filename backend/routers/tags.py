@@ -11,7 +11,7 @@ papers_router = APIRouter(prefix="/papers", tags=["tags"])
 
 DEFAULT_TAGS = [
     # ── Source / ingestion method (applied automatically) ─────────────────────
-    "pdf-upload", "from-url", "from-references",
+    "pdf-upload", "from-url", "from-references", "bulk-import",
     "from-linkedin", "from-twitter", "from-email",
     "from-conference", "from-newsletter", "from-google-scholar",
 

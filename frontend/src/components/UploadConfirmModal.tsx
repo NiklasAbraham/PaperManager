@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { uploadPdf, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople } from "../api/client";
+import { uploadPdf, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
@@ -45,6 +45,13 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
   const [peopleLoaded, setPeopleLoaded] = useState(false);
   const [creatingPerson, setCreatingPerson] = useState(false);
   const [showPersonDrop, setShowPersonDrop] = useState(false);
+
+  // Project selector
+  const [projects, setProjects] = useState<{id: string; name: string}[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  useEffect(() => {
+    listProjects().then(setProjects).catch(() => {});
+  }, []);
 
   // Step 2: refs
   const [checkedRefs, setCheckedRefs] = useState<boolean[]>([]);
@@ -152,7 +159,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
     setError(null);
     try {
       const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
-      const paper = await uploadPdf(file, title.trim(), undefined, undefined, isDefault ? undefined : summaryInstructions);
+      const paper = await uploadPdf(file, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions);
       await applySource(paper.id);
       const hasRefs = paper.references_found && paper.references_found.length > 0;
       if (hasRefs && !settings.autoSaveReferences) {
@@ -579,6 +586,20 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
           <Field label="Abstract">
             <textarea value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={4} className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
           </Field>
+          {projects.length > 0 && (
+            <Field label="Add to project">
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-gray-700"
+              >
+                <option value="">— None —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
           {duplicate && (
             <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs">
               <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>

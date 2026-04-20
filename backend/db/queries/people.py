@@ -153,3 +153,23 @@ def get_specialties(driver: Driver, person_id: str) -> list[dict]:
             id=person_id,
         )
         return [dict(r["t"]) for r in result]
+
+
+def get_or_create_person_with_affiliation(driver: Driver, name: str, affiliation: str | None) -> dict:
+    """Lookup by name; create if not found. If found and affiliation is missing, fill it in."""
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Person) WHERE toLower(p.name) = toLower($name) RETURN p LIMIT 1",
+            name=name,
+        )
+        record = result.single()
+        if record:
+            person = dict(record["p"])
+            if affiliation and not person.get("affiliation"):
+                session.run(
+                    "MATCH (p:Person {id: $id}) SET p.affiliation = $aff",
+                    id=person["id"], aff=affiliation,
+                )
+                person["affiliation"] = affiliation
+            return person
+    return create_person(driver, {"name": name, "affiliation": affiliation})
