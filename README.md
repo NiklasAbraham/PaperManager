@@ -2,6 +2,35 @@
 
 A personal academic paper manager. Upload PDFs, ingest papers from URLs, chat with papers using AI, explore a knowledge graph of authors and topics, and track references — all in a local web app backed by Neo4j and Google Drive.
 
+> 📚 **Full documentation:** [https://niklasabraham.github.io/PaperManager/](https://niklasabraham.github.io/PaperManager/)
+
+---
+
+## 📖 Documentation
+
+Browse the docs by section:
+
+### User Guide
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/user-guide/getting-started.md) | Installation, configuration, first run |
+| [Ingesting Papers](docs/user-guide/ingestion.md) | PDF upload, URL/DOI ingest, bulk import |
+| [Library](docs/user-guide/library.md) | Browsing, searching, filtering, sorting |
+| [Paper Detail](docs/user-guide/paper-detail.md) | Metadata, PDF viewer, figures, notes, chat, references |
+| [Knowledge Features](docs/user-guide/knowledge-features.md) | Graph, knowledge chat, Cypher editor |
+| [MCP Server](docs/user-guide/mcp-server.md) | Claude Desktop integration |
+
+### Technical Reference
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/technical/architecture.md) | System design with module interaction diagrams |
+| [Backend](docs/technical/backend.md) | FastAPI routers, services, DB queries |
+| [Frontend](docs/technical/frontend.md) | React pages and components |
+| [Data Model](docs/technical/data-model.md) | Neo4j graph schema |
+| [AI Pipelines](docs/technical/ai-pipelines.md) | Metadata extraction, summarisation, chat |
+| [API Reference](docs/technical/api-reference.md) | All REST endpoints |
+| [Decisions Log](docs/decisions.md) | Architecture decision record |
+
 ---
 
 ## Table of Contents

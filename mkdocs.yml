@@ -1,0 +1,84 @@
+site_name: PaperManager
+site_description: Personal academic paper manager with AI, knowledge graph, and full-text search
+site_author: PaperManager Contributors
+site_url: https://niklasabraham.github.io/PaperManager/
+repo_url: https://github.com/NiklasAbraham/PaperManager
+repo_name: NiklasAbraham/PaperManager
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Getting Started: user-guide/getting-started.md
+    - Ingesting Papers: user-guide/ingestion.md
+    - Library: user-guide/library.md
+    - Paper Detail: user-guide/paper-detail.md
+    - Knowledge Features: user-guide/knowledge-features.md
+    - MCP Server (Claude): user-guide/mcp-server.md
+  - Technical Reference:
+    - Architecture: technical/architecture.md
+    - Backend: technical/backend.md
+    - Frontend: technical/frontend.md
+    - Data Model: technical/data-model.md
+    - AI Pipelines: technical/ai-pipelines.md
+    - API Reference: technical/api-reference.md
+  - Decisions Log: decisions.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/NiklasAbraham/PaperManager
