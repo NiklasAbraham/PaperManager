@@ -68,11 +68,13 @@ export default function Settings() {
           <Select
             value={settings.defaultSort}
             options={[
-              { value: "date_desc", label: "Newest added" },
-              { value: "date_asc",  label: "Oldest added" },
-              { value: "year_desc", label: "Year (newest first)" },
-              { value: "year_asc",  label: "Year (oldest first)" },
-              { value: "title_asc", label: "Title (A → Z)" },
+              { value: "date_desc",      label: "Newest added" },
+              { value: "date_asc",       label: "Oldest added" },
+              { value: "year_desc",      label: "Year (newest first)" },
+              { value: "year_asc",       label: "Year (oldest first)" },
+              { value: "title_asc",      label: "Title (A → Z)" },
+              { value: "rating_desc",    label: "Rating (highest first)" },
+              { value: "citations_desc", label: "Citations (most first)" },
             ]}
             onChange={(v) => update({ defaultSort: v as AppSettings["defaultSort"] })}
           />
