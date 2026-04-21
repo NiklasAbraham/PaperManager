@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -290,6 +290,40 @@ export async function* bulkImport(
       if (line.startsWith("data: ")) {
         try {
           yield JSON.parse(line.slice(6)) as BulkSseEvent;
+        } catch { /* skip malformed */ }
+      }
+    }
+  }
+}
+
+// ── Literature search ─────────────────────────────────────────────────────────
+
+export async function* searchLiterature(
+  body: { days: number; max_per_source: number; sources: string[] },
+  signal?: AbortSignal,
+): AsyncGenerator<LiteratureSseEvent> {
+  const res = await fetch(`${BASE}/literature/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`API ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          yield JSON.parse(line.slice(6)) as LiteratureSseEvent;
         } catch { /* skip malformed */ }
       }
     }

@@ -1,0 +1,21 @@
+# Literature search keywords
+# One keyword or phrase per line. Lines starting with # are ignored.
+# These terms are ORed together and searched in title/abstract across arXiv, PubMed, and bioRxiv.
+# Edit this file to change what the Literature Search page fetches — no restart needed.
+
+protein
+peptide
+antibody
+nanobody
+enzyme
+TCR
+T cell receptor
+deep learning
+diffusion model
+transformer
+flow matching
+structure prediction
+protein design
+generative model
+molecular dynamics
+drug discovery
