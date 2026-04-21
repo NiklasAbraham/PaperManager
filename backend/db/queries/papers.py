@@ -81,6 +81,7 @@ def merge_paper_by_doi(driver: Driver, data: dict) -> dict:
               p.raw_text     = $raw_text,
               p.citation_count = $citation_count,
               p.metadata_source = $metadata_source,
+              p.venue        = $venue,
               p.created_at   = $now,
               p.updated_at   = $now
             ON MATCH SET
@@ -90,6 +91,7 @@ def merge_paper_by_doi(driver: Driver, data: dict) -> dict:
               p.summary      = COALESCE($summary, p.summary),
               p.citation_count = COALESCE($citation_count, p.citation_count),
               p.metadata_source = $metadata_source,
+              p.venue        = COALESCE($venue, p.venue),
               p.updated_at   = $now
             RETURN p
             """,
@@ -103,6 +105,7 @@ def merge_paper_by_doi(driver: Driver, data: dict) -> dict:
             raw_text=data.get("raw_text", ""),
             citation_count=data.get("citation_count"),
             metadata_source=data.get("metadata_source"),
+            venue=data.get("venue"),
             now=_now(),
         )
         return dict(result.single()["p"])
@@ -121,6 +124,7 @@ def create_paper(driver: Driver, data: dict) -> dict:
         "raw_text": data.get("raw_text"),
         "citation_count": data.get("citation_count"),
         "metadata_source": data.get("metadata_source"),
+        "venue": data.get("venue"),
         "created_at": _now(),
         "updated_at": _now(),
     }
@@ -175,3 +179,30 @@ def delete_paper(driver: Driver, paper_id: str) -> bool:
             id=paper_id,
         )
         return result.single()["deleted"] > 0
+
+
+def random_paper(driver: Driver, reading_status: str | None = None) -> dict | None:
+    """Return a single random Paper node, optionally filtered by reading_status."""
+    with driver.session() as session:
+        if reading_status:
+            result = session.run(
+                """
+                MATCH (p:Paper)
+                WHERE p.reading_status = $status
+                  AND NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+                WITH p, rand() AS r ORDER BY r LIMIT 1
+                RETURN p
+                """,
+                status=reading_status,
+            )
+        else:
+            result = session.run(
+                """
+                MATCH (p:Paper)
+                WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+                WITH p, rand() AS r ORDER BY r LIMIT 1
+                RETURN p
+                """
+            )
+        record = result.single()
+        return dict(record["p"]) if record else None

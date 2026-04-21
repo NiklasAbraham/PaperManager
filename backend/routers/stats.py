@@ -44,12 +44,28 @@ def get_stats(driver: Driver = Depends(get_driver)):
                    p.created_at AS created_at, authors
         """).data()
 
+        reading_status = session.run("""
+            MATCH (p:Paper)
+            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+            RETURN coalesce(p.reading_status, 'unread') AS status, count(p) AS count
+            ORDER BY status
+        """).data()
+
+        bookmarked_count = session.run("""
+            MATCH (p:Paper)
+            WHERE p.bookmarked = true
+              AND NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+            RETURN count(p) AS c
+        """).single()["c"]
+
     return {
         "counts": {
             "papers": papers, "authors": authors, "topics": topics,
             "tags": tags, "projects": projects,
+            "bookmarked": bookmarked_count,
         },
         "papers_by_year": by_year,
         "top_topics": top_topics,
         "recent_papers": recent,
+        "reading_status": reading_status,
     }

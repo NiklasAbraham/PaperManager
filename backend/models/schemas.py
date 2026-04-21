@@ -13,6 +13,7 @@ class PaperCreate(BaseModel):
     year: int | None = None
     doi: str | None = None
     abstract: str | None = None
+    venue: str | None = None
 
 
 class PaperUpdate(BaseModel):
@@ -21,6 +22,11 @@ class PaperUpdate(BaseModel):
     doi: str | None = None
     abstract: str | None = None
     summary: str | None = None
+    venue: str | None = None
+    reading_status: str | None = None   # "unread" | "reading" | "read"
+    rating: int | None = None           # 1-5
+    bookmarked: bool | None = None
+    color: str | None = None            # hex color string or named color
 
 
 class PaperOut(BaseModel):
@@ -34,6 +40,11 @@ class PaperOut(BaseModel):
     citation_count: int | None = None
     metadata_source: str | None = None
     created_at: str
+    venue: str | None = None
+    reading_status: str | None = None
+    rating: int | None = None
+    bookmarked: bool | None = None
+    color: str | None = None
 
 
 # ── People ────────────────────────────────────────────────────────────────────
