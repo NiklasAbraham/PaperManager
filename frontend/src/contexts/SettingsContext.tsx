@@ -13,7 +13,7 @@ Keep the summary under 300 words. Use plain language where possible.`;
 export interface AppSettings {
   // Library
   defaultView: "grid" | "list";
-  defaultSort: "date_desc" | "date_asc" | "year_desc" | "year_asc" | "title_asc";
+  defaultSort: "date_desc" | "date_asc" | "year_desc" | "year_asc" | "title_asc" | "rating_desc" | "citations_desc";
   showAbstractPreview: boolean;
   papersPerPage: 20 | 50 | 100 | 0; // 0 = all
 

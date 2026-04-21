@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -61,7 +61,9 @@ export async function deletePaper(paperId: string): Promise<void> {
 
 export async function updatePaper(paperId: string, data: Partial<{
   title: string; year: number | null; doi: string | null;
-  abstract: string | null; summary: string | null;
+  abstract: string | null; summary: string | null; venue: string | null;
+  reading_status: string | null; rating: number | null;
+  bookmarked: boolean | null; color: string | null;
 }>): Promise<Paper> {
   return apiFetch<Paper>(`/papers/${paperId}`, {
     method: "PATCH",

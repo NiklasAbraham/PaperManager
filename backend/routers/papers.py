@@ -5,7 +5,7 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 from db.connection import get_driver
-from db.queries.papers import create_paper, merge_paper_by_doi, get_paper, list_papers, update_paper, delete_paper, find_duplicate
+from db.queries.papers import create_paper, merge_paper_by_doi, get_paper, list_papers, update_paper, delete_paper, find_duplicate, random_paper
 from db.queries.notes import get_paper_note, upsert_note, set_mentions
 from db.queries.people import get_or_create_person, get_or_create_person_with_affiliation, link_author
 from db.queries.topics import get_or_create_topic, link_paper_topic
@@ -118,6 +118,7 @@ async def upload(
             "citation_count": meta.get("citation_count"),
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
+            "venue": meta.get("venue"),
         }) if meta.get("doi") or existing.get("doi") else create_paper(driver, {
             "title": meta.get("title", ""),
             "year": meta.get("year"),
@@ -128,6 +129,7 @@ async def upload(
             "citation_count": meta.get("citation_count"),
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
+            "venue": meta.get("venue"),
         })
     elif meta.get("doi"):
         # No existing paper but DOI known — use merge to future-proof against race conditions
@@ -141,6 +143,7 @@ async def upload(
             "citation_count": meta.get("citation_count"),
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
+            "venue": meta.get("venue"),
         })
     else:
         paper = create_paper(driver, {
@@ -153,6 +156,7 @@ async def upload(
             "citation_count": meta.get("citation_count"),
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
+            "venue": meta.get("venue"),
         })
 
     log.info("Paper saved | id=%s | title=%.60s", paper["id"], paper.get("title"))
@@ -277,6 +281,7 @@ def ingest_from_url(body: IngestFromUrlBody):
         "citation_count": meta.get("citation_count"),
         "metadata_source": meta.get("metadata_source", "url"),
         "raw_text": "",
+        "venue": meta.get("venue"),
     })
 
     log.info("Paper saved from URL | id=%s | title=%.60s", paper["id"], paper.get("title"))
@@ -330,6 +335,15 @@ def ingest_from_url(body: IngestFromUrlBody):
         "topics_auto_added": topics_added,
         "references_found": [],
     }
+
+
+@router.get("/random", response_model=PaperOut)
+def get_random_paper(reading_status: Optional[str] = None):
+    """Return a random paper from the library, optionally filtered by reading_status."""
+    paper = random_paper(get_driver(), reading_status=reading_status or None)
+    if not paper:
+        raise HTTPException(status_code=404, detail="No papers found")
+    return paper
 
 
 @router.get("", response_model=list[PaperOut])
@@ -486,3 +500,56 @@ def stream_pdf(paper_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": "inline"},
     )
+
+
+@router.get("/{paper_id}/bibtex")
+def paper_bibtex(paper_id: str):
+    """Return a BibTeX entry for a single paper."""
+    paper = get_paper(get_driver(), paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    driver = get_driver()
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Paper {id: $id})<-[:AUTHORED_BY]-(a:Person) RETURN collect(a.name) AS authors",
+            id=paper_id,
+        )
+        record = result.single()
+        authors = record["authors"] if record else []
+
+    key = paper_id[:8]
+    title = _bib_escape(paper.get("title") or "")
+    year = paper.get("year", "")
+    doi = paper.get("doi") or ""
+    venue = paper.get("venue") or ""
+    author_str = " and ".join(authors)
+
+    lines = [f"@article{{{key},"]
+    lines.append(f"  title  = {{{title}}},")
+    if author_str:
+        lines.append(f"  author = {{{author_str}}},")
+    if year:
+        lines.append(f"  year   = {{{year}}},")
+    if doi:
+        lines.append(f"  doi    = {{{doi}}},")
+    if venue:
+        lines.append(f"  journal = {{{_bib_escape(venue)}}},")
+    lines.append("}")
+
+    content = "\n".join(lines) + "\n"
+    filename = f"{_safe_filename(paper.get('title') or key)}.bib"
+    return Response(
+        content,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+    )
+
+
+def _bib_escape(s: str) -> str:
+    return s.replace("{", "\\{").replace("}", "\\}")
+
+
+def _safe_filename(title: str, max_len: int = 40) -> str:
+    """Return a filesystem-safe version of *title*, stripped to *max_len* chars."""
+    return "".join(c for c in title[:max_len] if c.isalnum() or c in " _-").strip()

@@ -13,6 +13,7 @@ type ViewMode = "grid" | "list";
 
 export default function Library() {
   const { settings } = useAppSettings();
+  const navigate = useNavigate();
   const [papers, setPapers]     = useState<Paper[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [stats, setStats]           = useState<Stats | null>(null);
@@ -22,22 +23,29 @@ export default function Library() {
   const [editingPaper, setEditingPaper] = useState<Paper | null>(null);
   const [activePanel, setActivePanel]   = useState<EntityType | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [surprisingMe, setSurprisingMe] = useState(false);
 
   const q             = searchParams.get("q") ?? "";
   const activeTag     = searchParams.get("tag") ?? "";
   const activeTopic   = searchParams.get("topic") ?? "";
   const activeProject = searchParams.get("project_id") ?? "";
-  const hasFilters    = q || activeTag || activeTopic || activeProject;
+  const activeStatus  = searchParams.get("reading_status") ?? "";
+  const activeBookmarked = searchParams.get("bookmarked") === "true";
+  const yearMin       = searchParams.get("year_min") ?? "";
+  const yearMax       = searchParams.get("year_max") ?? "";
+  const hasFilters    = q || activeTag || activeTopic || activeProject || activeStatus || activeBookmarked || yearMin || yearMax;
 
   // Sort papers per settings
   const sortedPapers = useMemo(() => {
     const sorted = [...papers];
     switch (settings.defaultSort) {
-      case "date_asc":   return sorted.reverse();
-      case "year_desc":  return sorted.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
-      case "year_asc":   return sorted.sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
-      case "title_asc":  return sorted.sort((a, b) => a.title.localeCompare(b.title));
-      default:           return sorted; // date_desc = API order
+      case "date_asc":        return sorted.reverse();
+      case "year_desc":       return sorted.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+      case "year_asc":        return sorted.sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
+      case "title_asc":       return sorted.sort((a, b) => a.title.localeCompare(b.title));
+      case "rating_desc":     return sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+      case "citations_desc":  return sorted.sort((a, b) => (b.citation_count ?? 0) - (a.citation_count ?? 0));
+      default:                return sorted; // date_desc = API order
     }
   }, [papers, settings.defaultSort]);
 
@@ -49,7 +57,9 @@ export default function Library() {
   const loadPapers = async (params: URLSearchParams) => {
     setLoading(true);
     try {
-      const hasFilter = params.get("q") || params.get("tag") || params.get("topic") || params.get("project_id");
+      const hasFilter = params.get("q") || params.get("tag") || params.get("topic") ||
+        params.get("project_id") || params.get("reading_status") || params.get("bookmarked") ||
+        params.get("year_min") || params.get("year_max");
       if (hasFilter) {
         const res = await apiFetch<SearchResponse>(`/search?${params}`);
         setPapers(res.results);
@@ -80,6 +90,37 @@ export default function Library() {
 
   const clearAll = () => setSearchParams(new URLSearchParams());
 
+  const toggleBookmarked = () => {
+    const next = new URLSearchParams(searchParams);
+    if (activeBookmarked) next.delete("bookmarked");
+    else next.set("bookmarked", "true");
+    setSearchParams(next);
+  };
+
+  const setYearMin = (val: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (val) next.set("year_min", val); else next.delete("year_min");
+    setSearchParams(next);
+  };
+
+  const setYearMax = (val: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (val) next.set("year_max", val); else next.delete("year_max");
+    setSearchParams(next);
+  };
+
+  const surpriseMe = async () => {
+    setSurprisingMe(true);
+    try {
+      const paper = await apiFetch<Paper>("/papers/random");
+      navigate(`/paper/${paper.id}`);
+    } catch {
+      // no papers
+    } finally {
+      setSurprisingMe(false);
+    }
+  };
+
   const refreshStats = () => apiFetch<Stats>("/stats").then(setStats).catch(() => {});
 
   const handleDeleted = (id: string) => {
@@ -96,7 +137,7 @@ export default function Library() {
     <div className="h-[calc(100vh-53px)] overflow-y-auto">
       <main>
         {/* Search + upload + view toggle bar */}
-        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-3 flex gap-3 items-center">
+        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-3 flex gap-3 items-center flex-wrap">
           <input
             type="search"
             value={q}
@@ -107,8 +148,65 @@ export default function Library() {
               setSearchParams(next);
             }}
             placeholder="Search papers, notes…"
-            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
           />
+
+          {/* Year range */}
+          <input
+            type="number"
+            value={yearMin}
+            onChange={(e) => setYearMin(e.target.value)}
+            placeholder="From year"
+            className="w-24 border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+          <input
+            type="number"
+            value={yearMax}
+            onChange={(e) => setYearMax(e.target.value)}
+            placeholder="To year"
+            className="w-24 border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+
+          {/* Reading status filter */}
+          <select
+            value={activeStatus}
+            onChange={(e) => {
+              const next = new URLSearchParams(searchParams);
+              if (e.target.value) next.set("reading_status", e.target.value);
+              else next.delete("reading_status");
+              setSearchParams(next);
+            }}
+            className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-gray-600"
+          >
+            <option value="">All statuses</option>
+            <option value="unread">Unread</option>
+            <option value="reading">Reading</option>
+            <option value="read">Read</option>
+          </select>
+
+          {/* Bookmark filter */}
+          <button
+            onClick={toggleBookmarked}
+            title={activeBookmarked ? "Showing bookmarked only — click to clear" : "Show bookmarked only"}
+            className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
+              activeBookmarked
+                ? "bg-amber-500 border-amber-500 text-white"
+                : "border-gray-200 text-gray-400 hover:text-amber-500 hover:border-amber-300"
+            }`}
+          >
+            ★
+          </button>
+
+          {/* Surprise Me */}
+          <button
+            onClick={surpriseMe}
+            disabled={surprisingMe}
+            title="Open a random paper"
+            className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-violet-600 hover:border-violet-300 transition-colors disabled:opacity-50 shrink-0"
+          >
+            {surprisingMe ? "…" : "🎲 Surprise"}
+          </button>
+
           {/* View toggle */}
           <div className="flex border border-gray-200 rounded-lg overflow-hidden shrink-0">
             <button
@@ -137,15 +235,19 @@ export default function Library() {
           {hasFilters && (
             <div className="flex flex-wrap gap-2 items-center">
               <span className="text-xs text-gray-500">Showing:</span>
-              {q         && <Chip label={`"${q}"`}    onRemove={() => setFilter("q", q)} />}
-              {activeTag && <Chip label={activeTag}   onRemove={() => setFilter("tag", activeTag)} />}
-              {activeTopic && <Chip label={activeTopic} onRemove={() => setFilter("topic", activeTopic)} />}
+              {q            && <Chip label={`"${q}"`}    onRemove={() => setFilter("q", q)} />}
+              {activeTag    && <Chip label={activeTag}   onRemove={() => setFilter("tag", activeTag)} />}
+              {activeTopic  && <Chip label={activeTopic} onRemove={() => setFilter("topic", activeTopic)} />}
               {activeProject && (
                 <Chip
                   label={projects.find((p) => p.id === activeProject)?.name ?? activeProject}
                   onRemove={() => setFilter("project_id", activeProject)}
                 />
               )}
+              {activeStatus && <Chip label={`Status: ${activeStatus}`} onRemove={() => setFilter("reading_status", activeStatus)} />}
+              {activeBookmarked && <Chip label="★ Bookmarked" onRemove={toggleBookmarked} />}
+              {yearMin && <Chip label={`From ${yearMin}`} onRemove={() => setYearMin("")} />}
+              {yearMax && <Chip label={`To ${yearMax}`}   onRemove={() => setYearMax("")} />}
               <button onClick={clearAll} className="text-xs text-gray-400 hover:text-gray-600 underline">
                 Clear all
               </button>
@@ -379,21 +481,43 @@ function Dashboard({ stats, onTopicClick, onEntityClick }: {
   onTopicClick: (name: string) => void;
   onEntityClick: (type: EntityType) => void;
 }) {
-  const { counts, papers_by_year, top_topics, recent_papers } = stats;
+  const { counts, papers_by_year, top_topics, recent_papers, reading_status } = stats;
   const navigate = useNavigate();
 
   const maxYear = Math.max(...papers_by_year.map((y) => y.count), 1);
 
+  const STATUS_COLORS: Record<string, string> = {
+    unread:  "bg-gray-100 text-gray-600",
+    reading: "bg-blue-100 text-blue-700",
+    read:    "bg-green-100 text-green-700",
+  };
+
   return (
     <div className="space-y-6">
       {/* Stat cards */}
-      <div className="grid grid-cols-5 gap-3">
-        <StatCard value={counts.papers}   label="Papers"   color="violet" onClick={() => onEntityClick("papers")}   />
-        <StatCard value={counts.authors}  label="Authors"  color="blue"   onClick={() => onEntityClick("authors")}  />
-        <StatCard value={counts.topics}   label="Topics"   color="green"  onClick={() => onEntityClick("topics")}   />
-        <StatCard value={counts.tags}     label="Tags"     color="amber"  onClick={() => onEntityClick("tags")}     />
-        <StatCard value={counts.projects} label="Projects" color="pink"   onClick={() => onEntityClick("projects")} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <StatCard value={counts.papers}    label="Papers"     color="violet" onClick={() => onEntityClick("papers")}   />
+        <StatCard value={counts.authors}   label="Authors"    color="blue"   onClick={() => onEntityClick("authors")}  />
+        <StatCard value={counts.topics}    label="Topics"     color="green"  onClick={() => onEntityClick("topics")}   />
+        <StatCard value={counts.tags}      label="Tags"       color="amber"  onClick={() => onEntityClick("tags")}     />
+        <StatCard value={counts.projects}  label="Projects"   color="pink"   onClick={() => onEntityClick("projects")} />
+        <StatCard value={counts.bookmarked ?? 0} label="Bookmarked" color="orange" />
       </div>
+
+      {/* Reading status breakdown */}
+      {reading_status && reading_status.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Reading progress</h3>
+          <div className="flex flex-wrap gap-2">
+            {reading_status.map(({ status, count }) => (
+              <span key={status} className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium ${STATUS_COLORS[status] ?? "bg-gray-100 text-gray-600"}`}>
+                {status === "unread" ? "📚 Unread" : status === "reading" ? "📖 Reading" : "✅ Read"}
+                <span className="font-bold">{count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         {/* Papers by year */}
@@ -485,6 +609,7 @@ const STAT_COLORS: Record<string, { bg: string; text: string; num: string }> = {
   green:  { bg: "bg-green-50",  text: "text-green-500",  num: "text-green-700"  },
   amber:  { bg: "bg-amber-50",  text: "text-amber-500",  num: "text-amber-700"  },
   pink:   { bg: "bg-pink-50",   text: "text-pink-500",   num: "text-pink-700"   },
+  orange: { bg: "bg-orange-50", text: "text-orange-500", num: "text-orange-700" },
 };
 
 function StatCard({ value, label, color, onClick }: { value: number; label: string; color: string; onClick?: () => void }) {
