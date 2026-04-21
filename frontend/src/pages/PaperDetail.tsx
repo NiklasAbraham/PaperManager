@@ -285,18 +285,124 @@ export default function PaperDetail() {
   const driveUrl    = paper.drive_file_id ? `https://drive.google.com/file/d/${paper.drive_file_id}/view` : null;
   const driveEmbed  = paper.drive_file_id ? `${BASE}/papers/${paper.id}/pdf` : null;
 
+  const cycleStatus = async () => {
+    if (!id) return;
+    const cycle: Array<Paper["reading_status"]> = ["unread", "reading", "read"];
+    const current = paper.reading_status ?? "unread";
+    const next = cycle[(cycle.indexOf(current) + 1) % cycle.length];
+    const updated = await apiFetch<typeof paper>(`/papers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reading_status: next }),
+    });
+    setPaper(updated);
+  };
+
+  const toggleBookmark = async () => {
+    if (!id) return;
+    const updated = await apiFetch<typeof paper>(`/papers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookmarked: !paper.bookmarked }),
+    });
+    setPaper(updated);
+  };
+
+  const setRating = async (stars: number) => {
+    if (!id) return;
+    const newRating = paper.rating === stars ? null : stars;
+    const updated = await apiFetch<typeof paper>(`/papers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: newRating }),
+    });
+    setPaper(updated);
+  };
+
+  const downloadBibtex = async () => {
+    const res = await fetch(`${BASE}/papers/${id}/bibtex`);
+    if (!res.ok) return;
+    const text = await res.text();
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${paper.title.slice(0, 40).replace(/[^\w\s]/g, "").trim()}.bib`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const STATUS_STYLES: Record<string, string> = {
+    unread:  "bg-gray-100 text-gray-500",
+    reading: "bg-blue-100 text-blue-600",
+    read:    "bg-green-100 text-green-600",
+  };
+  const STATUS_LABELS: Record<string, string> = {
+    unread: "📚 Unread",
+    reading: "📖 Reading",
+    read: "✅ Read",
+  };
+  const currentStatus = paper.reading_status ?? "unread";
+
   return (
     <div className="h-[calc(100vh-53px)] flex flex-col">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shrink-0">
-        <Link to="/" className="text-sm text-violet-600 hover:underline">← Library</Link>
-        <h1 className="text-sm font-medium text-gray-700 truncate max-w-md">{paper.title}</h1>
-        <button
-          onClick={() => setEditOpen(true)}
-          className="w-24 text-right text-xs text-gray-400 hover:text-violet-600 transition-colors"
-        >
-          Edit metadata
-        </button>
+      <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shrink-0 flex-wrap gap-2">
+        <Link to="/" className="text-sm text-violet-600 hover:underline shrink-0">← Library</Link>
+        <h1 className="text-sm font-medium text-gray-700 truncate max-w-md flex-1 text-center">{paper.title}</h1>
+
+        {/* Paper controls */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Reading status */}
+          <button
+            onClick={cycleStatus}
+            title="Click to cycle reading status"
+            className={`text-xs px-2 py-1 rounded-full font-medium transition-colors ${STATUS_STYLES[currentStatus]}`}
+          >
+            {STATUS_LABELS[currentStatus]}
+          </button>
+
+          {/* Stars */}
+          <div className="flex gap-0.5">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <button
+                key={star}
+                onClick={() => setRating(star)}
+                title={`Rate ${star} star${star > 1 ? "s" : ""}`}
+                className={`text-base leading-none transition-colors ${
+                  star <= (paper.rating ?? 0) ? "text-amber-400" : "text-gray-200 hover:text-amber-300"
+                }`}
+              >
+                ★
+              </button>
+            ))}
+          </div>
+
+          {/* Bookmark */}
+          <button
+            onClick={toggleBookmark}
+            title={paper.bookmarked ? "Remove bookmark" : "Bookmark"}
+            className={`text-lg leading-none transition-colors ${paper.bookmarked ? "text-amber-400" : "text-gray-300 hover:text-amber-300"}`}
+          >
+            ★
+          </button>
+
+          {/* BibTeX download */}
+          <button
+            onClick={downloadBibtex}
+            title="Download BibTeX"
+            className="text-xs text-gray-400 hover:text-violet-600 transition-colors px-2 py-1 border border-gray-200 rounded-lg"
+          >
+            .bib
+          </button>
+
+          <button
+            onClick={() => setEditOpen(true)}
+            className="text-xs text-gray-400 hover:text-violet-600 transition-colors"
+          >
+            Edit metadata
+          </button>
+        </div>
       </div>
 
       {/* Main two-column layout */}
@@ -359,9 +465,9 @@ export default function PaperDetail() {
               <div className="max-w-2xl mx-auto px-8 py-10 space-y-6">
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 leading-snug">{paper.title}</h2>
-                  {paper.year || (paper as any).venue ? (
+                  {paper.year || paper.venue ? (
                     <p className="text-xs text-gray-400 mt-1">
-                      {paper.year}{(paper as any).venue ? ` · ${(paper as any).venue}` : ""}
+                      {paper.year}{paper.venue ? ` · ${paper.venue}` : ""}
                     </p>
                   ) : null}
                   {authors.length > 0 && (

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { deletePaper } from "../api/client";
+import { deletePaper, apiFetch } from "../api/client";
 import EditPaperModal from "./EditPaperModal";
 import type { Paper } from "../types";
 
@@ -9,6 +9,18 @@ const SOURCE_COLORS: Record<string, string> = {
   crossref:         "bg-green-100 text-green-700",
   llm:              "bg-yellow-100 text-yellow-700",
   heuristic:        "bg-red-100 text-red-700",
+};
+
+const STATUS_STYLES: Record<string, string> = {
+  unread:  "bg-gray-100 text-gray-500",
+  reading: "bg-blue-100 text-blue-600",
+  read:    "bg-green-100 text-green-600",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  unread: "📚 Unread",
+  reading: "📖 Reading",
+  read: "✅ Read",
 };
 
 interface Props {
@@ -25,6 +37,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
   const [deleting, setDeleting] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
+  const currentStatus = paper.reading_status ?? "unread";
   const summaryPreview = paper.summary?.split("\n").slice(0, 2).join(" ") ?? "";
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -44,6 +57,51 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
     e.stopPropagation();
     setEditing(true);
   };
+
+  const toggleBookmark = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newVal = !paper.bookmarked;
+    const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookmarked: newVal }),
+    });
+    setPaper(updated);
+    onUpdated?.(updated);
+  };
+
+  const cycleStatus = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const cycle: Array<Paper["reading_status"]> = ["unread", "reading", "read"];
+    const next = cycle[(cycle.indexOf(currentStatus) + 1) % cycle.length];
+    const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reading_status: next }),
+    });
+    setPaper(updated);
+    onUpdated?.(updated);
+  };
+
+  const setRating = async (e: React.MouseEvent, stars: number) => {
+    e.stopPropagation();
+    const newRating = paper.rating === stars ? null : stars;
+    const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: newRating }),
+    });
+    setPaper(updated);
+    onUpdated?.(updated);
+  };
+
+  const colorDot = paper.color ? (
+    <span
+      className="w-3 h-3 rounded-full border border-white shadow-sm shrink-0"
+      style={{ backgroundColor: paper.color }}
+      title={`Color: ${paper.color}`}
+    />
+  ) : null;
 
   return (
     <>
@@ -76,15 +134,22 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
         </div>
 
         <div className="flex items-start justify-between gap-2 mb-1 pr-14">
-          <h3 className="font-medium text-gray-900 text-sm leading-snug line-clamp-2">{paper.title}</h3>
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            {colorDot}
+            <h3 className="font-medium text-gray-900 text-sm leading-snug line-clamp-2">{paper.title}</h3>
+          </div>
           {paper.year && <span className="text-xs text-gray-400 shrink-0">{paper.year}</span>}
         </div>
+
+        {paper.venue && (
+          <p className="text-xs text-gray-400 italic mt-0.5 truncate">{paper.venue}</p>
+        )}
 
         {showAbstract && summaryPreview && (
           <p className="text-xs text-gray-500 line-clamp-2 mt-1">{summaryPreview}</p>
         )}
 
-        <div className="mt-3 flex flex-wrap gap-1">
+        <div className="mt-3 flex flex-wrap gap-1 items-center">
           {paper.metadata_source && (
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SOURCE_COLORS[paper.metadata_source] ?? "bg-gray-100 text-gray-500"}`}>
               {paper.metadata_source}
@@ -95,6 +160,40 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
               {paper.citation_count.toLocaleString()} citations
             </span>
           )}
+
+          {/* Reading status badge — clickable to cycle */}
+          <button
+            onClick={cycleStatus}
+            title="Click to cycle reading status"
+            className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${STATUS_STYLES[currentStatus]}`}
+          >
+            {STATUS_LABELS[currentStatus]}
+          </button>
+
+          {/* Bookmark */}
+          <button
+            onClick={toggleBookmark}
+            title={paper.bookmarked ? "Remove bookmark" : "Bookmark this paper"}
+            className={`text-sm leading-none ${paper.bookmarked ? "text-amber-400" : "text-gray-300 hover:text-amber-300"} transition-colors`}
+          >
+            ★
+          </button>
+        </div>
+
+        {/* Star rating */}
+        <div className="mt-2 flex gap-0.5" onClick={(e) => e.stopPropagation()}>
+          {[1, 2, 3, 4, 5].map((star) => (
+            <button
+              key={star}
+              onClick={(e) => setRating(e, star)}
+              title={`Rate ${star} star${star > 1 ? "s" : ""}`}
+              className={`text-sm leading-none transition-colors ${
+                star <= (paper.rating ?? 0) ? "text-amber-400" : "text-gray-200 hover:text-amber-300"
+              }`}
+            >
+              ★
+            </button>
+          ))}
         </div>
       </div>
 

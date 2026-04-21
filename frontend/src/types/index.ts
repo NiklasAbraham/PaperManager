@@ -9,6 +9,11 @@ export interface Paper {
   citation_count?: number;
   metadata_source?: string;
   created_at: string;
+  venue?: string;
+  reading_status?: "unread" | "reading" | "read";
+  rating?: number;
+  bookmarked?: boolean;
+  color?: string;
 }
 
 export interface Person {
@@ -88,10 +93,11 @@ export interface GraphData {
 }
 
 export interface Stats {
-  counts: { papers: number; authors: number; topics: number; tags: number; projects: number };
+  counts: { papers: number; authors: number; topics: number; tags: number; projects: number; bookmarked: number };
   papers_by_year: { year: number; count: number }[];
   top_topics: { name: string; count: number }[];
   recent_papers: (Paper & { authors: string[] })[];
+  reading_status: { status: string; count: number }[];
 }
 
 export interface ParsedMeta {

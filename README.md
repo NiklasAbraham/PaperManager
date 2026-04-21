@@ -255,22 +255,31 @@ The main page shows all papers in your library.
 **Search & filter:**
 - Full-text search across title, abstract, and summary
 - Filter by tag, topic, project, or person (sidebar)
+- Filter by **reading status** (Unread / Reading / Read) using the status dropdown
+- Filter by **year range** using the "From year" / "To year" inputs
+- Filter to **bookmarked papers only** using the ★ button
 - Active filters shown as removable chips
 - Searches update the URL for bookmarking
 
 **View options:**
 - Grid or list view toggle
-- Sort by date added (newest/oldest), year, or title
+- Sort by date added (newest/oldest), year, title, **rating**, or **citation count**
 - Configurable page size (20 / 50 / 100 / all)
 
 **Paper cards show:**
-- Title, year, authors, metadata source badge (color-coded: green = Semantic Scholar/CrossRef, yellow = LLM-extracted, red = guessed)
+- Title, year, venue, metadata source badge
 - Abstract preview (optional)
-- Tags
+- **Reading status badge** — click to cycle through Unread → Reading → Read
+- **Star rating** (1–5) — click to rate; click again to clear
+- **Bookmark toggle** (★)
+- **Color label dot** (set in Edit modal)
 - Quick edit / delete buttons
 
+**"🎲 Surprise"** button — opens a random paper from your library, great for rediscovering papers.
+
 **Dashboard** (when no filters active):
-- Count cards: papers, authors, topics, tags, projects
+- Count cards: papers, authors, topics, tags, projects, **bookmarked**
+- **Reading progress** breakdown (Unread / Reading / Read counts)
 - Papers by year bar chart
 - Top topics
 - Recently added papers
@@ -283,7 +292,13 @@ Click any paper to open its detail view.
 
 ### Metadata & Abstract
 
-Left panel — shows title, authors, year, DOI, venue, citation count, metadata source, abstract, and AI summary. The **Edit** button opens a modal to update any field.
+Left panel — shows title, authors, year, DOI, venue, citation count, metadata source, abstract, and AI summary. The **Edit** button opens a modal to update any field including **venue**, **reading status**, and **color label**.
+
+The top bar includes:
+- **Reading status** badge — click to cycle Unread → Reading → Read
+- **Star rating** (1–5 stars) — click any star to rate or clear
+- **Bookmark** (★) toggle
+- **.bib** button — download a BibTeX entry for this paper
 
 Author and topic chips are clickable — clicking an author opens the People page; clicking a topic filters the library.
 
@@ -560,8 +575,8 @@ PaperManager ships with an MCP (Model Context Protocol) server at `backend/mcp_s
 
 | Tool | Description |
 |---|---|
-| `search_papers` | Search by keyword, tag, topic, project, or person |
-| `get_paper_detail` | Full paper metadata |
+| `search_papers` | Search by keyword, tag, topic, project, person, year range, reading status, or bookmark |
+| `get_paper_detail` | Full paper metadata including reading_status, rating, bookmarked, venue |
 | `chat_with_paper` | Ask a question about a paper's content |
 | `add_note` | Write/update a paper's markdown note |
 | `get_note` | Read a paper's note |
@@ -569,6 +584,10 @@ PaperManager ships with an MCP (Model Context Protocol) server at `backend/mcp_s
 | `add_topic` | Link a research topic to a paper |
 | `link_person_to_paper` | Link a person with a role |
 | `add_paper_metadata` | Add a paper by metadata (no PDF) |
+| `set_reading_status` | Set reading status: unread / reading / read |
+| `rate_paper` | Rate a paper 1–5 stars |
+| `bookmark_paper` | Bookmark or un-bookmark a paper |
+| `get_random_paper` | Get a random paper (optionally filtered by reading_status) |
 | `list_projects` | List all projects |
 | `list_project_papers` | Papers in a project |
 | `add_to_project` | Add a paper to a project |
@@ -591,8 +610,9 @@ All endpoints served from `http://localhost:8000`.
 |---|---|---|
 | `GET` | `/papers` | List papers (`?skip=&limit=`) |
 | `POST` | `/papers` | Create paper (manual) |
+| `GET` | `/papers/random` | Get a random paper (`?reading_status=`) |
 | `GET` | `/papers/{id}` | Get paper detail |
-| `PATCH` | `/papers/{id}` | Update paper fields |
+| `PATCH` | `/papers/{id}` | Update paper fields (incl. reading_status, rating, bookmarked, color, venue) |
 | `DELETE` | `/papers/{id}` | Delete paper + Drive file + figures |
 | `POST` | `/papers/parse` | Extract metadata from PDF (no save) |
 | `GET` | `/papers/check-duplicate` | Check by `?doi=` or `?title=` |
@@ -601,6 +621,7 @@ All endpoints served from `http://localhost:8000`.
 | `POST` | `/papers/bulk-import` | Bulk import (SSE stream) |
 | `POST` | `/papers/{id}/chat` | Chat with paper |
 | `GET` | `/papers/{id}/pdf` | Stream PDF from Drive |
+| `GET` | `/papers/{id}/bibtex` | Download BibTeX entry for paper |
 | `GET` | `/papers/{id}/note` | Get markdown note |
 | `PUT` | `/papers/{id}/note` | Create/update note |
 | `GET` | `/papers/{id}/extract-references` | Extract references (no save) |
@@ -670,10 +691,10 @@ All endpoints served from `http://localhost:8000`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/search` | Full-text + filtered search (`?q=&tag=&topic=&project_id=&person_id=`) |
+| `GET` | `/search` | Full-text + filtered search (`?q=&tag=&topic=&project_id=&person_id=&year_min=&year_max=&reading_status=&bookmarked=`) |
 | `GET` | `/graph` | Graph data (`?mode=full\|papers\|paper&id=`) |
 | `POST` | `/graph/cypher` | Custom Cypher → graph nodes + links |
-| `GET` | `/stats` | Library statistics (counts, by year, top topics, recent) |
+| `GET` | `/stats` | Library statistics (counts, by year, top topics, recent, reading_status breakdown) |
 
 ### Cypher, Export, Backfill, Knowledge Chat
 
@@ -702,7 +723,7 @@ All endpoints served from `http://localhost:8000`.
 
 | Label | Key properties |
 |---|---|
-| `Paper` | `id` (uuid), `title`, `year`, `doi`, `abstract`, `summary`, `drive_file_id`, `raw_text`, `citation_count`, `metadata_source`, `created_at`, `updated_at` |
+| `Paper` | `id` (uuid), `title`, `year`, `doi`, `abstract`, `summary`, `drive_file_id`, `raw_text`, `citation_count`, `metadata_source`, `venue`, `reading_status`, `rating`, `bookmarked`, `color`, `created_at`, `updated_at` |
 | `Person` | `id`, `name`, `affiliation` |
 | `Topic` | `id`, `name` |
 | `Tag` | `id`, `name` |
