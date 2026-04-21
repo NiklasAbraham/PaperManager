@@ -6,6 +6,7 @@ import People from "./pages/People";
 import Projects from "./pages/Projects";
 import Settings from "./pages/Settings";
 import BulkImport from "./pages/BulkImport";
+import LiteratureSearch from "./pages/LiteratureSearch";
 import { SettingsProvider } from "./contexts/SettingsContext";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
@@ -29,6 +30,7 @@ function NavBar() {
       <NavLink to="/graph" className={cls}>Graph</NavLink>
       <NavLink to="/cypher" className={cls}>Cypher</NavLink>
       <NavLink to="/knowledge" className={cls}>Knowledge</NavLink>
+      <NavLink to="/literature" className={cls}>Literature</NavLink>
       <NavLink to="/bulk-import" className={cls}>Bulk Import</NavLink>
       <NavLink to="/settings" className={cls}>Settings</NavLink>
     </nav>
@@ -50,6 +52,7 @@ export default function App() {
               <Route path="/graph"   element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading graph…</div>}><Graph /></Suspense>} />
               <Route path="/cypher" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Cypher /></Suspense>} />
               <Route path="/knowledge" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><KnowledgeChat /></Suspense>} />
+              <Route path="/literature" element={<LiteratureSearch />} />
               <Route path="/bulk-import" element={<BulkImport />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>

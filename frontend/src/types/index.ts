@@ -173,3 +173,23 @@ export type BulkSseEvent =
   | { done?: false; index: number; total: number; status: "skipped"; title: string; id: string; reason: string }
   | { done?: false; index: number; total: number; status: "error"; input: string; error: string }
   | { done: true; imported: number; skipped: number; errors: number };
+
+// ── Literature search ─────────────────────────────────────────────────────────
+
+export interface LitPaper {
+  title: string;
+  abstract?: string;
+  authors: string[];
+  doi?: string;
+  year?: number;
+  date: string;
+  source: "arxiv" | "pubmed" | "biorxiv";
+  url: string;
+  already_in_library: boolean;
+}
+
+export type LiteratureSseEvent =
+  | { done?: false; searching: string }
+  | { done?: false; source: string; paper: LitPaper }
+  | { done?: false; source: string; error: string }
+  | { done: true; counts: Record<string, number> };
