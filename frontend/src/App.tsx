@@ -7,7 +7,7 @@ import Projects from "./pages/Projects";
 import Settings from "./pages/Settings";
 import BulkImport from "./pages/BulkImport";
 import LiteratureSearch from "./pages/LiteratureSearch";
-import { SettingsProvider } from "./contexts/SettingsContext";
+import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
 const Graph         = lazy(() => import("./pages/Graph"));
@@ -15,6 +15,7 @@ const Cypher        = lazy(() => import("./pages/Cypher"));
 const KnowledgeChat = lazy(() => import("./pages/KnowledgeChat"));
 
 function NavBar() {
+  const { settings, update } = useAppSettings();
   const cls = ({ isActive }: { isActive: boolean }) =>
     `px-3 py-2 rounded text-sm font-medium transition-colors ${
       isActive
@@ -33,6 +34,22 @@ function NavBar() {
       <NavLink to="/literature" className={cls}>Literature</NavLink>
       <NavLink to="/bulk-import" className={cls}>Bulk Import</NavLink>
       <NavLink to="/settings" className={cls}>Settings</NavLink>
+      <div className="ml-auto">
+        <button
+          onClick={() => update({ debugMode: !settings.debugMode })}
+          title={settings.debugMode ? "Debug mode ON — click to disable" : "Debug mode OFF — click to enable"}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold border transition-colors ${
+            settings.debugMode
+              ? "bg-amber-500 border-amber-500 text-white"
+              : "bg-white border-gray-300 text-gray-400 hover:border-gray-400 hover:text-gray-600"
+          }`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+            <path fillRule="evenodd" d="M6.28 5.22a.75.75 0 0 1 0 1.06L2.56 10l3.72 3.72a.75.75 0 0 1-1.06 1.06L1 10.53a.75.75 0 0 1 0-1.06l4.22-4.25a.75.75 0 0 1 1.06 0Zm7.44 0a.75.75 0 0 1 1.06 0l4.22 4.22a.75.75 0 0 1 0 1.06l-4.22 4.22a.75.75 0 0 1-1.06-1.06L17.44 10l-3.72-3.72a.75.75 0 0 1 0-1.06ZM11.377 2.011a.75.75 0 0 1 .612.867l-2.5 14.5a.75.75 0 0 1-1.478-.255l2.5-14.5a.75.75 0 0 1 .866-.612Z" clipRule="evenodd" />
+          </svg>
+          {settings.debugMode && <span>DEBUG</span>}
+        </button>
+      </div>
     </nav>
   );
 }

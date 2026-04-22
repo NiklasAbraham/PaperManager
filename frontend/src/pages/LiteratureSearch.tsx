@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
-import type { LitPaper, LiteratureSseEvent } from "../types";
-import { searchLiterature, ingestFromUrl } from "../api/client";
+import { useEffect, useRef, useState } from "react";
+import type { LitPaper, LiteratureSseEvent, T_IngestOut } from "../types";
+import { searchLiterature, getLiteratureKeywords, putLiteratureKeywords } from "../api/client";
+import UploadConfirmModal from "../components/UploadConfirmModal";
+import { useAppSettings } from "../contexts/SettingsContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -126,6 +128,7 @@ function PaperCard({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function LiteratureSearch() {
+  const { settings } = useAppSettings();
   const [days, setDays] = useState(7);
   const [maxPerSource, setMaxPerSource] = useState(100);
   const [sources, setSources] = useState<Record<string, boolean>>({
@@ -139,6 +142,33 @@ export default function LiteratureSearch() {
   const [currentlySearching, setCurrentlySearching] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Keywords editor
+  const [kwText, setKwText] = useState<string>("");
+  const [kwEditing, setKwEditing] = useState(false);
+  const [kwSaving, setKwSaving] = useState(false);
+  const [kwDraft, setKwDraft] = useState<string>("");
+
+  useEffect(() => {
+    getLiteratureKeywords().then(r => setKwText(r.content)).catch(() => {});
+  }, []);
+
+  async function saveKeywords() {
+    setKwSaving(true);
+    try {
+      const r = await putLiteratureKeywords(kwDraft);
+      setKwText(r.content);
+      setKwEditing(false);
+    } finally {
+      setKwSaving(false);
+    }
+  }
+
+  // Parsed keyword list for display (non-comment, non-empty lines)
+  const kwList = kwText
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith("#"));
 
   const activeSources = Object.entries(sources)
     .filter(([, v]) => v)
@@ -193,33 +223,28 @@ export default function LiteratureSearch() {
     abortRef.current?.abort();
   }
 
-  // ── Import handler ──────────────────────────────────────────────────────────
+  // ── Import modal state ───────────────────────────────────────────────────────
 
-  async function handleImport(paper: ResultPaper) {
+  const [importingPaper, setImportingPaper] = useState<ResultPaper | null>(null);
+
+  function handleImport(paper: ResultPaper) {
+    setImportingPaper(paper);
+  }
+
+  function handleImportConfirmed(result: T_IngestOut) {
+    if (!importingPaper) return;
     setResults(prev =>
       prev.map(p =>
-        p.url === paper.url ? { ...p, _importState: "importing" } : p
+        p.url === importingPaper.url
+          ? { ...p, _importState: "done", _inLibrary: true, _importedId: result.id }
+          : p
       )
     );
-    try {
-      await ingestFromUrl(paper.url);
-      setResults(prev =>
-        prev.map(p =>
-          p.url === paper.url
-            ? { ...p, _importState: "done", _inLibrary: true }
-            : p
-        )
-      );
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setResults(prev =>
-        prev.map(p =>
-          p.url === paper.url
-            ? { ...p, _importState: "error", _importError: msg }
-            : p
-        )
-      );
-    }
+    setImportingPaper(null);
+  }
+
+  function handleImportCancel() {
+    setImportingPaper(null);
   }
 
   // ── Group results by source ─────────────────────────────────────────────────
@@ -240,71 +265,155 @@ export default function LiteratureSearch() {
       {/* Controls bar */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex flex-wrap items-end gap-4">
-          {/* Days selector */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">Date range</label>
-            <select
-              value={days}
-              onChange={e => setDays(Number(e.target.value))}
-              disabled={status === "searching"}
-              className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
-            >
-              <option value={7}>Last 7 days</option>
-              <option value={14}>Last 14 days</option>
-              <option value={30}>Last 30 days</option>
-            </select>
-          </div>
+          <div className="flex min-w-0 flex-1 flex-wrap items-end gap-4">
+            {/* Days selector */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-500 font-medium">Date range</label>
+              <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-1 shadow-sm">
+                {[
+                  { value: 7, label: "7d" },
+                  { value: 14, label: "14d" },
+                  { value: 30, label: "30d" },
+                ].map((option) => {
+                  const selected = days === option.value;
 
-          {/* Max per source */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">Max per source</label>
-            <select
-              value={maxPerSource}
-              onChange={e => setMaxPerSource(Number(e.target.value))}
-              disabled={status === "searching"}
-              className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
-            >
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
-            </select>
-          </div>
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setDays(option.value)}
+                      disabled={status === "searching"}
+                      aria-pressed={selected}
+                      className={`min-w-[64px] rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                        selected
+                          ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200"
+                          : "text-gray-500 hover:text-gray-700"
+                      } ${status === "searching" ? "cursor-not-allowed opacity-50" : ""}`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
 
-          {/* Source toggles */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">Sources</label>
-            <div className="flex gap-2">
-              {Object.entries(SOURCE_META).map(([key, meta]) => (
-                <label
-                  key={key}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium cursor-pointer transition-colors ${
-                    sources[key]
-                      ? `${meta.bg} ${meta.color} border-transparent`
-                      : "bg-white text-gray-500 border-gray-300"
-                  } ${status === "searching" ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
+                <div className="flex items-center gap-2 rounded-lg border border-transparent bg-white/80 px-2 py-1 ring-1 ring-gray-200">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-400">Custom</span>
                   <input
-                    type="checkbox"
-                    className="hidden"
-                    checked={!!sources[key]}
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={days}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      if (Number.isFinite(next) && next > 0) setDays(next);
+                    }}
                     disabled={status === "searching"}
-                    onChange={e =>
-                      setSources(prev => ({ ...prev, [key]: e.target.checked }))
-                    }
+                    className="w-20 border-0 bg-transparent p-0 text-sm font-medium text-gray-700 focus:outline-none focus:ring-0"
                   />
-                  {meta.label}
-                </label>
-              ))}
+                  <span className="text-xs font-medium text-gray-400">days</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Max per source */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-500 font-medium">Max per source</label>
+              <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-1 shadow-sm">
+                {[50, 100, 200].map((value) => {
+                  const selected = maxPerSource === value;
+
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setMaxPerSource(value)}
+                      disabled={status === "searching"}
+                      aria-pressed={selected}
+                      className={`min-w-[58px] rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                        selected
+                          ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200"
+                          : "text-gray-500 hover:text-gray-700"
+                      } ${status === "searching" ? "cursor-not-allowed opacity-50" : ""}`}
+                    >
+                      {value}
+                    </button>
+                  );
+                })}
+
+                <div className="flex items-center gap-2 rounded-lg border border-transparent bg-white/80 px-2 py-1 ring-1 ring-gray-200">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-400">Custom</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={maxPerSource}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      if (Number.isFinite(next) && next > 0) setMaxPerSource(next);
+                    }}
+                    disabled={status === "searching"}
+                    className="w-20 border-0 bg-transparent p-0 text-sm font-medium text-gray-700 focus:outline-none focus:ring-0"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Source toggles */}
+            <div className="flex min-w-0 flex-col gap-1">
+              <label className="text-xs text-gray-500 font-medium">Sources</label>
+              <div className="flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-gray-50 p-1 shadow-sm">
+                {Object.entries(SOURCE_META).map(([key, meta]) => (
+                  <label
+                    key={key}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium cursor-pointer transition-colors ${
+                      sources[key]
+                        ? `${meta.bg} ${meta.color} border-transparent`
+                        : "bg-white text-gray-500 border-gray-300"
+                    } ${status === "searching" ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="hidden"
+                      checked={!!sources[key]}
+                      disabled={status === "searching"}
+                      onChange={e =>
+                        setSources(prev => ({ ...prev, [key]: e.target.checked }))
+                      }
+                    />
+                    {meta.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Keywords button */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-500 font-medium invisible">kw</label>
+              <button
+                onClick={() => { setKwDraft(kwText); setKwEditing(true); }}
+                className="flex h-[42px] items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:border-violet-200 hover:bg-white hover:text-violet-700"
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-violet-600 ring-1 ring-violet-100">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6-6 3 3-6 6H9v-3z" />
+                  </svg>
+                </span>
+                <span>Keywords</span>
+                {kwList.length > 0 && (
+                  <span className="ml-1 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-gray-500 ring-1 ring-gray-200">
+                    {kwList.length}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
 
           {/* Search / Stop button */}
-          <div className="flex flex-col gap-1">
+          <div className="ml-auto flex flex-col gap-1 self-end">
             <label className="text-xs text-gray-500 font-medium invisible">Action</label>
             {status === "searching" ? (
               <button
                 onClick={handleStop}
-                className="px-4 py-1.5 rounded text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
+                className="h-[42px] px-5 rounded-xl text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
               >
                 Stop
               </button>
@@ -312,17 +421,12 @@ export default function LiteratureSearch() {
               <button
                 onClick={handleSearch}
                 disabled={activeSources.length === 0}
-                className="px-4 py-1.5 rounded text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="h-[42px] px-5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Search
               </button>
             )}
           </div>
-
-          {/* Keywords note */}
-          <p className="text-xs text-gray-400 self-end pb-1.5">
-            Keywords: <code className="bg-gray-100 px-1 rounded">prompts/literature_search_keywords.txt</code>
-          </p>
         </div>
 
         {/* Status bar */}
@@ -406,6 +510,72 @@ export default function LiteratureSearch() {
           );
         })}
       </div>
+
+      {/* Import modal */}
+      {importingPaper && (
+        <UploadConfirmModal
+          file={null}
+          url={importingPaper.url}
+          meta={{
+            title: importingPaper.title,
+            authors: importingPaper.authors,
+            year: importingPaper.year,
+            doi: importingPaper.doi ?? undefined,
+            abstract: importingPaper.abstract ?? undefined,
+            metadata_source: importingPaper.source,
+          }}
+          onConfirmed={handleImportConfirmed}
+          onCancel={handleImportCancel}
+          debug={settings.debugMode}
+        />
+      )}
+
+      {/* Keywords modal */}
+      {kwEditing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl w-[500px] max-w-[95vw] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <h2 className="text-sm font-semibold text-gray-900">Edit search keywords</h2>
+              <button
+                onClick={() => setKwEditing(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-3">
+              <p className="text-xs text-gray-500">
+                One keyword or phrase per line. Lines starting with <code className="bg-gray-100 px-1 rounded">#</code> are comments and ignored. Terms are OR-ed and searched across arXiv, PubMed, and bioRxiv.
+              </p>
+              <textarea
+                value={kwDraft}
+                onChange={e => setKwDraft(e.target.value)}
+                rows={14}
+                autoFocus
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono bg-gray-50 resize-none w-full focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent"
+                placeholder="One keyword per line…"
+              />
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-100">
+              <button
+                onClick={() => setKwEditing(false)}
+                className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveKeywords}
+                disabled={kwSaving}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+              >
+                {kwSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

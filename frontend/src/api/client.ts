@@ -28,6 +28,7 @@ export async function uploadPdf(
   projectId?: string,
   captionMethod?: string,
   summaryInstructions?: string,
+  debug?: boolean,
 ): Promise<T_IngestOut> {
   const form = new FormData();
   form.append("file", file);
@@ -35,6 +36,7 @@ export async function uploadPdf(
   if (projectId) form.append("project_id", projectId);
   if (captionMethod) form.append("caption_method", captionMethod);
   if (summaryInstructions) form.append("summary_instructions", summaryInstructions);
+  if (debug) form.append("debug", "true");
   const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form });
   if (!res.ok) {
     const detail = await res.text();
@@ -43,12 +45,33 @@ export async function uploadPdf(
   return res.json();
 }
 
-export async function ingestFromUrl(url: string, projectId?: string): Promise<T_IngestOut> {
+export async function ingestFromUrl(url: string, projectId?: string, debug?: boolean): Promise<T_IngestOut> {
   return apiFetch<T_IngestOut>("/papers/from-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, project_id: projectId ?? null }),
+    body: JSON.stringify({ url, project_id: projectId ?? null, debug: debug ?? false }),
   });
+}
+
+export async function ingestFromUrlFull(url: string, projectId?: string, debug?: boolean): Promise<T_IngestOut> {
+  return apiFetch<T_IngestOut>("/papers/from-url-full", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, project_id: projectId ?? null, debug: debug ?? false }),
+  });
+}
+
+export async function deleteDebugPapers(): Promise<{ deleted: number; figures_deleted: number }> {
+  return apiFetch("/papers/debug-cleanup", { method: "DELETE" });
+}
+
+export async function countDebugPapers(): Promise<number> {
+  const res = await apiFetch<unknown[]>("/search?tag=debug&limit=500");
+  return Array.isArray(res) ? res.length : 0;
+}
+
+export async function regenerateSummary(paperId: string): Promise<{ summary: string }> {
+  return apiFetch(`/papers/${paperId}/regenerate-summary`, { method: "POST" });
 }
 
 export async function deletePaper(paperId: string): Promise<void> {
@@ -62,6 +85,7 @@ export async function deletePaper(paperId: string): Promise<void> {
 export async function updatePaper(paperId: string, data: Partial<{
   title: string; year: number | null; doi: string | null;
   abstract: string | null; summary: string | null; venue: string | null;
+  metadata_source: string | null;
   reading_status: string | null; rating: number | null;
   bookmarked: boolean | null; color: string | null;
 }>): Promise<Paper> {
@@ -146,11 +170,11 @@ export async function renameTopic(oldName: string, newName: string): Promise<voi
   });
 }
 
-export async function getOrCreatePerson(name: string): Promise<{id: string; name: string; affiliation?: string}> {
+export async function getOrCreatePerson(name: string, affiliation?: string, email?: string): Promise<{id: string; name: string; affiliation?: string; email?: string}> {
   return apiFetch("/people/get-or-create", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, affiliation: "" }),
+    body: JSON.stringify({ name, affiliation: affiliation ?? null, email: email ?? null }),
   });
 }
 
@@ -164,6 +188,10 @@ export async function linkPersonInvolves(paperId: string, personId: string, role
 
 export async function listPeople(): Promise<{id: string; name: string; affiliation?: string}[]> {
   return apiFetch("/people");
+}
+
+export async function fetchPaperInvolves(paperId: string): Promise<{id: string; name: string; affiliation?: string; role: string}[]> {
+  return apiFetch(`/papers/${paperId}/involves`);
 }
 
 export async function deletePerson(personId: string): Promise<void> {
@@ -296,6 +324,20 @@ export async function* bulkImport(
       }
     }
   }
+}
+
+// ── Literature keywords ───────────────────────────────────────────────────────
+
+export async function getLiteratureKeywords(): Promise<{ content: string }> {
+  return apiFetch("/literature/keywords");
+}
+
+export async function putLiteratureKeywords(content: string): Promise<{ content: string; keywords: string[] }> {
+  return apiFetch("/literature/keywords", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
 }
 
 // ── Literature search ─────────────────────────────────────────────────────────

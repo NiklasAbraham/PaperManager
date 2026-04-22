@@ -6,11 +6,12 @@ import type { ParsedMeta, T_IngestOut } from "../types";
 
 interface Props {
   onUploaded: (paper: T_IngestOut) => void;
+  debug?: boolean;
 }
 
 type Tab = "pdf" | "url";
 
-export default function PaperDrop({ onUploaded }: Props) {
+export default function PaperDrop({ onUploaded, debug }: Props) {
   const [open, setOpen]           = useState(false);
   const [tab, setTab]             = useState<Tab>("pdf");
   const [parsing, setParsing]     = useState(false);
@@ -62,7 +63,7 @@ export default function PaperDrop({ onUploaded }: Props) {
     setLoadingUrl(true);
     setError(null);
     try {
-      const paper = await ingestFromUrl(urlValue.trim());
+      const paper = await ingestFromUrl(urlValue.trim(), undefined, debug);
       setUrlValue("");
       setOpen(false);
       onUploaded(paper);
@@ -193,6 +194,7 @@ export default function PaperDrop({ onUploaded }: Props) {
           meta={parsedMeta}
           onConfirmed={handleConfirmed}
           onCancel={() => { setPendingFile(null); setParsedMeta(null); }}
+          debug={debug}
         />
       )}
     </>

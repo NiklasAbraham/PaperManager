@@ -69,9 +69,13 @@ async def test_update_paper(cleanup):
         create = await c.post(BASE, json={"title": "Old Title"})
         paper_id = create.json()["id"]
         cleanup.append(paper_id)
-        r = await c.patch(f"{BASE}/{paper_id}", json={"title": "New Title"})
+        r = await c.patch(
+            f"{BASE}/{paper_id}",
+            json={"title": "New Title", "metadata_source": "manual"},
+        )
     assert r.status_code == 200
     assert r.json()["title"] == "New Title"
+    assert r.json()["metadata_source"] == "manual"
 
 
 @pytest.mark.asyncio

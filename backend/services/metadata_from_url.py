@@ -290,3 +290,42 @@ def resolve_url(url: str) -> dict | None:
 
     log.warning("Could not identify URL type | url=%.80s", url)
     return None
+
+
+# ── PDF download ──────────────────────────────────────────────────────────────
+
+def fetch_pdf_bytes(url: str) -> bytes | None:
+    """
+    Try to download the PDF for an arXiv or bioRxiv/medRxiv URL.
+    Returns raw PDF bytes, or None if the source doesn't provide an open PDF.
+    """
+    url = url.strip()
+
+    # arXiv → https://arxiv.org/pdf/{id}
+    m = _ARXIV_URL.search(url) or _ARXIV_ID.match(url)
+    if m:
+        arxiv_id = re.sub(r"v\d+$", "", m.group(1))
+        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+        log.info("Downloading arXiv PDF | url=%s", pdf_url)
+        r = _get(pdf_url, timeout=60)
+        if r and r.headers.get("content-type", "").startswith("application/pdf"):
+            return r.content
+        log.warning("arXiv PDF download returned non-PDF content-type")
+        return None
+
+    # bioRxiv / medRxiv → {content_url}.full.pdf
+    m = _BIORXIV.search(url)
+    if m:
+        site = m.group(1)
+        doi_path = m.group(2)
+        # Extract version from URL if present (e.g. …123456v2)
+        ver_m = re.search(r"(v\d+)(?:[?#]|$)", url[url.find(doi_path):])
+        ver = ver_m.group(1) if ver_m else ""
+        pdf_url = f"https://www.{site}.org/content/{doi_path}{ver}.full.pdf"
+        log.info("Downloading %s PDF | url=%s", site, pdf_url)
+        r = _get(pdf_url, timeout=60)
+        if r and r.headers.get("content-type", "").startswith("application/pdf"):
+            return r.content
+        log.warning("%s PDF download returned non-PDF content-type", site)
+
+    return None

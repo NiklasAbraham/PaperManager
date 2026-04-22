@@ -61,6 +61,7 @@ async def upload(
     project_id: Optional[str] = Form(None),
     caption_method: Optional[str] = Form("ollama"),
     summary_instructions: Optional[str] = Form(None),
+    debug: bool = Form(False),
 ):
     """Full ingestion pipeline: PDF → metadata → Drive → summary → Neo4j."""
     pdf_bytes = await file.read()
@@ -163,6 +164,8 @@ async def upload(
 
     # Step 6b: Apply source tag
     tag_paper(driver, paper["id"], "pdf-upload")
+    if debug:
+        tag_paper(driver, paper["id"], "debug")
 
     # Step 7: Link authors (with affiliations)
     authors_detail = meta.get("authors_detail") or []
@@ -288,6 +291,11 @@ def ingest_from_url(body: IngestFromUrlBody):
 
     # Apply source tag
     tag_paper(driver, paper["id"], "from-url")
+    if body.debug:
+        tag_paper(driver, paper["id"], "debug")
+        log.info("DEBUG IMPORT (from-url) | id=%s | title=%.80s | meta=%s",
+                 paper["id"], paper.get("title"),
+                 {k: v for k, v in meta.items() if k != "raw_text"})
 
     authors_detail = meta.get("authors_detail") or []
     aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
@@ -335,6 +343,274 @@ def ingest_from_url(body: IngestFromUrlBody):
         "topics_auto_added": topics_added,
         "references_found": [],
     }
+
+
+@router.post("/from-url-full", response_model=IngestOut, status_code=status.HTTP_201_CREATED)
+async def ingest_from_url_full(body: IngestFromUrlBody):
+    """
+    Full ingestion pipeline triggered from a URL.
+    - arXiv / bioRxiv / medRxiv: downloads the open-access PDF and runs the complete
+      pipeline (Drive upload, full-text summary, figure extraction, reference extraction).
+    - PubMed / DOI / other: falls back to metadata-only ingest with abstract summary.
+    """
+    import asyncio as _asyncio
+    from services.metadata_from_url import fetch_pdf_bytes
+
+    # 1. Resolve metadata
+    meta = resolve_url(body.url)
+    if not meta or not meta.get("title"):
+        raise HTTPException(status_code=422, detail="Could not resolve metadata from the given URL")
+
+    # 2. Try to download PDF
+    try:
+        pdf_bytes = await _asyncio.to_thread(fetch_pdf_bytes, body.url)
+    except Exception as exc:
+        log.warning("PDF download failed (non-fatal) | url=%s | %s", body.url, exc)
+        pdf_bytes = None
+
+    driver = get_driver()
+
+    if pdf_bytes:
+        log.info("Full PDF pipeline | url=%.80s | size=%d bytes", body.url, len(pdf_bytes))
+        # Override extracted metadata with URL-resolved metadata (better quality)
+        pdf_meta = extract_metadata(pdf_bytes)
+        raw_text = pdf_meta.get("raw_text", "")
+        # Prefer URL-resolved fields (API metadata > heuristic PDF extraction)
+        merged = {**pdf_meta, **{k: v for k, v in meta.items() if v is not None and k != "raw_text"}}
+        merged["raw_text"] = raw_text
+
+        filename = f"{merged.get('title', 'paper')[:60]}.pdf"
+        try:
+            drive_file_id = upload_pdf(pdf_bytes, filename)
+        except Exception as exc:
+            log.error("Drive upload failed | %s", exc)
+            raise HTTPException(status_code=503, detail=f"Drive upload failed: {exc}")
+
+        summary = None
+        try:
+            summary = summarize_paper(raw_text, merged.get("title", ""))
+        except Exception as exc:
+            log.warning("Summary failed (non-fatal) | %s", exc)
+
+        existing = find_duplicate(driver, doi=merged.get("doi"), title=merged.get("title", ""))
+        if existing and existing.get("drive_file_id"):
+            import json as _json
+            raise HTTPException(status_code=409, detail=_json.dumps({
+                "message": "Paper already exists in your library",
+                "existing_id": existing["id"],
+                "existing_title": existing.get("title", ""),
+            }))
+
+        save_data = {
+            "title": merged.get("title", ""),
+            "year": merged.get("year"),
+            "doi": merged.get("doi"),
+            "abstract": merged.get("abstract"),
+            "summary": summary,
+            "drive_file_id": drive_file_id,
+            "citation_count": merged.get("citation_count"),
+            "metadata_source": merged.get("metadata_source", "url"),
+            "raw_text": raw_text,
+            "venue": merged.get("venue"),
+        }
+        paper = merge_paper_by_doi(driver, save_data) if merged.get("doi") else create_paper(driver, save_data)
+        tag_paper(driver, paper["id"], "from-url")
+        if body.debug:
+            tag_paper(driver, paper["id"], "debug")
+            log.info("DEBUG IMPORT (from-url-full PDF) | id=%s | title=%.80s | meta=%s",
+                     paper["id"], paper.get("title"),
+                     {k: v for k, v in merged.items() if k not in ("raw_text", "authors_detail")})
+
+        authors_detail = merged.get("authors_detail") or []
+        aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+        missing = [n for n in merged.get("authors", []) if n and not aff_map.get(n)]
+        if missing and raw_text:
+            try:
+                aff_map.update(extract_affiliations_with_ollama(missing, raw_text))
+            except Exception:
+                pass
+
+        authors_saved = []
+        for name in merged.get("authors", []):
+            if not name:
+                continue
+            person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+            link_author(driver, paper["id"], person["id"])
+            authors_saved.append(name)
+
+        topics_added = []
+        for topic_name in merged.get("topics", []):
+            if not topic_name:
+                continue
+            topic = get_or_create_topic(driver, topic_name)
+            link_paper_topic(driver, paper["id"], topic["id"])
+            topics_added.append(topic_name)
+        try:
+            ai_topics = suggest_topics(title=merged.get("title", ""), abstract=merged.get("abstract", "") or "", summary=summary or "")
+            for t in ai_topics:
+                if t and t not in topics_added:
+                    link_paper_topic(driver, paper["id"], t)
+                    topics_added.append(t)
+        except Exception:
+            pass
+
+        if body.project_id:
+            try:
+                add_paper_to_project(driver, body.project_id, paper["id"])
+            except Exception:
+                pass
+
+        references_found = []
+        try:
+            references_found = extract_references(raw_text, merged.get("doi"))
+        except Exception as exc:
+            log.warning("Reference extraction failed (non-fatal) | %s", exc)
+
+        try:
+            figs = extract_figures(pdf_bytes, caption_method="ollama")
+            for i, fig in enumerate(figs):
+                fig_filename = f"{paper['id']}_p{fig['page_number']}_{i+1}.png"
+                fig_drive_id = upload_image(fig["image_bytes"], fig_filename)
+                create_figure(driver, {
+                    "paper_id": paper["id"],
+                    "figure_number": fig["figure_number"],
+                    "caption": fig["caption"],
+                    "drive_file_id": fig_drive_id,
+                    "page_number": fig["page_number"],
+                })
+            log.info("Figures extracted | count=%d | paper_id=%s", len(figs), paper["id"])
+        except Exception as exc:
+            log.warning("Figure extraction failed (non-fatal) | %s", exc)
+
+        return {
+            **paper,
+            "drive_url": get_file_url(drive_file_id),
+            "authors": authors_saved,
+            "topics_auto_added": topics_added,
+            "references_found": references_found,
+            "pdf_fetched": True,
+        }
+
+    else:
+        # No PDF available — fall back to metadata-only (same as /from-url)
+        log.info("No PDF available, falling back to metadata-only | url=%.80s", body.url)
+        summary = None
+        if meta.get("abstract"):
+            try:
+                summary = summarize_paper(meta["abstract"], meta.get("title", ""))
+            except Exception as exc:
+                log.warning("Summary failed (non-fatal) | %s", exc)
+
+        paper = merge_paper_by_doi(driver, {
+            "title": meta.get("title", ""),
+            "year": meta.get("year"),
+            "doi": meta.get("doi"),
+            "abstract": meta.get("abstract"),
+            "summary": summary,
+            "drive_file_id": None,
+            "citation_count": meta.get("citation_count"),
+            "metadata_source": meta.get("metadata_source", "url"),
+            "raw_text": "",
+            "venue": meta.get("venue"),
+        })
+        tag_paper(driver, paper["id"], "from-url")
+        if body.debug:
+            tag_paper(driver, paper["id"], "debug")
+            log.info("DEBUG IMPORT (from-url-full fallback) | id=%s | title=%.80s | meta=%s",
+                     paper["id"], paper.get("title"),
+                     {k: v for k, v in meta.items() if k != "raw_text"})
+
+        authors_saved = []
+        for name in meta.get("authors", []):
+            if not name:
+                continue
+            person = get_or_create_person_with_affiliation(driver, name, None)
+            link_author(driver, paper["id"], person["id"])
+            authors_saved.append(name)
+
+        topics_added = []
+        for topic_name in meta.get("topics", []):
+            if not topic_name:
+                continue
+            topic = get_or_create_topic(driver, topic_name)
+            link_paper_topic(driver, paper["id"], topic["id"])
+            topics_added.append(topic_name)
+        try:
+            ai_topics = suggest_topics(title=meta.get("title", ""), abstract=meta.get("abstract", "") or "", summary=summary or "")
+            for t in ai_topics:
+                if t and t not in topics_added:
+                    link_paper_topic(driver, paper["id"], t)
+                    topics_added.append(t)
+        except Exception:
+            pass
+
+        if body.project_id:
+            try:
+                add_paper_to_project(driver, body.project_id, paper["id"])
+            except Exception:
+                pass
+
+        references_found = []
+        try:
+            references_found = extract_references("", meta.get("doi"))
+        except Exception as exc:
+            log.warning("Reference extraction failed (non-fatal) | %s", exc)
+
+        return {
+            **paper,
+            "drive_url": None,
+            "authors": authors_saved,
+            "topics_auto_added": topics_added,
+            "references_found": references_found,
+            "pdf_fetched": False,
+        }
+
+
+@router.delete("/debug-cleanup")
+def debug_cleanup():
+    """Delete all papers tagged 'debug' (figures, Drive files, notes, Neo4j nodes)."""
+    driver = get_driver()
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Paper)-[:TAGGED]->(t:Tag {name: 'debug'}) "
+            "RETURN p.id AS id, p.drive_file_id AS drive_file_id",
+        )
+        debug_papers = [{"id": r["id"], "drive_file_id": r["drive_file_id"]} for r in result]
+
+    deleted = 0
+    figures_deleted = 0
+    for p in debug_papers:
+        paper_id = p["id"]
+        # Delete figures from Drive + Neo4j
+        figs = list_figures(driver, paper_id)
+        for fig in figs:
+            if fig.get("drive_file_id"):
+                try:
+                    delete_file(fig["drive_file_id"])
+                except Exception as exc:
+                    log.warning("Figure Drive delete failed | %s", exc)
+        if figs:
+            delete_figures_for_paper(driver, paper_id)
+            figures_deleted += len(figs)
+        # Delete note
+        with driver.session() as session:
+            session.run(
+                "MATCH (n:Note)-[:ABOUT]->(p:Paper {id: $id}) DETACH DELETE n",
+                id=paper_id,
+            )
+        # Delete PDF from Drive
+        if p.get("drive_file_id"):
+            try:
+                delete_file(p["drive_file_id"])
+            except Exception as exc:
+                log.warning("Drive delete failed (non-fatal) | %s", exc)
+        # Delete paper node
+        delete_paper(driver, paper_id)
+        deleted += 1
+        log.info("DEBUG cleanup deleted | id=%s", paper_id)
+
+    log.info("Debug cleanup complete | papers=%d | figures=%d", deleted, figures_deleted)
+    return {"deleted": deleted, "figures_deleted": figures_deleted}
 
 
 @router.get("/random", response_model=PaperOut)
@@ -404,6 +680,22 @@ def delete(paper_id: str):
 
     delete_paper(driver, paper_id)
     log.info("Paper deleted | id=%s | title=%.60s", paper_id, paper.get("title"))
+
+
+@router.post("/{paper_id}/regenerate-summary")
+def regenerate_summary(paper_id: str):
+    """Re-generate the AI summary for a single paper using its stored raw_text."""
+    from services.ai import summarize_paper
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    raw_text = paper.get("raw_text") or ""
+    if not raw_text.strip():
+        raise HTTPException(status_code=422, detail="No extracted text available for this paper")
+    summary = summarize_paper(raw_text, paper.get("title", ""))
+    updated = update_paper(driver, paper_id, {"summary": summary})
+    return {"summary": updated.get("summary") if updated else summary}
 
 
 @router.get("/{paper_id}/note", response_model=NoteOut)

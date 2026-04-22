@@ -116,6 +116,7 @@ export interface T_IngestOut extends Paper {
   authors: string[];
   topics_auto_added: string[];
   references_found: Reference[];
+  pdf_fetched?: boolean;  // undefined = legacy upload (assume true); false = no PDF available
 }
 
 // ── Figures ───────────────────────────────────────────────────────────────────

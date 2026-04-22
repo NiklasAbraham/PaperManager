@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor } from "../api/client";
+import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
 import { useAppSettings } from "../contexts/SettingsContext";
-import type { Paper, Person, Topic, Tag, Reference, Figure } from "../types";
+import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData } from "../types";
+
+const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
+  paper: "#7c3aed", person: "#2563eb", topic: "#16a34a",
+  tag: "#d97706", project: "#db2777", note: "#6b7280", unknown: "#9ca3af",
+};
 
 interface PaperFull extends Paper {
   authors?: Person[];
@@ -25,7 +30,7 @@ export default function PaperDetail() {
   const [newTag, setNewTag]   = useState("");
   const [newTopic, setNewTopic] = useState("");
   const [tab, setTab]           = useState<RightTab>("notes");
-  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures">("abstract");
+  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "graph" | "people" | "meta">("abstract");
   // Figures
   const [figures, setFigures]         = useState<Figure[]>([]);
   const [figuresLoaded, setFiguresLoaded] = useState(false);
@@ -36,8 +41,17 @@ export default function PaperDetail() {
   const [figureAnswer, setFigureAnswer]     = useState<string | null>(null);
   const [figureAnswering, setFigureAnswering] = useState(false);
   const [figureModel, setFigureModel]       = useState<"claude" | "claude-work">("claude");
+  // Graph tab
+  const [graphData, setGraphData]   = useState<GraphData | null>(null);
+  const [graphLoaded, setGraphLoaded] = useState(false);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+  const graphInstanceRef  = useRef<unknown>(null);
+
+  // People tab
+  const [involves, setInvolves] = useState<{id: string; name: string; affiliation?: string; role: string}[]>([]);
+  const [involvesLoaded, setInvolvesLoaded] = useState(false);
+
   const { settings } = useAppSettings();
-  const [metaOpen, setMetaOpen] = useState(true);
   const [rightWidth, setRightWidth] = useState(320);
   const dragging = useRef(false);
   const [references, setReferences] = useState<Reference[]>([]);
@@ -77,10 +91,108 @@ export default function PaperDetail() {
     }
   }, [leftTab, id, figuresLoaded]);
 
+  // Load involves lazily when people tab is first opened
+  useEffect(() => {
+    if (leftTab === "people" && id && !involvesLoaded) {
+      fetchPaperInvolves(id).then((data) => { setInvolves(data); setInvolvesLoaded(true); }).catch(() => setInvolvesLoaded(true));
+    }
+  }, [leftTab, id, involvesLoaded]);
+
+  // Load graph lazily when graph tab is first opened
+  useEffect(() => {
+    if (leftTab === "graph" && id && !graphLoaded) {
+      fetchGraph(`paper&id=${id}`).then((data) => { setGraphData(data); setGraphLoaded(true); }).catch(() => setGraphLoaded(true));
+    }
+  }, [leftTab, id, graphLoaded]);
+
+  // Build force-graph when graph data is ready
+  useEffect(() => {
+    if (!graphLoaded || !graphData || graphData.nodes.length === 0 || !graphContainerRef.current) return;
+
+    import("force-graph").then(({ default: ForceGraph }) => {
+      if (graphInstanceRef.current) {
+        (graphInstanceRef.current as { _destructor?: () => void })?._destructor?.();
+        if (graphContainerRef.current) graphContainerRef.current.innerHTML = "";
+      }
+      if (!graphContainerRef.current) return;
+
+      const w = graphContainerRef.current.clientWidth;
+      const h = graphContainerRef.current.clientHeight;
+
+      const graph = ForceGraph()(graphContainerRef.current)
+        .width(w)
+        .height(h)
+        .backgroundColor("#f9fafb")
+        .nodeId("id")
+        .nodeLabel((n: unknown) => (n as { label?: string }).label ?? "")
+        .nodeColor((n: unknown) => PAPER_GRAPH_NODE_COLORS[(n as { type?: string }).type ?? "unknown"] ?? PAPER_GRAPH_NODE_COLORS.unknown)
+        .nodeRelSize(6)
+        .nodeCanvasObjectMode(() => "after")
+        .nodeCanvasObject((node: unknown, ctx: CanvasRenderingContext2D, globalScale: number) => {
+          const n = node as { label?: string; x?: number; y?: number };
+          if (!n.label || typeof n.x !== "number" || typeof n.y !== "number") return;
+          const fontSize = Math.max(10 / globalScale, 2.5);
+          ctx.font = `${fontSize}px Inter, sans-serif`;
+          const display = n.label.length > 22 ? n.label.slice(0, 21) + "…" : n.label;
+          const tw = ctx.measureText(display).width;
+          const px = n.x, py = n.y + 6 + fontSize * 0.9;
+          ctx.fillStyle = "rgba(249,250,251,0.85)";
+          ctx.fillRect(px - tw / 2 - 2, py - fontSize / 2 - 1, tw + 4, fontSize + 2);
+          ctx.fillStyle = "#1e293b";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(display, px, py);
+        })
+        .linkColor(() => "#cbd5e1")
+        .linkWidth(1.5)
+        .linkDirectionalArrowLength(6)
+        .linkDirectionalArrowRelPos(1)
+        .linkCanvasObjectMode(() => "after")
+        .linkCanvasObject((link: unknown, ctx: CanvasRenderingContext2D, globalScale: number) => {
+          const l = link as { type?: string; source?: { x?: number; y?: number }; target?: { x?: number; y?: number } };
+          const label = l.type ?? "";
+          if (!label) return;
+          const src = l.source, tgt = l.target;
+          if (!src || !tgt || typeof src.x !== "number" || typeof tgt.x !== "number") return;
+          const midX = (src.x! + tgt.x!) / 2;
+          const midY = (src.y! + tgt.y!) / 2;
+          const fontSize = Math.max(9 / globalScale, 2);
+          ctx.font = `${fontSize}px Inter, sans-serif`;
+          const tw = ctx.measureText(label).width;
+          ctx.fillStyle = "rgba(249,250,251,0.85)";
+          ctx.fillRect(midX - tw / 2 - 2, midY - fontSize / 2 - 1, tw + 4, fontSize + 2);
+          ctx.fillStyle = "#64748b";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(label, midX, midY);
+        })
+        .onNodeClick((n: unknown) => {
+          const node = n as { type?: string; id?: string };
+          if (node.type === "paper" && node.id && node.id !== id) navigate(`/paper/${node.id}`);
+        })
+        .graphData({
+          nodes: graphData.nodes.map((n) => ({ ...n })),
+          links: graphData.links.map((l) => ({ ...l })),
+        });
+
+      graphInstanceRef.current = graph;
+    });
+
+    return () => {
+      if (graphInstanceRef.current) {
+        (graphInstanceRef.current as { _destructor?: () => void })?._destructor?.();
+        graphInstanceRef.current = null;
+      }
+    };
+  }, [graphData, graphLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [figuresExtractMsg, setFiguresExtractMsg] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  // Inline meta editing
+  const [metaEdit, setMetaEdit] = useState<Partial<{ title: string; year: string; doi: string; venue: string; abstract: string }>>({});
 
   const EXTRACT_STEPS = ["Loading model…", "Rendering pages…", "Detecting figures…", "Saving images…"];
 
@@ -238,6 +350,40 @@ export default function PaperDetail() {
       setConfirmDelete(false);
       alert(e instanceof Error ? e.message : "Delete failed");
     }
+  };
+
+  const saveModalMetadata = async (next: { tags: string[]; topics: string[] }) => {
+    if (!id) return { tags, topics };
+
+    const currentTagNames = tags.map((tag) => tag.name);
+    const currentTopicNames = topics.map((topic) => topic.name);
+
+    const tagsToAdd = next.tags.filter((name) => !currentTagNames.includes(name));
+    const tagsToRemove = currentTagNames.filter((name) => !next.tags.includes(name));
+    const topicsToAdd = next.topics.filter((name) => !currentTopicNames.includes(name));
+    const topicsToRemove = currentTopicNames.filter((name) => !next.topics.includes(name));
+
+    await Promise.all([
+      ...tagsToAdd.map((name) => apiFetch(`/papers/${id}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      })),
+      ...tagsToRemove.map((name) => apiFetch(`/papers/${id}/tags/${encodeURIComponent(name)}`, { method: "DELETE" })),
+      ...topicsToAdd.map((name) => apiFetch(`/papers/${id}/topics`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      })),
+      ...topicsToRemove.map((name) => apiFetch(`/papers/${id}/topics/${encodeURIComponent(name)}`, { method: "DELETE" })),
+    ]);
+
+    const [nextTags, nextTopics] = await Promise.all([
+      apiFetch<Tag[]>(`/papers/${id}/tags`),
+      apiFetch<Topic[]>(`/papers/${id}/topics`),
+    ]);
+
+    return { tags: nextTags, topics: nextTopics };
   };
 
   const addTag = async () => {
@@ -444,6 +590,36 @@ export default function PaperDetail() {
             >
               {figuresLoaded && figures.length > 0 ? `Figures (${figures.length})` : "Figures"}
             </button>
+            <button
+              onClick={() => setLeftTab("graph")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "graph"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Graph
+            </button>
+            <button
+              onClick={() => setLeftTab("people")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "people"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              People
+            </button>
+            <button
+              onClick={() => setLeftTab("meta")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "meta"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Metadata
+            </button>
             {driveUrl && (
               <a
                 href={driveUrl}
@@ -562,6 +738,298 @@ export default function PaperDetail() {
               allow="autoplay"
               title="PDF viewer"
             />
+          )}
+
+          {/* People tab */}
+          {leftTab === "people" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-5 space-y-6">
+
+                {/* Authors */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Authors</p>
+                  {authors.length === 0 ? (
+                    <p className="text-xs text-gray-400">No authors recorded.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {authors.map((a) => (
+                        <div key={a.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-4 py-3">
+                          <div>
+                            <Link to="/people" className="text-sm font-medium text-gray-800 hover:text-violet-600 transition-colors">
+                              {a.name}
+                            </Link>
+                            {a.affiliation && (
+                              <p className="text-xs text-gray-400 mt-0.5">{a.affiliation}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-medium bg-violet-100 text-violet-600 px-2 py-0.5 rounded-full">author</span>
+                            <button
+                              onClick={async () => {
+                                if (!id) return;
+                                await removeAuthor(id, a.id);
+                                setAuthors((prev) => prev.filter((p) => p.id !== a.id));
+                              }}
+                              title="Remove from paper"
+                              className="text-gray-300 hover:text-red-400 transition-colors text-sm leading-none"
+                            >×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Involved people */}
+                {involvesLoaded && involves.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Involved</p>
+                    <div className="space-y-2">
+                      {involves.map((p) => (
+                        <div key={`${p.id}-${p.role}`} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-4 py-3">
+                          <div>
+                            <Link to="/people" className="text-sm font-medium text-gray-800 hover:text-violet-600 transition-colors">
+                              {p.name}
+                            </Link>
+                            {p.affiliation && (
+                              <p className="text-xs text-gray-400 mt-0.5">{p.affiliation}</p>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-medium bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
+                            {p.role}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!involvesLoaded && <p className="text-xs text-gray-400">Loading…</p>}
+              </div>
+            </div>
+          )}
+
+          {/* Meta tab */}
+          {leftTab === "meta" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-xl mx-auto px-6 py-5 space-y-6">
+
+                {/* Editable fields */}
+                <MetaSection title="Paper info">
+                  <div className="space-y-2">
+                    {(["title", "year", "venue", "doi", "abstract"] as const).map((field) => {
+                      const currentVal = String(paper[field] ?? "");
+                      const editVal = metaEdit[field] ?? currentVal;
+                      const isDirty = editVal !== currentVal;
+                      return (
+                        <div key={field}>
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">{field}</p>
+                          {field === "abstract" ? (
+                            <textarea
+                              value={editVal}
+                              onChange={(e) => setMetaEdit((s) => ({ ...s, [field]: e.target.value }))}
+                              onBlur={async () => {
+                                if (!isDirty || !id) return;
+                                const updated = await updatePaper(id, { [field]: editVal || null });
+                                setPaper((p) => p ? { ...p, ...updated } : p);
+                                setMetaEdit((s) => { const n = { ...s }; delete n[field]; return n; });
+                              }}
+                              rows={4}
+                              className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 resize-none"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={editVal}
+                              onChange={(e) => setMetaEdit((s) => ({ ...s, [field]: e.target.value }))}
+                              onBlur={async () => {
+                                if (!isDirty || !id) return;
+                                const val = field === "year" ? (editVal ? Number(editVal) : null) : (editVal || null);
+                                const updated = await updatePaper(id, { [field]: val });
+                                setPaper((p) => p ? { ...p, ...updated } : p);
+                                setMetaEdit((s) => { const n = { ...s }; delete n[field]; return n; });
+                              }}
+                              className={`w-full text-xs border rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 ${isDirty ? "border-violet-300 bg-violet-50" : "border-gray-200"}`}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                    {paper.citation_count != null && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Citations</p>
+                        <p className="text-xs text-gray-600">{paper.citation_count.toLocaleString()}</p>
+                      </div>
+                    )}
+                    {paper.metadata_source && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Metadata source</p>
+                        <p className="text-xs text-gray-600">{paper.metadata_source}</p>
+                      </div>
+                    )}
+                  </div>
+                </MetaSection>
+
+                {/* AI Summary */}
+                <MetaSection title="AI Summary">
+                  <button
+                    onClick={async () => {
+                      if (!id || regenerating) return;
+                      setRegenerating(true);
+                      try {
+                        const res = await regenerateSummary(id);
+                        setPaper((p) => p ? { ...p, summary: res.summary } : p);
+                      } catch (e) {
+                        alert(e instanceof Error ? e.message : "Failed to regenerate summary");
+                      } finally {
+                        setRegenerating(false);
+                      }
+                    }}
+                    disabled={regenerating}
+                    className="text-xs px-3 py-1.5 bg-violet-50 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 font-medium"
+                  >
+                    {regenerating ? "Regenerating…" : "✦ Re-generate summary with AI"}
+                  </button>
+                  {!paper.summary && !regenerating && (
+                    <p className="text-xs text-gray-400 mt-1">No summary yet.</p>
+                  )}
+                </MetaSection>
+
+                {/* Topics */}
+                <MetaSection title="Topics">
+                  <div className="flex flex-wrap gap-1">
+                    {topics.map((t) => (
+                      <span key={t.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                        {t.name}
+                      </span>
+                    ))}
+                  </div>
+                  <InlineAdd value={newTopic} onChange={setNewTopic} onAdd={addTopic} placeholder="Add topic…" />
+                  <button
+                    onClick={handleSuggestTopics}
+                    disabled={suggestingTopics}
+                    className="mt-1.5 w-full text-xs py-1 px-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 disabled:opacity-50 flex items-center justify-center gap-1"
+                  >
+                    {suggestingTopics ? "Asking Claude…" : "✦ Suggest topics with AI"}
+                  </button>
+                  {topicSuggestOpen && !suggestingTopics && (
+                    <div className="mt-2 border border-blue-200 rounded-lg overflow-hidden">
+                      <div className="bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 flex justify-between">
+                        <span>Topic suggestions</span>
+                        <button onClick={() => setTopicSuggestOpen(false)} className="text-blue-400 hover:text-blue-700">×</button>
+                      </div>
+                      <div className="p-3 space-y-2">
+                        <div className="flex flex-wrap gap-1">
+                          {suggestedTopics.map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setSelectedSugTopics((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; })}
+                              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                                topics.map((x) => x.name).includes(t)
+                                  ? "border-gray-200 text-gray-400 cursor-default"
+                                  : selectedSugTopics.has(t)
+                                  ? "bg-blue-600 text-white border-blue-600"
+                                  : "border-dashed border-blue-400 text-blue-600 hover:bg-blue-50"
+                              }`}
+                            >
+                              {topics.map((x) => x.name).includes(t) ? "✓ " : "+ "}{t}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={applyTopicSuggestions}
+                          disabled={selectedSugTopics.size === 0}
+                          className="w-full text-xs py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          Apply {selectedSugTopics.size} topic{selectedSugTopics.size !== 1 ? "s" : ""}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </MetaSection>
+
+                {/* Tags */}
+                <MetaSection title="Tags">
+                  <div className="flex flex-wrap gap-1">
+                    {tags.map((t) => (
+                      <span key={t.id} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                        {t.name}
+                      </span>
+                    ))}
+                  </div>
+                  <InlineAdd value={newTag} onChange={setNewTag} onAdd={addTag} placeholder="Add tag…" />
+                  <button
+                    onClick={handleSuggestTags}
+                    disabled={suggestingTags}
+                    className="mt-1.5 w-full text-xs py-1 px-2 bg-violet-50 text-violet-600 rounded hover:bg-violet-100 disabled:opacity-50 flex items-center justify-center gap-1"
+                  >
+                    {suggestingTags ? "Asking Claude…" : "✦ Suggest tags with AI"}
+                  </button>
+                  {tagSuggestOpen && !suggestingTags && (
+                    <div className="mt-2 border border-violet-200 rounded-lg overflow-hidden">
+                      <div className="bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 flex justify-between">
+                        <span>Tag suggestions</span>
+                        <button onClick={() => setTagSuggestOpen(false)} className="text-violet-400 hover:text-violet-700">×</button>
+                      </div>
+                      <div className="p-3 space-y-2">
+                        {suggestedNew.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">New from AI</p>
+                            <div className="flex flex-wrap gap-1">
+                              {suggestedNew.map((t) => (
+                                <button key={t} onClick={() => setSelectedSugTags((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; })}
+                                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${selectedSugTags.has(t) ? "bg-violet-600 text-white border-violet-600" : "border-dashed border-violet-400 text-violet-600"}`}>
+                                  + {t}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">All tags</p>
+                          <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                            {allTagSuggestions.filter((t) => !tags.map((x) => x.name).includes(t)).map((t) => (
+                              <button key={t} onClick={() => setSelectedSugTags((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; })}
+                                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${selectedSugTags.has(t) ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400"}`}>
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <input value={newTagDraft} onChange={(e) => setNewTagDraft(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && newTagDraft.trim()) { const clean = newTagDraft.toLowerCase().replace(/\s+/g, "-"); setSelectedSugTags((p) => new Set([...p, clean])); setSuggestedNew((p) => [...p, clean]); setNewTagDraft(""); } }}
+                            placeholder="custom-tag" className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none" />
+                          <button onClick={() => { if (newTagDraft.trim()) { const clean = newTagDraft.toLowerCase().replace(/\s+/g, "-"); setSelectedSugTags((p) => new Set([...p, clean])); setSuggestedNew((p) => [...p, clean]); setNewTagDraft(""); } }}
+                            className="text-xs px-2 py-1 bg-gray-100 rounded hover:bg-gray-200">+</button>
+                        </div>
+                        <button onClick={applyTagSuggestions} disabled={selectedSugTags.size === 0}
+                          className="w-full text-xs py-1.5 bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50">
+                          Apply {selectedSugTags.size} tag{selectedSugTags.size !== 1 ? "s" : ""}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </MetaSection>
+              </div>
+            </div>
+          )}
+
+          {/* Graph tab */}
+          {leftTab === "graph" && (
+            <div className="flex-1 overflow-hidden relative bg-gray-50">
+              {!graphLoaded && (
+                <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400 z-10">
+                  Loading graph…
+                </div>
+              )}
+              {graphLoaded && graphData && graphData.nodes.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400">
+                  No connections yet.
+                </div>
+              )}
+              <div ref={graphContainerRef} className="w-full h-full" />
+            </div>
           )}
 
           {/* Figures tab */}
@@ -701,150 +1169,6 @@ export default function PaperDetail() {
 
         {/* RIGHT — metadata + notes/chat */}
         <div className="shrink-0 flex flex-col bg-white overflow-hidden" style={{ width: rightWidth }}>
-
-          {/* Metadata section (collapsible) */}
-          <div className="border-b border-gray-100">
-            <button
-              onClick={() => setMetaOpen((o) => !o)}
-              className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:bg-gray-50"
-            >
-              <span>Metadata</span>
-              <span className="text-gray-400">{metaOpen ? "▲" : "▼"}</span>
-            </button>
-
-            {metaOpen && (
-              <div className="px-4 pb-4 space-y-3 overflow-y-auto max-h-72">
-                {/* Topics */}
-                <MetaSection title="Topics">
-                  <div className="flex flex-wrap gap-1">
-                    {topics.map((t) => (
-                      <span key={t.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
-                        {t.name}
-                      </span>
-                    ))}
-                  </div>
-                  <InlineAdd value={newTopic} onChange={setNewTopic} onAdd={addTopic} placeholder="Add topic…" />
-                  <button
-                    onClick={handleSuggestTopics}
-                    disabled={suggestingTopics}
-                    className="mt-1.5 w-full text-xs py-1 px-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 disabled:opacity-50 flex items-center justify-center gap-1"
-                  >
-                    {suggestingTopics ? "Asking Claude…" : "✦ Suggest topics with AI"}
-                  </button>
-
-                  {topicSuggestOpen && !suggestingTopics && (
-                    <div className="mt-2 border border-blue-200 rounded-lg overflow-hidden">
-                      <div className="bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 flex justify-between">
-                        <span>Topic suggestions</span>
-                        <button onClick={() => setTopicSuggestOpen(false)} className="text-blue-400 hover:text-blue-700">×</button>
-                      </div>
-                      <div className="p-3 space-y-2">
-                        <div className="flex flex-wrap gap-1">
-                          {suggestedTopics.map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => setSelectedSugTopics((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; })}
-                              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                                topics.map((x) => x.name).includes(t)
-                                  ? "border-gray-200 text-gray-400 cursor-default"
-                                  : selectedSugTopics.has(t)
-                                  ? "bg-blue-600 text-white border-blue-600"
-                                  : "border-dashed border-blue-400 text-blue-600 hover:bg-blue-50"
-                              }`}
-                            >
-                              {topics.map((x) => x.name).includes(t) ? "✓ " : "+ "}{t}
-                            </button>
-                          ))}
-                        </div>
-                        <button
-                          onClick={applyTopicSuggestions}
-                          disabled={selectedSugTopics.size === 0}
-                          className="w-full text-xs py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                        >
-                          Apply {selectedSugTopics.size} topic{selectedSugTopics.size !== 1 ? "s" : ""}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </MetaSection>
-
-                {/* Tags */}
-                <MetaSection title="Tags">
-                  <div className="flex flex-wrap gap-1">
-                    {tags.map((t) => (
-                      <span key={t.id} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                        {t.name}
-                      </span>
-                    ))}
-                  </div>
-                  <InlineAdd value={newTag} onChange={setNewTag} onAdd={addTag} placeholder="Add tag…" />
-                  <button
-                    onClick={handleSuggestTags}
-                    disabled={suggestingTags}
-                    className="mt-1.5 w-full text-xs py-1 px-2 bg-violet-50 text-violet-600 rounded hover:bg-violet-100 disabled:opacity-50 flex items-center justify-center gap-1"
-                  >
-                    {suggestingTags ? "Asking Ollama…" : "✦ Suggest tags with AI"}
-                  </button>
-
-                  {/* Suggestion panel */}
-                  {tagSuggestOpen && !suggestingTags && (
-                    <div className="mt-2 border border-violet-200 rounded-lg overflow-hidden">
-                      <div className="bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 flex justify-between">
-                        <span>Tag suggestions</span>
-                        <button onClick={() => setTagSuggestOpen(false)} className="text-violet-400 hover:text-violet-700">×</button>
-                      </div>
-                      <div className="p-3 space-y-2">
-                        {suggestedNew.length > 0 && (
-                          <div>
-                            <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">New from AI</p>
-                            <div className="flex flex-wrap gap-1">
-                              {suggestedNew.map((t) => (
-                                <button key={t} onClick={() => setSelectedSugTags((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; })}
-                                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${selectedSugTags.has(t) ? "bg-violet-600 text-white border-violet-600" : "border-dashed border-violet-400 text-violet-600"}`}>
-                                  + {t}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">All tags</p>
-                          <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
-                            {allTagSuggestions.filter((t) => !tags.map((x) => x.name).includes(t)).map((t) => (
-                              <button key={t} onClick={() => setSelectedSugTags((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; })}
-                                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${selectedSugTags.has(t) ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400"}`}>
-                                {t}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        {/* Custom new tag */}
-                        <div className="flex gap-1">
-                          <input value={newTagDraft} onChange={(e) => setNewTagDraft(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter" && newTagDraft.trim()) { const clean = newTagDraft.toLowerCase().replace(/\s+/g, "-"); setSelectedSugTags((p) => new Set([...p, clean])); setSuggestedNew((p) => [...p, clean]); setNewTagDraft(""); } }}
-                            placeholder="custom-tag" className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none" />
-                          <button onClick={() => { if (newTagDraft.trim()) { const clean = newTagDraft.toLowerCase().replace(/\s+/g, "-"); setSelectedSugTags((p) => new Set([...p, clean])); setSuggestedNew((p) => [...p, clean]); setNewTagDraft(""); } }}
-                            className="text-xs px-2 py-1 bg-gray-100 rounded hover:bg-gray-200">+</button>
-                        </div>
-                        <button onClick={applyTagSuggestions} disabled={selectedSugTags.size === 0}
-                          className="w-full text-xs py-1.5 bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50">
-                          Apply {selectedSugTags.size} tag{selectedSugTags.size !== 1 ? "s" : ""}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </MetaSection>
-
-                {/* Confidence badge */}
-                {paper.metadata_source && (
-                  <p className="text-xs text-gray-400">
-                    Source: <span className="font-medium">{paper.metadata_source}</span>
-                    {paper.citation_count != null && ` · ${paper.citation_count.toLocaleString()} citations`}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
 
           {/* Tabs: Notes / Chat / References */}
           <div className="flex border-b border-gray-100 shrink-0">
@@ -1019,6 +1343,15 @@ export default function PaperDetail() {
       {editOpen && (
         <EditPaperModal
           paper={paper}
+          metadataEditor={{
+            tags,
+            topics,
+            onSave: saveModalMetadata,
+            onSaved: ({ tags: nextTags, topics: nextTopics }) => {
+              setTags(nextTags);
+              setTopics(nextTopics);
+            },
+          }}
           onSaved={(updated) => { setPaper((p) => p ? { ...p, ...updated } : p); setEditOpen(false); }}
           onClose={() => setEditOpen(false)}
         />
