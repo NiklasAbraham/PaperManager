@@ -75,7 +75,7 @@ def search_arxiv(keywords: list[str], start: date, end: date, max_results: int =
     while len(results) < max_results:
         fetch = min(batch, max_results - len(results))
         r = _get(
-            "http://export.arxiv.org/api/query",
+            "https://export.arxiv.org/api/query",
             params={
                 "search_query": query,
                 "start": start_idx,

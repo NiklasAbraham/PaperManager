@@ -4,7 +4,7 @@ from db.queries.people import (
     create_person, get_person, list_people, delete_person,
     link_author, link_involves, link_specializes,
     unlink_author, unlink_involves,
-    get_papers_by_person, get_specialties,
+    get_papers_by_person, get_specialties, get_involves_for_paper, get_authors_for_paper,
 )
 from models.schemas import PersonCreate as PersonUpdate
 from db.queries.topics import get_or_create_topic
@@ -71,10 +71,20 @@ def add_specialty(person_id: str, body: SpecialtyLink):
     return {"person_id": person_id, "topic": topic}
 
 
+@papers_router.get("/{paper_id}/authors")
+def list_authors(paper_id: str):
+    return get_authors_for_paper(get_driver(), paper_id)
+
+
 @papers_router.post("/{paper_id}/authors", status_code=status.HTTP_201_CREATED)
 def add_author(paper_id: str, body: AuthorLink):
     link_author(get_driver(), paper_id, body.person_id)
     return {"paper_id": paper_id, "person_id": body.person_id, "rel": "AUTHORED_BY"}
+
+
+@papers_router.get("/{paper_id}/involves")
+def list_involves(paper_id: str):
+    return get_involves_for_paper(get_driver(), paper_id)
 
 
 @papers_router.post("/{paper_id}/involves", status_code=status.HTTP_201_CREATED)

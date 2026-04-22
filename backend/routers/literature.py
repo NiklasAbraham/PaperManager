@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from db.connection import get_driver
 from services.literature_search import (
+    _KEYWORDS_FILE,
     load_keywords,
     mark_existing,
     search_arxiv,
@@ -74,6 +75,27 @@ async def _stream_search(body: LiteratureSearchBody) -> AsyncGenerator[str, None
             yield _sse({"source": source, "paper": paper.to_dict()})
 
     yield _sse({"done": True, "counts": counts})
+
+
+class KeywordsBody(BaseModel):
+    content: str
+
+
+@router.get("/keywords")
+def get_keywords():
+    """Return the raw text of the keywords file."""
+    try:
+        return {"content": _KEYWORDS_FILE.read_text(encoding="utf-8")}
+    except FileNotFoundError:
+        return {"content": ""}
+
+
+@router.put("/keywords")
+def put_keywords(body: KeywordsBody):
+    """Overwrite the keywords file with new content."""
+    _KEYWORDS_FILE.write_text(body.content, encoding="utf-8")
+    # Return parsed keyword list so UI can preview what will be used
+    return {"content": body.content, "keywords": load_keywords()}
 
 
 @router.post("/search")

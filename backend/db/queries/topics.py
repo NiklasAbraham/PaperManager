@@ -55,6 +55,15 @@ def unlink_paper_topic(driver: Driver, paper_id: str, topic_name: str):
         )
 
 
+def get_topics_for_paper(driver: Driver, paper_id: str) -> list[dict]:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Paper {id: $id})-[:ABOUT]->(t:Topic) RETURN t ORDER BY t.name",
+            id=paper_id,
+        )
+        return [dict(r["t"]) for r in result]
+
+
 def papers_by_topic(driver: Driver, topic_name: str) -> list[dict]:
     with driver.session() as session:
         result = session.run(

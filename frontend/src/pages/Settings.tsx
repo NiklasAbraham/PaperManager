@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers } from "../api/client";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures";
@@ -10,6 +10,14 @@ export default function Settings() {
   const { settings, update, reset } = useAppSettings();
   const [confirmReset, setConfirmReset] = useState(false);
   const [exporting, setExporting] = useState<"bibtex" | "json" | null>(null);
+  const [debugCount, setDebugCount] = useState<number | null>(null);
+  const [debugDeleting, setDebugDeleting] = useState(false);
+  const [debugDeleteResult, setDebugDeleteResult] = useState<{ deleted: number; figures_deleted: number } | null>(null);
+  const [confirmDebugDelete, setConfirmDebugDelete] = useState(false);
+
+  useEffect(() => {
+    countDebugPapers().then(setDebugCount).catch(() => setDebugCount(null));
+  }, []);
   const [backfill, setBackfill] = useState<Record<BackfillOp, BackfillState>>({
     topics:  { status: "idle" },
     summary: { status: "idle" },
@@ -246,6 +254,55 @@ export default function Settings() {
           state={backfill.figures}
           onRun={() => runBackfill("figures")}
         />
+      </Section>
+
+      {/* ── Debug Mode ── */}
+      <Section title="Debug Mode" description="Papers imported while debug mode is ON are tagged 'debug'. Use this to bulk-delete test imports.">
+        <Row label="Debug papers in library" description={
+          debugCount === null ? "Counting…" :
+          debugCount === 0 ? "No debug papers in library." :
+          `${debugCount} paper${debugCount !== 1 ? "s" : ""} tagged 'debug' in library.`
+        }>
+          {debugDeleteResult ? (
+            <p className="text-xs text-green-700 font-medium">
+              Deleted {debugDeleteResult.deleted} paper{debugDeleteResult.deleted !== 1 ? "s" : ""} and {debugDeleteResult.figures_deleted} figure{debugDeleteResult.figures_deleted !== 1 ? "s" : ""}.
+            </p>
+          ) : confirmDebugDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-500">Delete all {debugCount} debug paper{debugCount !== 1 ? "s" : ""}?</span>
+              <button
+                onClick={async () => {
+                  setDebugDeleting(true);
+                  try {
+                    const result = await deleteDebugPapers();
+                    setDebugDeleteResult(result);
+                    setDebugCount(0);
+                  } catch { /* best-effort */ }
+                  setDebugDeleting(false);
+                  setConfirmDebugDelete(false);
+                }}
+                disabled={debugDeleting}
+                className="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {debugDeleting ? "Deleting…" : "Yes, delete all"}
+              </button>
+              <button
+                onClick={() => setConfirmDebugDelete(false)}
+                className="px-3 py-1.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDebugDelete(true)}
+              disabled={(debugCount ?? 0) === 0}
+              className="px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Delete all debug papers
+            </button>
+          )}
+        </Row>
       </Section>
 
       {/* ── Data ── */}

@@ -31,9 +31,7 @@ export default function Library() {
   const activeProject = searchParams.get("project_id") ?? "";
   const activeStatus  = searchParams.get("reading_status") ?? "";
   const activeBookmarked = searchParams.get("bookmarked") === "true";
-  const yearMin       = searchParams.get("year_min") ?? "";
-  const yearMax       = searchParams.get("year_max") ?? "";
-  const hasFilters    = q || activeTag || activeTopic || activeProject || activeStatus || activeBookmarked || yearMin || yearMax;
+  const hasFilters    = q || activeTag || activeTopic || activeProject || activeStatus || activeBookmarked;
 
   // Sort papers per settings
   const sortedPapers = useMemo(() => {
@@ -58,8 +56,7 @@ export default function Library() {
     setLoading(true);
     try {
       const hasFilter = params.get("q") || params.get("tag") || params.get("topic") ||
-        params.get("project_id") || params.get("reading_status") || params.get("bookmarked") ||
-        params.get("year_min") || params.get("year_max");
+        params.get("project_id") || params.get("reading_status") || params.get("bookmarked");
       if (hasFilter) {
         const res = await apiFetch<SearchResponse>(`/search?${params}`);
         setPapers(res.results);
@@ -73,6 +70,14 @@ export default function Library() {
   };
 
   useEffect(() => {
+    if (searchParams.has("year_min") || searchParams.has("year_max")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("year_min");
+      next.delete("year_max");
+      setSearchParams(next, { replace: true });
+      return;
+    }
+
     loadPapers(searchParams);
     apiFetch<Project[]>("/projects").then(setProjects).catch(() => {});
     apiFetch<Stats>("/stats").then(setStats).catch(() => {});
@@ -94,18 +99,6 @@ export default function Library() {
     const next = new URLSearchParams(searchParams);
     if (activeBookmarked) next.delete("bookmarked");
     else next.set("bookmarked", "true");
-    setSearchParams(next);
-  };
-
-  const setYearMin = (val: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (val) next.set("year_min", val); else next.delete("year_min");
-    setSearchParams(next);
-  };
-
-  const setYearMax = (val: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (val) next.set("year_max", val); else next.delete("year_max");
     setSearchParams(next);
   };
 
@@ -137,7 +130,8 @@ export default function Library() {
     <div className="h-[calc(100vh-53px)] overflow-y-auto">
       <main>
         {/* Search + upload + view toggle bar */}
-        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-3 flex gap-3 items-center flex-wrap">
+        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-3 flex gap-2 items-center flex-wrap">
+          {/* Search */}
           <input
             type="search"
             value={q}
@@ -148,23 +142,7 @@ export default function Library() {
               setSearchParams(next);
             }}
             placeholder="Search papers, notes…"
-            className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
-
-          {/* Year range */}
-          <input
-            type="number"
-            value={yearMin}
-            onChange={(e) => setYearMin(e.target.value)}
-            placeholder="From year"
-            className="w-24 border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
-          <input
-            type="number"
-            value={yearMax}
-            onChange={(e) => setYearMax(e.target.value)}
-            placeholder="To year"
-            className="w-24 border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            className="flex-1 min-w-[160px] h-9 border border-gray-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
           />
 
           {/* Reading status filter */}
@@ -176,7 +154,7 @@ export default function Library() {
               else next.delete("reading_status");
               setSearchParams(next);
             }}
-            className="border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-gray-600"
+            className="h-9 border border-gray-200 rounded-lg px-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-gray-600 shrink-0"
           >
             <option value="">All statuses</option>
             <option value="unread">Unread</option>
@@ -184,50 +162,57 @@ export default function Library() {
             <option value="read">Read</option>
           </select>
 
-          {/* Bookmark filter */}
-          <button
-            onClick={toggleBookmarked}
-            title={activeBookmarked ? "Showing bookmarked only — click to clear" : "Show bookmarked only"}
-            className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
-              activeBookmarked
-                ? "bg-amber-500 border-amber-500 text-white"
-                : "border-gray-200 text-gray-400 hover:text-amber-500 hover:border-amber-300"
-            }`}
-          >
-            ★
-          </button>
-
-          {/* Surprise Me */}
-          <button
-            onClick={surpriseMe}
-            disabled={surprisingMe}
-            title="Open a random paper"
-            className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-violet-600 hover:border-violet-300 transition-colors disabled:opacity-50 shrink-0"
-          >
-            {surprisingMe ? "…" : "🎲 Surprise"}
-          </button>
-
-          {/* View toggle */}
-          <div className="flex border border-gray-200 rounded-lg overflow-hidden shrink-0">
+          {/* Right-side icon buttons — all h-9 w-9 */}
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            {/* Bookmark filter */}
             <button
-              onClick={() => setViewMode("grid")}
-              title="Grid view"
-              className={`px-2.5 py-2 transition-colors ${viewMode === "grid" ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-50"}`}
+              onClick={toggleBookmarked}
+              title={activeBookmarked ? "Showing bookmarked only — click to clear" : "Show bookmarked only"}
+              className={`h-9 w-9 flex items-center justify-center rounded-lg border text-sm transition-colors ${
+                activeBookmarked
+                  ? "bg-amber-500 border-amber-500 text-white"
+                  : "border-gray-200 text-gray-400 hover:text-amber-500 hover:border-amber-300"
+              }`}
             >
-              <GridIcon />
+              ★
             </button>
+
+            {/* Surprise Me */}
             <button
-              onClick={() => setViewMode("list")}
-              title="List view"
-              className={`px-2.5 py-2 border-l border-gray-200 transition-colors ${viewMode === "list" ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-50"}`}
+              onClick={surpriseMe}
+              disabled={surprisingMe}
+              title="Open a random paper"
+              className="h-9 w-9 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-violet-600 hover:border-violet-300 transition-colors disabled:opacity-50"
             >
-              <ListIcon />
+              {surprisingMe
+                ? <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-3.866-3.134-7-7-7S5.5 8.134 5.5 12s3.134 7 7 7 7-3.134 7-7z"/><path strokeLinecap="round" strokeLinejoin="round" d="M9 9h.01M15 9h.01M9 15h.01M15 15h.01M12 12h.01"/></svg>
+              }
             </button>
+
+            {/* View toggle */}
+            <div className="flex h-9 border border-gray-200 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setViewMode("grid")}
+                title="Grid view"
+                className={`w-9 flex items-center justify-center transition-colors ${viewMode === "grid" ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-50"}`}
+              >
+                <GridIcon />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                title="List view"
+                className={`w-9 flex items-center justify-center border-l border-gray-200 transition-colors ${viewMode === "list" ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-50"}`}
+              >
+                <ListIcon />
+              </button>
+            </div>
+
+            <PaperDrop onUploaded={(p: T_IngestOut) => {
+              setPapers((prev) => [p, ...prev]);
+              refreshStats();
+            }} debug={settings.debugMode} />
           </div>
-          <PaperDrop onUploaded={(p: T_IngestOut) => {
-            setPapers((prev) => [p, ...prev]);
-            refreshStats();
-          }} />
         </div>
 
         <div className="p-6 space-y-6">
@@ -246,8 +231,6 @@ export default function Library() {
               )}
               {activeStatus && <Chip label={`Status: ${activeStatus}`} onRemove={() => setFilter("reading_status", activeStatus)} />}
               {activeBookmarked && <Chip label="★ Bookmarked" onRemove={toggleBookmarked} />}
-              {yearMin && <Chip label={`From ${yearMin}`} onRemove={() => setYearMin("")} />}
-              {yearMax && <Chip label={`To ${yearMax}`}   onRemove={() => setYearMax("")} />}
               <button onClick={clearAll} className="text-xs text-gray-400 hover:text-gray-600 underline">
                 Clear all
               </button>

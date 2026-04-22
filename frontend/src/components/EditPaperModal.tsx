@@ -1,11 +1,17 @@
 import { useState } from "react";
 import { updatePaper } from "../api/client";
-import type { Paper } from "../types";
+import type { Paper, Tag, Topic } from "../types";
 
 interface Props {
   paper: Paper;
   onSaved: (updated: Paper) => void;
   onClose: () => void;
+  metadataEditor?: {
+    tags: Tag[];
+    topics: Topic[];
+    onSave: (next: { tags: string[]; topics: string[] }) => Promise<{ tags: Tag[]; topics: Topic[] }>;
+    onSaved?: (next: { tags: Tag[]; topics: Topic[] }) => void;
+  };
 }
 
 const PAPER_COLORS = [
@@ -13,16 +19,42 @@ const PAPER_COLORS = [
   "#06b6d4", "#6366f1", "#ec4899", "#8b5cf6", "#14b8a6",
 ];
 
-export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
+export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor }: Props) {
   const [title,          setTitle]          = useState(paper.title);
   const [year,           setYear]           = useState(paper.year?.toString() ?? "");
   const [doi,            setDoi]            = useState(paper.doi ?? "");
   const [abstract,       setAbstract]       = useState(paper.abstract ?? "");
   const [venue,          setVenue]          = useState(paper.venue ?? "");
+  const [metadataSource, setMetadataSource] = useState(paper.metadata_source ?? "");
   const [reading_status, setReadingStatus]  = useState<Paper["reading_status"]>(paper.reading_status ?? "unread");
   const [color,          setColor]          = useState(paper.color ?? "");
+  const [tagNames, setTagNames]             = useState(() => metadataEditor?.tags.map((tag) => tag.name) ?? []);
+  const [topicNames, setTopicNames]         = useState(() => metadataEditor?.topics.map((topic) => topic.name) ?? []);
+  const [newTag, setNewTag]                 = useState("");
+  const [newTopic, setNewTopic]             = useState("");
   const [saving,   setSaving]   = useState(false);
   const [error,    setError]    = useState<string | null>(null);
+
+  const updateList = (items: string[], next: string) => {
+    if (!next) return items;
+    return items.includes(next) ? items : [...items, next];
+  };
+
+  const removeListItem = (items: string[], target: string) => items.filter((item) => item !== target);
+
+  const addTagDraft = () => {
+    const clean = newTag.trim().toLowerCase().replace(/\s+/g, "-");
+    if (!clean) return;
+    setTagNames((prev) => updateList(prev, clean));
+    setNewTag("");
+  };
+
+  const addTopicDraft = () => {
+    const clean = newTopic.trim();
+    if (!clean) return;
+    setTopicNames((prev) => updateList(prev, clean));
+    setNewTopic("");
+  };
 
   const save = async () => {
     if (!title.trim()) return;
@@ -35,9 +67,18 @@ export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
         doi:            doi.trim() || null,
         abstract:       abstract.trim() || null,
         venue:          venue.trim() || null,
+        metadata_source: metadataSource.trim() || null,
         reading_status: reading_status ?? null,
         color:          color || null,
       });
+
+      if (metadataEditor) {
+        const nextTags = [...new Set(tagNames.map((tag) => tag.trim()).filter(Boolean))];
+        const nextTopics = [...new Set(topicNames.map((topic) => topic.trim()).filter(Boolean))];
+        const savedMetadata = await metadataEditor.onSave({ tags: nextTags, topics: nextTopics });
+        metadataEditor.onSaved?.(savedMetadata);
+      }
+
       onSaved(updated);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -86,6 +127,14 @@ export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
             />
           </Field>
 
+          <Field label="Metadata source">
+            <input
+              type="text" value={metadataSource} onChange={(e) => setMetadataSource(e.target.value)}
+              placeholder="manual, semantic_scholar, crossref…"
+              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </Field>
+
           <Field label="Abstract">
             <textarea
               value={abstract} onChange={(e) => setAbstract(e.target.value)}
@@ -124,6 +173,100 @@ export default function EditPaperModal({ paper, onSaved, onClose }: Props) {
               </div>
             </Field>
           </div>
+
+          {metadataEditor && (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Tags">
+                  <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <div className="flex flex-wrap gap-1.5 min-h-6">
+                      {tagNames.length === 0 ? (
+                        <span className="text-xs text-gray-400">No tags yet</span>
+                      ) : (
+                        tagNames.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => setTagNames((prev) => removeListItem(prev, tag))}
+                            className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs text-gray-600 ring-1 ring-gray-200 hover:ring-red-200 hover:text-red-600"
+                          >
+                            <span>{tag}</span>
+                            <span>×</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newTag}
+                        onChange={(e) => setNewTag(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addTagDraft();
+                          }
+                        }}
+                        placeholder="Add tag"
+                        className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300"
+                      />
+                      <button
+                        type="button"
+                        onClick={addTagDraft}
+                        className="px-3 py-1.5 text-sm rounded bg-white text-gray-600 ring-1 ring-gray-200 hover:text-violet-700 hover:ring-violet-200"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </Field>
+
+                <Field label="Topics">
+                  <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <div className="flex flex-wrap gap-1.5 min-h-6">
+                      {topicNames.length === 0 ? (
+                        <span className="text-xs text-gray-400">No topics yet</span>
+                      ) : (
+                        topicNames.map((topic) => (
+                          <button
+                            key={topic}
+                            type="button"
+                            onClick={() => setTopicNames((prev) => removeListItem(prev, topic))}
+                            className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs text-blue-700 ring-1 ring-blue-200 hover:ring-red-200 hover:text-red-600"
+                          >
+                            <span>{topic}</span>
+                            <span>×</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newTopic}
+                        onChange={(e) => setNewTopic(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addTopicDraft();
+                          }
+                        }}
+                        placeholder="Add topic"
+                        className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300"
+                      />
+                      <button
+                        type="button"
+                        onClick={addTopicDraft}
+                        className="px-3 py-1.5 text-sm rounded bg-white text-gray-600 ring-1 ring-gray-200 hover:text-violet-700 hover:ring-violet-200"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </Field>
+              </div>
+            </>
+          )}
 
           {error && <p className="text-xs text-red-500">{error}</p>}
         </div>

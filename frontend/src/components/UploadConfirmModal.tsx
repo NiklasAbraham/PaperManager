@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { uploadPdf, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects } from "../api/client";
+import { uploadPdf, ingestFromUrlFull, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
@@ -11,13 +11,17 @@ const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 interface Props {
-  file: File;
+  file: File | null;
   meta: ParsedMeta;
   onConfirmed: (paper: T_IngestOut) => void;
   onCancel: () => void;
+  /** When provided (no file), ingest via URL instead of PDF upload. */
+  url?: string;
+  debug?: boolean;
 }
 
-export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }: Props) {
+export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug }: Props) {
+  const urlMode = !file && !!url;
   const { settings } = useAppSettings();
 
   const [title, setTitle]       = useState(meta.title || "");
@@ -45,6 +49,9 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
   const [peopleLoaded, setPeopleLoaded] = useState(false);
   const [creatingPerson, setCreatingPerson] = useState(false);
   const [showPersonDrop, setShowPersonDrop] = useState(false);
+  const [showPersonForm, setShowPersonForm] = useState(false);
+  const [newPersonAffiliation, setNewPersonAffiliation] = useState("");
+  const [newPersonEmail, setNewPersonEmail] = useState("");
 
   // Project selector
   const [projects, setProjects] = useState<{id: string; name: string}[]>([]);
@@ -52,6 +59,12 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
   useEffect(() => {
     listProjects().then(setProjects).catch(() => {});
   }, []);
+
+  // PDF-missing banner (URL mode only)
+  const [pdfMissing, setPdfMissing]     = useState(false);
+  const [manualPdf, setManualPdf]       = useState<File | null>(null);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [pdfUploaded, setPdfUploaded]   = useState(false);
 
   // Step 2: refs
   const [checkedRefs, setCheckedRefs] = useState<boolean[]>([]);
@@ -108,10 +121,18 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
   const handleCreatePerson = async () => {
     if (!personQuery.trim()) return;
     setCreatingPerson(true);
+    setShowPersonDrop(false);
     try {
-      const person = await getOrCreatePerson(personQuery.trim());
+      const person = await getOrCreatePerson(
+        personQuery.trim(),
+        newPersonAffiliation.trim() || undefined,
+        newPersonEmail.trim() || undefined,
+      );
       setAllPeople((prev) => prev.find((p) => p.id === person.id) ? prev : [...prev, person]);
       handleSelectPerson(person);
+      setShowPersonForm(false);
+      setNewPersonAffiliation("");
+      setNewPersonEmail("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create person");
     } finally {
@@ -158,9 +179,15 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
     setSaving(true);
     setError(null);
     try {
-      const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
-      const paper = await uploadPdf(file, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions);
+      let paper: T_IngestOut;
+      if (urlMode) {
+        paper = await ingestFromUrlFull(url!, selectedProjectId || undefined, debug);
+      } else {
+        const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
+        paper = await uploadPdf(file!, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions, debug);
+      }
       await applySource(paper.id);
+      if (urlMode && paper.pdf_fetched === false) setPdfMissing(true);
       const hasRefs = paper.references_found && paper.references_found.length > 0;
       if (hasRefs && !settings.autoSaveReferences) {
         setUploadedPaper(paper);
@@ -190,6 +217,22 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Manual PDF upload (when pdf_fetched === false) ─────────────────────────
+
+  const uploadManualPdf = async () => {
+    if (!manualPdf || !uploadedPaper) return;
+    setUploadingPdf(true);
+    try {
+      await uploadPdf(manualPdf, uploadedPaper.title);
+      setPdfUploaded(true);
+      setPdfMissing(false);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "PDF upload failed");
+    } finally {
+      setUploadingPdf(false);
     }
   };
 
@@ -278,47 +321,87 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
 
             {/* Person autocomplete */}
             {sourceType === "person" && (
-              <div className="relative">
-                <input
-                  autoFocus
-                  value={personQuery}
-                  onChange={(e) => {
-                    setPersonQuery(e.target.value);
-                    setSourcePerson(null);
-                    setShowPersonDrop(true);
-                  }}
-                  onFocus={() => setShowPersonDrop(true)}
-                  placeholder="Search or create a person…"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                />
-                {sourcePerson && (
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-violet-600 text-xs font-medium">✓ {sourcePerson.name}</span>
-                )}
-                {showPersonDrop && (filteredPeople.length > 0 || showCreateOption) && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-                    {filteredPeople.map((p) => (
+              <div className="space-y-2">
+                <div className="relative">
+                  <input
+                    autoFocus
+                    value={personQuery}
+                    onChange={(e) => {
+                      setPersonQuery(e.target.value);
+                      setSourcePerson(null);
+                      setShowPersonForm(false);
+                      setShowPersonDrop(true);
+                    }}
+                    onFocus={() => setShowPersonDrop(true)}
+                    placeholder="Search or create a person…"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  />
+                  {sourcePerson && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-violet-600 text-xs font-medium">✓ {sourcePerson.name}</span>
+                  )}
+                  {showPersonDrop && (filteredPeople.length > 0 || showCreateOption) && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                      {filteredPeople.map((p) => (
+                        <button
+                          key={p.id}
+                          onMouseDown={() => handleSelectPerson(p)}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 flex items-center gap-2"
+                        >
+                          <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs flex items-center justify-center font-medium shrink-0">
+                            {p.name[0]?.toUpperCase()}
+                          </span>
+                          <span>{p.name}</span>
+                          {p.affiliation && <span className="text-xs text-gray-400 ml-auto">{p.affiliation}</span>}
+                        </button>
+                      ))}
+                      {showCreateOption && (
+                        <button
+                          onMouseDown={(e) => { e.preventDefault(); setShowPersonDrop(false); setShowPersonForm(true); }}
+                          className="w-full text-left px-3 py-2 text-sm text-violet-600 hover:bg-violet-50 flex items-center gap-2 border-t border-gray-100"
+                        >
+                          <span className="w-6 h-6 rounded-full border-2 border-dashed border-violet-400 text-violet-500 text-xs flex items-center justify-center shrink-0">+</span>
+                          Create "{personQuery.trim()}"
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inline person-details form */}
+                {showPersonForm && !sourcePerson && (
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
+                    <p className="text-xs font-medium text-violet-700">New person: <span className="font-semibold">{personQuery.trim()}</span></p>
+                    <div className="space-y-1.5">
+                      <input
+                        autoFocus
+                        value={newPersonAffiliation}
+                        onChange={(e) => setNewPersonAffiliation(e.target.value)}
+                        placeholder="Affiliation (e.g. MIT, Google Brain) — optional"
+                        className="w-full border border-gray-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                      />
+                      <input
+                        value={newPersonEmail}
+                        onChange={(e) => setNewPersonEmail(e.target.value)}
+                        placeholder="Email — optional"
+                        type="email"
+                        className="w-full border border-gray-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-0.5">
                       <button
-                        key={p.id}
-                        onMouseDown={() => handleSelectPerson(p)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 flex items-center gap-2"
-                      >
-                        <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs flex items-center justify-center font-medium shrink-0">
-                          {p.name[0]?.toUpperCase()}
-                        </span>
-                        <span>{p.name}</span>
-                        {p.affiliation && <span className="text-xs text-gray-400 ml-auto">{p.affiliation}</span>}
-                      </button>
-                    ))}
-                    {showCreateOption && (
-                      <button
-                        onMouseDown={handleCreatePerson}
+                        onClick={handleCreatePerson}
                         disabled={creatingPerson}
-                        className="w-full text-left px-3 py-2 text-sm text-violet-600 hover:bg-violet-50 flex items-center gap-2 border-t border-gray-100"
+                        className="px-3 py-1.5 text-xs font-medium bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50"
                       >
-                        <span className="w-6 h-6 rounded-full border-2 border-dashed border-violet-400 text-violet-500 text-xs flex items-center justify-center shrink-0">+</span>
-                        {creatingPerson ? "Creating…" : `Create "${personQuery.trim()}"`}
+                        {creatingPerson ? "Creating…" : "Create person"}
                       </button>
-                    )}
+                      <button
+                        onClick={() => { setShowPersonForm(false); setNewPersonAffiliation(""); setNewPersonEmail(""); }}
+                        className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -390,7 +473,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-          <ModalHeader step={2} title="AI Summary Prompt" subtitle="Customize the summary instructions for this paper. Change your default in Settings." />
+          <ModalHeader step={2} title="AI Summary Prompt" subtitle={urlMode ? "PDF will be downloaded automatically (arXiv/bioRxiv). Summary uses full text if available, otherwise abstract." : "Customize the summary instructions for this paper. Change your default in Settings."} />
 
           <div className="px-6 py-4">
             <textarea
@@ -417,7 +500,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
             <button onClick={confirm} disabled={saving || !title.trim()}
               className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2">
               {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
-              {saving ? "Uploading…" : "Upload →"}
+              {saving ? (urlMode ? "Importing…" : "Uploading…") : (urlMode ? "Import →" : "Upload →")}
             </button>
           </div>
         </div>
@@ -427,12 +510,44 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
 
   // ── Render: Step 3 (refs) ───────────────────────────────────────────────────
 
+  const pdfMissingBanner = pdfMissing ? (
+    <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+      <p className="text-xs font-medium text-amber-800 mb-1.5">PDF not downloaded automatically</p>
+      <p className="text-xs text-amber-700 mb-2">
+        arXiv and bioRxiv PDFs download automatically. For PubMed, DOI, or paywalled papers you can upload the PDF manually below — it will be matched by DOI and enrich the existing record.
+      </p>
+      {pdfUploaded ? (
+        <p className="text-xs text-green-700 font-medium">PDF uploaded successfully.</p>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => setManualPdf(e.target.files?.[0] ?? null)}
+            className="text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:text-xs file:border file:border-gray-200 file:rounded file:bg-white file:text-gray-700 hover:file:bg-gray-50"
+          />
+          {manualPdf && (
+            <button
+              onClick={uploadManualPdf}
+              disabled={uploadingPdf}
+              className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1"
+            >
+              {uploadingPdf && <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+              {uploadingPdf ? "Uploading…" : "Upload PDF"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   if (step === 3 && uploadedPaper) {
     const refs = uploadedPaper.references_found;
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
           <ModalHeader step={3} title="Save references?" subtitle={`Found ${refs.length} reference${refs.length !== 1 ? "s" : ""} — uncheck any to skip.`} />
+          {pdfMissingBanner}
           <div className="px-6 py-3 max-h-[55vh] overflow-y-auto space-y-1">
             {refs.map((ref, i) => (
               <label key={i} className="flex items-start gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 py-1">
@@ -465,7 +580,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
           <ModalHeader step={4} title="Add tags" subtitle="Ollama suggested tags based on the abstract. Click to toggle, or add your own." />
-
+          {pdfMissingBanner}
           <div className="px-6 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
             {loadingTags ? (
               <div className="flex items-center gap-2 text-violet-600 text-sm py-4 justify-center">
@@ -631,7 +746,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel }
             <button onClick={confirm} disabled={saving || !title.trim()}
               className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2">
               {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
-              {saving ? "Uploading…" : "Upload →"}
+              {saving ? "Importing…" : urlMode ? "Import →" : "Upload →"}
             </button>
           )}
         </div>

@@ -55,6 +55,15 @@ def list_tags(driver: Driver) -> list[dict]:
         return [{**dict(r["t"]), "paper_count": r["paper_count"]} for r in result]
 
 
+def get_tags_for_paper(driver: Driver, paper_id: str) -> list[dict]:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Paper {id: $id})-[:TAGGED]->(t:Tag) RETURN t ORDER BY t.name",
+            id=paper_id,
+        )
+        return [dict(r["t"]) for r in result]
+
+
 def papers_by_tag(driver: Driver, tag_name: str) -> list[dict]:
     with driver.session() as session:
         result = session.run(

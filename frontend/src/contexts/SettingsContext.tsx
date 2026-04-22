@@ -32,6 +32,9 @@ export interface AppSettings {
   graphNodeSize: number;
   graphShowNodeLabels: boolean;
   graphShowEdgeLabels: boolean;
+
+  // Debug
+  debugMode: boolean;
 }
 
 export const SETTINGS_DEFAULTS: AppSettings = {
@@ -49,6 +52,7 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   graphNodeSize: 16,
   graphShowNodeLabels: true,
   graphShowEdgeLabels: true,
+  debugMode: false,
 };
 
 const STORAGE_KEY = "paperManager:settings";

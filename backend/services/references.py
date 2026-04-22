@@ -4,6 +4,7 @@ import logging
 import httpx
 
 from services.pdf_parser import DOI_RE, ARXIV_RE, YEAR_RE
+from config import settings
 
 log = logging.getLogger(__name__)
 
@@ -125,19 +126,29 @@ def _extract_references_with_ai(ref_text: str) -> list[dict]:
         if not settings.anthropic_api_key:
             return []
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.Anthropic(
+            api_key=settings.anthropic_api_key,
+            base_url="https://api.anthropic.com",
+            http_client=httpx.Client(verify=settings.ssl_verify if settings.ssl_verify is not False else False),
+        )
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{
                 "role": "user",
                 "content": (
-                    "Parse every reference entry from this text into a JSON array.\n"
-                    "Each object must have exactly these keys:\n"
-                    "  title (string), authors (array of strings), year (integer or null),\n"
-                    "  doi (string or null), arxiv_id (string or null)\n"
-                    "Return ONLY valid JSON — no markdown, no explanation.\n\n"
-                    f"References text:\n{ref_text[:8000]}"
+                    "Extract every cited reference from the text below into a JSON array.\n"
+                    "Rules:\n"
+                    "- Only include real academic references (papers, books, reports, preprints).\n"
+                    "- Skip section headers, acknowledgements, footnotes, and non-reference text.\n"
+                    "- Each entry must have these keys:\n"
+                    "    title (string, required — the paper/book title only, not authors or venue),\n"
+                    "    authors (array of strings — last, first or full names),\n"
+                    "    year (integer or null),\n"
+                    "    doi (string or null — only if explicitly present in the text),\n"
+                    "    arxiv_id (string or null — e.g. '2301.07041', only if explicitly present)\n"
+                    "- Return ONLY valid JSON array — no markdown fences, no explanation.\n\n"
+                    f"Text:\n{ref_text[:14000]}"
                 ),
             }],
         )
@@ -187,27 +198,31 @@ def extract_references(raw_text: str, doi: str | None) -> list[dict]:
     """
     Extract cited references for a paper.
 
-    Strategy A: Semantic Scholar references API (requires DOI/arXiv).
-    Strategy B: Regex over the raw PDF text references section.
-    Strategy C: Claude AI parsing when regex yields too few results.
+    Strategy A: Semantic Scholar references API (requires DOI/arXiv) — highest quality.
+    Strategy B: Claude AI on the references section — good quality, handles all styles.
+    Strategy C: Regex — last resort when Claude is unavailable or fails.
 
     Returns list of dicts: {title, authors, year, doi, arxiv_id}
     """
+    # Strategy A: Semantic Scholar (best — structured, complete DOI/author data)
     if doi:
         result = _fetch_s2_references(doi)
         if result:
+            log.debug("References via S2 | count=%d", len(result))
             return result
 
-    regex_refs = _extract_references_from_text(raw_text)
-    if len(regex_refs) >= 3:
-        return regex_refs
+    if not raw_text:
+        return []
 
-    # Regex got nothing useful — try Claude
-    log.debug("Regex found only %d references — trying Claude AI", len(regex_refs))
+    # Strategy B: Claude AI on the reference section
     ref_section = _get_ref_section_text(raw_text)
     if ref_section:
         ai_refs = _extract_references_with_ai(ref_section)
         if ai_refs:
+            log.debug("References via Claude AI | count=%d", len(ai_refs))
             return ai_refs
 
+    # Strategy C: Regex fallback
+    regex_refs = _extract_references_from_text(raw_text)
+    log.debug("References via regex | count=%d", len(regex_refs))
     return regex_refs

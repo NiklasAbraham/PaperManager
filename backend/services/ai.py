@@ -12,6 +12,20 @@ from config import settings
 # you can edit them without restarting the backend.
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
+# Personal Anthropic API — always use the canonical base URL, never the
+# ANTHROPIC_BASE_URL env var (which may be set to a corporate proxy with
+# surrounding newlines, causing httpx URL validation errors).
+_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+
+
+def _personal_client() -> anthropic.Anthropic:
+    """Return an Anthropic client for the personal API key with SSL settings applied."""
+    return anthropic.Anthropic(
+        api_key=settings.anthropic_api_key,
+        base_url=_ANTHROPIC_BASE_URL,
+        http_client=httpx.Client(verify=_ssl_verify()),
+    )
+
 
 def _load_prompt(filename: str) -> str:
     path = _PROMPTS_DIR / filename
@@ -49,7 +63,7 @@ def summarize_paper(text: str, title: str = "", custom_instructions: str | None 
             text=text[:40000],
         )
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = _personal_client()
     message = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=1024,
@@ -74,7 +88,7 @@ def suggest_topics(title: str, abstract: str = "", summary: str = "") -> list[st
 
     prompt = _load_prompt("topics.txt").format(title=title or "(unknown)", context=context)
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = _personal_client()
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=256,
@@ -100,7 +114,7 @@ def chat_with_paper(
         title=paper_title or "(unknown)",
         text=paper_text[:60000],
     )
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = _personal_client()
 
     messages: list[dict[str, Any]] = list(history or [])
     messages.append({"role": "user", "content": question})
@@ -213,7 +227,7 @@ def knowledge_chat_stream(
             http_client=httpx.Client(verify=_ssl_verify()),
         )
     else:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = _personal_client()
 
     return client.messages.stream(
         model="claude-opus-4-6",

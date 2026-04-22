@@ -100,6 +100,30 @@ def unlink_author(driver: Driver, paper_id: str, person_id: str):
         )
 
 
+def get_authors_for_paper(driver: Driver, paper_id: str) -> list[dict]:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (paper:Paper {id: $id})-[:AUTHORED_BY]->(person:Person) RETURN person",
+            id=paper_id,
+        )
+        return [dict(r["person"]) for r in result]
+
+
+def get_involves_for_paper(driver: Driver, paper_id: str) -> list[dict]:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (paper:Paper {id: $id})-[r:INVOLVES]->(person:Person) "
+            "RETURN person, r.role AS role",
+            id=paper_id,
+        )
+        rows = []
+        for record in result:
+            d = dict(record["person"])
+            d["role"] = record["role"]
+            rows.append(d)
+        return rows
+
+
 def unlink_involves(driver: Driver, paper_id: str, person_id: str, role: str | None = None):
     with driver.session() as session:
         if role:

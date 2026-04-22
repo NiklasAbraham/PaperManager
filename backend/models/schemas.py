@@ -23,6 +23,7 @@ class PaperUpdate(BaseModel):
     abstract: str | None = None
     summary: str | None = None
     venue: str | None = None
+    metadata_source: str | None = None
     reading_status: str | None = None   # "unread" | "reading" | "read"
     rating: int | None = None           # 1-5
     bookmarked: bool | None = None
@@ -131,11 +132,13 @@ class IngestOut(PaperOut):
     authors: list[str] = []
     topics_auto_added: list[str] = []
     references_found: list[dict] = []
+    pdf_fetched: bool = True  # False when no PDF was downloaded (metadata-only ingest)
 
 
 class IngestFromUrlBody(BaseModel):
     url: str
     project_id: str | None = None
+    debug: bool = False
 
 
 # ── References ─────────────────────────────────────────────────────────────────

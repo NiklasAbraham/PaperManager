@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, status
 from db.connection import get_driver
 from db.queries.topics import (
     get_or_create_topic, list_topics, link_paper_topic, unlink_paper_topic,
-    papers_by_topic, link_related_topics,
+    papers_by_topic, link_related_topics, get_topics_for_paper,
 )
 from db.queries.papers import get_paper
 from models.schemas import TopicBody, PaperOut
@@ -52,6 +52,11 @@ def rename_topic(name: str, body: dict):
 def relate(name_a: str, name_b: str):
     link_related_topics(get_driver(), name_a, name_b)
     return {"related": [name_a, name_b]}
+
+
+@papers_router.get("/{paper_id}/topics")
+def list_paper_topics(paper_id: str):
+    return get_topics_for_paper(get_driver(), paper_id)
 
 
 @papers_router.post("/{paper_id}/topics/suggest")
