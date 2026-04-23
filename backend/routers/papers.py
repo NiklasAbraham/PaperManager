@@ -61,10 +61,18 @@ async def upload(
     project_id: Optional[str] = Form(None),
     caption_method: Optional[str] = Form("ollama"),
     summary_instructions: Optional[str] = Form(None),
+    document_type: Optional[str] = Form(None),
     debug: bool = Form(False),
 ):
-    """Full ingestion pipeline: PDF → metadata → Drive → summary → Neo4j."""
+    """Full ingestion pipeline: PDF → metadata → Drive → summary → Neo4j.
+    
+    When document_type is 'book' or 'lecture_deck', references and figure
+    extraction are skipped — chapter detection is available separately via
+    POST /papers/{id}/chapters/detect.
+    """
     pdf_bytes = await file.read()
+
+    is_book = document_type in ("book", "lecture_deck")
 
     # Step 1-2: Extract metadata
     meta = extract_metadata(pdf_bytes)
@@ -120,6 +128,7 @@ async def upload(
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
             "venue": meta.get("venue"),
+            "document_type": document_type,
         }) if meta.get("doi") or existing.get("doi") else create_paper(driver, {
             "title": meta.get("title", ""),
             "year": meta.get("year"),
@@ -131,6 +140,7 @@ async def upload(
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
             "venue": meta.get("venue"),
+            "document_type": document_type,
         })
     elif meta.get("doi"):
         # No existing paper but DOI known — use merge to future-proof against race conditions
@@ -145,6 +155,7 @@ async def upload(
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
             "venue": meta.get("venue"),
+            "document_type": document_type,
         })
     else:
         paper = create_paper(driver, {
@@ -158,12 +169,15 @@ async def upload(
             "metadata_source": meta.get("metadata_source", "heuristic"),
             "raw_text": raw_text,
             "venue": meta.get("venue"),
+            "document_type": document_type,
         })
 
     log.info("Paper saved | id=%s | title=%.60s", paper["id"], paper.get("title"))
 
     # Step 6b: Apply source tag
     tag_paper(driver, paper["id"], "pdf-upload")
+    if is_book:
+        tag_paper(driver, paper["id"], document_type or "book")
     if debug:
         tag_paper(driver, paper["id"], "debug")
 
@@ -220,30 +234,36 @@ async def upload(
         except Exception:
             pass  # project not found — don't fail the whole ingestion
 
-    # Step 10: Extract references (best-effort)
+    # Step 10: Extract references (best-effort — skipped for books/lecture decks)
     references_found = []
-    try:
-        references_found = extract_references(raw_text, meta.get("doi"))
-        log.info("References extracted | count=%d | paper_id=%s", len(references_found), paper["id"])
-    except Exception as exc:
-        log.warning("Reference extraction failed (non-fatal) | %s", exc)
+    if not is_book:
+        try:
+            references_found = extract_references(raw_text, meta.get("doi"))
+            log.info("References extracted | count=%d | paper_id=%s", len(references_found), paper["id"])
+        except Exception as exc:
+            log.warning("Reference extraction failed (non-fatal) | %s", exc)
+    else:
+        log.info("Skipping reference extraction for document_type=%s | paper_id=%s", document_type, paper["id"])
 
-    # Step 11: Extract figures (best-effort)
-    try:
-        figs = extract_figures(pdf_bytes, caption_method=caption_method or "ollama")
-        for i, fig in enumerate(figs):
-            fig_filename = f"{paper['id']}_p{fig['page_number']}_{i+1}.png"
-            fig_drive_id = upload_image(fig["image_bytes"], fig_filename)
-            create_figure(driver, {
-                "paper_id": paper["id"],
-                "figure_number": fig["figure_number"],
-                "caption": fig["caption"],
-                "drive_file_id": fig_drive_id,
-                "page_number": fig["page_number"],
-            })
-        log.info("Figures extracted | count=%d | paper_id=%s", len(figs), paper["id"])
-    except Exception as exc:
-        log.warning("Figure extraction failed (non-fatal) | %s", exc)
+    # Step 11: Extract figures (best-effort — skipped for books/lecture decks)
+    if not is_book:
+        try:
+            figs = extract_figures(pdf_bytes, caption_method=caption_method or "ollama")
+            for i, fig in enumerate(figs):
+                fig_filename = f"{paper['id']}_p{fig['page_number']}_{i+1}.png"
+                fig_drive_id = upload_image(fig["image_bytes"], fig_filename)
+                create_figure(driver, {
+                    "paper_id": paper["id"],
+                    "figure_number": fig["figure_number"],
+                    "caption": fig["caption"],
+                    "drive_file_id": fig_drive_id,
+                    "page_number": fig["page_number"],
+                })
+            log.info("Figures extracted | count=%d | paper_id=%s", len(figs), paper["id"])
+        except Exception as exc:
+            log.warning("Figure extraction failed (non-fatal) | %s", exc)
+    else:
+        log.info("Skipping figure extraction for document_type=%s | paper_id=%s", document_type, paper["id"])
 
     return {
         **paper,
