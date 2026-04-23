@@ -14,6 +14,7 @@ export interface Paper {
   rating?: number;
   bookmarked?: boolean;
   color?: string;
+  document_type?: "paper" | "book" | "lecture_deck";
 }
 
 export interface Person {
@@ -117,6 +118,21 @@ export interface T_IngestOut extends Paper {
   topics_auto_added: string[];
   references_found: Reference[];
   pdf_fetched?: boolean;  // undefined = legacy upload (assume true); false = no PDF available
+}
+
+// ── Chapter (book support) ────────────────────────────────────────────────────
+
+export interface Chapter {
+  id: string;
+  paper_id: string;
+  number: number;
+  title: string;
+  level: number;         // 1 = chapter, 2 = sub-chapter
+  summary?: string;
+  start_page?: number;
+  end_page?: number;
+  created_at: string;
+  updated_at: string;
 }
 
 // ── Figures ───────────────────────────────────────────────────────────────────
