@@ -46,7 +46,7 @@ class ChapterCandidate:
 
 
 def _deduplicate(candidates: list[ChapterCandidate]) -> list[ChapterCandidate]:
-    """Remove candidates whose normalised title is already in the list."""
+    """Remove candidates whose normalized title is already in the list."""
     seen: set[str] = set()
     result: list[ChapterCandidate] = []
     for c in candidates:

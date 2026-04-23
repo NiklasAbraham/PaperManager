@@ -49,7 +49,9 @@ export default function BookChapters({ paperId }: Props) {
     try {
       const updated = await regenerateChapterSummary(paperId, chapterId);
       setChapters((prev) => prev.map((c) => (c.id === chapterId ? updated : c)));
-    } catch { /* best-effort */ }
+    } catch (e) {
+      console.error("Failed to regenerate chapter summary:", e);
+    }
     setRegenerating(null);
   };
 

@@ -759,7 +759,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             </div>
             {documentType !== "paper" && (
               <p className="mt-1.5 text-xs text-violet-600">
-                📌 References &amp; figure extraction will be skipped. After upload, use the <strong>Chapters</strong> tab to auto-detect chapter structure and summaries.
+                📌 References & figure extraction will be skipped. After upload, use the <strong>Chapters</strong> tab to auto-detect chapter structure and summaries.
               </p>
             )}
           </Field>
