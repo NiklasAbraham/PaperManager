@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch, deleteDebugPapers, countDebugPapers } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults } from "../api/client";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures";
@@ -9,7 +9,16 @@ type BackfillState = { status: "idle" | "running" | "done" | "error"; result?: B
 export default function Settings() {
   const { settings, update, reset } = useAppSettings();
   const [confirmReset, setConfirmReset] = useState(false);
-  const [exporting, setExporting] = useState<"bibtex" | "json" | null>(null);
+  const [exporting, setExporting] = useState<"bibtex" | "json" | "rdf" | "csv" | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<Record<string, number> | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const rdfInputRef = useRef<HTMLInputElement>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearResult, setClearResult] = useState<Record<string, number> | null>(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<{ seeded: number } | null>(null);
   const [debugCount, setDebugCount] = useState<number | null>(null);
   const [debugDeleting, setDebugDeleting] = useState(false);
   const [debugDeleteResult, setDebugDeleteResult] = useState<{ deleted: number; figures_deleted: number } | null>(null);
@@ -53,6 +62,52 @@ export default function Settings() {
     } finally {
       setExporting(null);
     }
+  };
+
+  const handleExportRdf = async () => {
+    setExporting("rdf");
+    try { await exportRdf(); } finally { setExporting(null); }
+  };
+
+  const handleExportCsv = async () => {
+    setExporting("csv");
+    try { await exportCsv(); } finally { setExporting(null); }
+  };
+
+  const handleImportRdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    setImportError(null);
+    try {
+      const result = await importRdf(file);
+      setImportResult(result.imported);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(false);
+      if (rdfInputRef.current) rdfInputRef.current.value = "";
+    }
+  };
+
+  const handleClearPapers = async () => {
+    setClearing(true);
+    try {
+      const result = await clearPapers();
+      setClearResult(result);
+      setConfirmClear(false);
+    } catch { /* best-effort */ }
+    setClearing(false);
+  };
+
+  const handleSeedDefaults = async () => {
+    setSeeding(true);
+    try {
+      const result = await seedDefaults();
+      setSeedResult(result);
+    } catch { /* best-effort */ }
+    setSeeding(false);
   };
 
   return (
@@ -232,6 +287,47 @@ export default function Settings() {
             {exporting === "json" ? "Exporting…" : "Download .json"}
           </button>
         </Row>
+        <Row label="RDF / Turtle" description="Full graph export (nodes + relationships) as a .ttl file. Can be re-imported without creating duplicates.">
+          <button
+            onClick={handleExportRdf}
+            disabled={exporting === "rdf"}
+            className="px-4 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+          >
+            {exporting === "rdf" ? "Exporting…" : "Download .ttl"}
+          </button>
+        </Row>
+        <Row label="CSV (ZIP)" description="All nodes and edges as CSV files, bundled in a ZIP archive.">
+          <button
+            onClick={handleExportCsv}
+            disabled={exporting === "csv"}
+            className="px-4 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+          >
+            {exporting === "csv" ? "Exporting…" : "Download .zip"}
+          </button>
+        </Row>
+        <div className="px-5 py-4 space-y-2">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Import RDF / Turtle</p>
+            <p className="text-xs text-gray-400 mt-0.5">Upload a .ttl file exported from this app. Uses MERGE — safe to run on a populated database (no duplicates).</p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              ref={rdfInputRef}
+              type="file"
+              accept=".ttl"
+              onChange={handleImportRdf}
+              disabled={importing}
+              className="text-sm text-gray-600 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 disabled:opacity-50"
+            />
+            {importing && <span className="text-xs text-gray-500">Importing…</span>}
+            {importResult && (
+              <span className="text-xs text-green-700 font-medium">
+                Imported: {Object.entries(importResult).map(([k, v]) => `${v} ${k}`).join(", ")}
+              </span>
+            )}
+            {importError && <span className="text-xs text-red-600">{importError}</span>}
+          </div>
+        </div>
       </Section>
 
       {/* ── Library Maintenance ── */}
@@ -330,6 +426,56 @@ export default function Settings() {
               className="px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
             >
               Reset to defaults
+            </button>
+          )}
+        </Row>
+        <Row
+          label="Clear all papers"
+          description="Delete all papers, people, notes, figures, and projects from the database. Tags and topics are preserved."
+        >
+          {clearResult ? (
+            <p className="text-xs text-green-700 font-medium">
+              Deleted: {Object.entries(clearResult).map(([k, v]) => `${v} ${k}`).join(", ")}
+            </p>
+          ) : confirmClear ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-500">This is irreversible. Are you sure?</span>
+              <button
+                onClick={handleClearPapers}
+                disabled={clearing}
+                className="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {clearing ? "Deleting…" : "Yes, delete all"}
+              </button>
+              <button
+                onClick={() => setConfirmClear(false)}
+                className="px-3 py-1.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmClear(true)}
+              className="px-4 py-1.5 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
+            >
+              Clear all papers
+            </button>
+          )}
+        </Row>
+        <Row
+          label="Seed default data"
+          description="Re-populate the default tags (pdf-upload, from-url, from-references, debug, etc.). Safe to run at any time — idempotent."
+        >
+          {seedResult ? (
+            <p className="text-xs text-green-700 font-medium">Seeded {seedResult.seeded} default tags.</p>
+          ) : (
+            <button
+              onClick={handleSeedDefaults}
+              disabled={seeding}
+              className="px-4 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              {seeding ? "Seeding…" : "Seed defaults"}
             </button>
           )}
         </Row>

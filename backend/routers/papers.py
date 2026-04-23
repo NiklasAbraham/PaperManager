@@ -254,6 +254,52 @@ async def upload(
     }
 
 
+@router.post("/preview-url")
+def preview_url(body: IngestFromUrlBody):
+    """Resolve metadata from a URL without creating any paper — for the upload confirm modal."""
+    meta = resolve_url(body.url)
+    if not meta or not meta.get("title"):
+        raise HTTPException(status_code=422, detail="Could not resolve metadata from the given URL")
+    return {
+        "title": meta.get("title", ""),
+        "authors": meta.get("authors") or [],
+        "year": meta.get("year"),
+        "doi": meta.get("doi"),
+        "abstract": meta.get("abstract"),
+        "metadata_source": meta.get("metadata_source", "unknown"),
+    }
+
+
+@router.post("/preview-url/pdf")
+async def preview_url_pdf(body: IngestFromUrlBody):
+    """
+    Download the PDF for a URL and extract metadata from it — no paper is created.
+    Used as a fallback in the upload modal when API metadata is incomplete.
+    """
+    import asyncio as _asyncio
+    from services.metadata_from_url import fetch_pdf_bytes
+    from services.pdf_parser import extract_metadata
+
+    try:
+        pdf_bytes = await _asyncio.to_thread(fetch_pdf_bytes, body.url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PDF download failed: {exc}")
+
+    if not pdf_bytes:
+        raise HTTPException(status_code=422, detail="No open-access PDF available for this URL (only arXiv and bioRxiv are supported)")
+
+    meta = extract_metadata(pdf_bytes)
+    return {
+        "title": meta.get("title", ""),
+        "authors": meta.get("authors") or [],
+        "year": meta.get("year"),
+        "doi": meta.get("doi"),
+        "abstract": meta.get("abstract"),
+        "metadata_source": meta.get("metadata_source", "pdf"),
+        "_pdf_bytes_size": len(pdf_bytes),
+    }
+
+
 @router.post("/from-url", response_model=IngestOut, status_code=status.HTTP_201_CREATED)
 def ingest_from_url(body: IngestFromUrlBody):
     """Ingest a paper from a URL (arXiv, DOI, PubMed, bioRxiv) — no PDF needed."""
@@ -372,12 +418,24 @@ async def ingest_from_url_full(body: IngestFromUrlBody):
 
     if pdf_bytes:
         log.info("Full PDF pipeline | url=%.80s | size=%d bytes", body.url, len(pdf_bytes))
-        # Override extracted metadata with URL-resolved metadata (better quality)
         pdf_meta = extract_metadata(pdf_bytes)
         raw_text = pdf_meta.get("raw_text", "")
-        # Prefer URL-resolved fields (API metadata > heuristic PDF extraction)
-        merged = {**pdf_meta, **{k: v for k, v in meta.items() if v is not None and k != "raw_text"}}
+        # Merge: API metadata wins, but only if it actually has data.
+        # Empty list/string from a failed API lookup must NOT override
+        # good data extracted from the PDF.
+        merged = dict(pdf_meta)
+        for k, v in meta.items():
+            if k == "raw_text":
+                continue
+            if v is None:
+                continue
+            if isinstance(v, (list, str)) and not v:
+                continue  # skip empty list / empty string — keep PDF-extracted value
+            merged[k] = v
         merged["raw_text"] = raw_text
+        if not merged.get("authors") or not merged.get("abstract"):
+            log.warning("Metadata still incomplete after merge | authors=%s abstract_len=%d",
+                        bool(merged.get("authors")), len(merged.get("abstract") or ""))
 
         filename = f"{merged.get('title', 'paper')[:60]}.pdf"
         try:
@@ -388,7 +446,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody):
 
         summary = None
         try:
-            summary = summarize_paper(raw_text, merged.get("title", ""))
+            summary = summarize_paper(raw_text, merged.get("title", ""), body.summary_instructions or None)
         except Exception as exc:
             log.warning("Summary failed (non-fatal) | %s", exc)
 
@@ -497,7 +555,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody):
         summary = None
         if meta.get("abstract"):
             try:
-                summary = summarize_paper(meta["abstract"], meta.get("title", ""))
+                summary = summarize_paper(meta["abstract"], meta.get("title", ""), body.summary_instructions or None)
             except Exception as exc:
                 log.warning("Summary failed (non-fatal) | %s", exc)
 
@@ -696,6 +754,112 @@ def regenerate_summary(paper_id: str):
     summary = summarize_paper(raw_text, paper.get("title", ""))
     updated = update_paper(driver, paper_id, {"summary": summary})
     return {"summary": updated.get("summary") if updated else summary}
+
+
+@router.post("/{paper_id}/refetch-pdf")
+async def refetch_pdf(paper_id: str):
+    """
+    Download the PDF for a paper (arXiv / bioRxiv / medRxiv) using its stored DOI,
+    run the full extraction pipeline, and update the paper + authors in Neo4j.
+    Returns the updated paper with refreshed authors list.
+    """
+    import asyncio as _asyncio
+    from services.metadata_from_url import fetch_pdf_bytes, _ARXIV_ID
+    from services.pdf_parser import extract_metadata
+    from services.drive import upload_pdf, get_file_url
+    from services.ai import summarize_paper
+    from db.queries.people import get_or_create_person_with_affiliation, link_author
+
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    doi = paper.get("doi") or ""
+    if not doi:
+        raise HTTPException(status_code=422, detail="Paper has no DOI — cannot locate PDF")
+
+    # Build a URL we can pass to fetch_pdf_bytes
+    if doi.lower().startswith("arxiv:"):
+        arxiv_id = doi[len("arxiv:"):]
+        source_url = f"https://arxiv.org/abs/{arxiv_id}"
+    elif doi.startswith("10.1101/"):
+        source_url = f"https://www.biorxiv.org/content/{doi}"
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail=f"PDF auto-download is only supported for arXiv and bioRxiv papers (DOI: {doi})"
+        )
+
+    # Download PDF
+    try:
+        pdf_bytes = await _asyncio.to_thread(fetch_pdf_bytes, source_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PDF download failed: {exc}")
+
+    if not pdf_bytes:
+        raise HTTPException(status_code=502, detail="Could not download PDF — source may not provide open-access PDFs")
+
+    log.info("refetch-pdf | paper_id=%s | doi=%s | size=%d bytes", paper_id, doi, len(pdf_bytes))
+
+    # Run full extraction
+    pdf_meta = extract_metadata(pdf_bytes)
+    raw_text = pdf_meta.get("raw_text", "")
+
+    # Merge: keep existing non-empty paper fields, fill gaps from PDF extraction
+    updates: dict = {}
+    if not paper.get("abstract") and pdf_meta.get("abstract"):
+        updates["abstract"] = pdf_meta["abstract"]
+    if not paper.get("venue") and pdf_meta.get("venue"):
+        updates["venue"] = pdf_meta["venue"]
+    if not paper.get("year") and pdf_meta.get("year"):
+        updates["year"] = pdf_meta["year"]
+
+    # Always update raw_text and drive_file_id (re-upload PDF)
+    try:
+        filename = f"{paper.get('title', 'paper')[:60]}.pdf"
+        drive_file_id = upload_pdf(pdf_bytes, filename)
+        updates["drive_file_id"] = drive_file_id
+    except Exception as exc:
+        log.warning("Drive upload failed (non-fatal) | %s", exc)
+        drive_file_id = paper.get("drive_file_id")
+
+    updates["raw_text"] = raw_text
+
+    # Re-generate summary if we got full text and paper has none
+    if raw_text and not paper.get("summary"):
+        try:
+            updates["summary"] = summarize_paper(raw_text, paper.get("title", ""))
+        except Exception as exc:
+            log.warning("Summary failed (non-fatal) | %s", exc)
+
+    updated_paper = update_paper(driver, paper_id, updates)
+
+    # Save authors (PDF extraction may have found them)
+    authors_saved = []
+    existing_author_ids = {
+        r["person"]["id"]
+        for r in driver.session().run(
+            "MATCH (p:Paper {id:$id})-[:AUTHORED_BY]->(a:Person) RETURN a AS person", id=paper_id
+        )
+    }
+    for name in pdf_meta.get("authors") or []:
+        if not name:
+            continue
+        aff_map = {d["name"]: d.get("affiliation") for d in (pdf_meta.get("authors_detail") or [])}
+        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        if person["id"] not in existing_author_ids:
+            link_author(driver, paper_id, person["id"])
+        authors_saved.append(name)
+
+    log.info("refetch-pdf done | paper_id=%s | authors=%d | raw_text_len=%d",
+             paper_id, len(authors_saved), len(raw_text))
+
+    return {
+        **(updated_paper or paper),
+        "authors": authors_saved,
+        "drive_url": get_file_url(drive_file_id) if drive_file_id else None,
+    }
 
 
 @router.get("/{paper_id}/note", response_model=NoteOut)

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
-import { parsePdf, ingestFromUrl } from "../api/client";
+import { parsePdf, previewUrl } from "../api/client";
 import UploadConfirmModal from "./UploadConfirmModal";
 import type { ParsedMeta, T_IngestOut } from "../types";
 
@@ -18,6 +18,7 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
   const [error, setError]         = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [parsedMeta, setParsedMeta]   = useState<ParsedMeta | null>(null);
+  const [pendingUrl, setPendingUrl]   = useState<string | null>(null);
   const [urlValue, setUrlValue]   = useState("");
   const [loadingUrl, setLoadingUrl] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -63,10 +64,11 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
     setLoadingUrl(true);
     setError(null);
     try {
-      const paper = await ingestFromUrl(urlValue.trim(), undefined, debug);
+      const meta = await previewUrl(urlValue.trim());
+      setPendingUrl(urlValue.trim());
+      setParsedMeta(meta);
       setUrlValue("");
       setOpen(false);
-      onUploaded(paper);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not resolve URL");
     } finally {
@@ -77,6 +79,7 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
   const handleConfirmed = (paper: T_IngestOut) => {
     setPendingFile(null);
     setParsedMeta(null);
+    setPendingUrl(null);
     onUploaded(paper);
   };
 
@@ -188,12 +191,13 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
         )}
       </div>
 
-      {pendingFile && parsedMeta && (
+      {parsedMeta && (pendingFile || pendingUrl) && (
         <UploadConfirmModal
           file={pendingFile}
           meta={parsedMeta}
+          url={pendingUrl ?? undefined}
           onConfirmed={handleConfirmed}
-          onCancel={() => { setPendingFile(null); setParsedMeta(null); }}
+          onCancel={() => { setPendingFile(null); setParsedMeta(null); setPendingUrl(null); }}
           debug={debug}
         />
       )}
