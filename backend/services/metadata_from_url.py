@@ -93,8 +93,12 @@ def _fetch_arxiv(arxiv_id: str) -> dict | None:
         log.warning("arXiv returned no entry for id=%s", clean)
         return None
 
-    title     = (entry.findtext("atom:title",   "", ns) or "").strip().replace("\n", " ")
-    abstract  = (entry.findtext("atom:summary", "", ns) or "").strip().replace("\n", " ")
+    def _norm(s: str) -> str:
+        """Normalize whitespace: collapse all runs of whitespace to a single space."""
+        return re.sub(r"\s+", " ", s).strip()
+
+    title     = _norm(entry.findtext("atom:title",   "", ns) or "")
+    abstract  = _norm(entry.findtext("atom:summary", "", ns) or "")
     published = entry.findtext("atom:published", "", ns) or ""
     year      = int(published[:4]) if len(published) >= 4 else None
 
@@ -115,9 +119,9 @@ def _fetch_arxiv(arxiv_id: str) -> dict | None:
     venue_tag = entry.find("arxiv:journal_ref", ns)
     venue = venue_tag.text.strip() if venue_tag is not None and venue_tag.text else "arXiv"
 
-    return {
+    result = {
         "title": title,
-        "abstract": abstract,
+        "abstract": abstract or None,
         "year": year,
         "authors": authors,
         "doi": doi,
@@ -126,6 +130,21 @@ def _fetch_arxiv(arxiv_id: str) -> dict | None:
         "topics": [],
         "metadata_source": "arxiv",
     }
+
+    # Upgrade via Semantic Scholar for richer metadata (citation count, affiliations)
+    # especially if authors or abstract are missing from the Atom feed
+    if not authors or not abstract:
+        log.info("arXiv Atom missing authors/abstract — trying S2 upgrade | id=%s", clean)
+        s2 = lookup_semantic_scholar(doi)
+        if s2 and s2.get("title"):
+            # Merge: keep arXiv fields where S2 is missing, fill gaps from S2
+            for key in ("authors", "abstract", "citation_count", "authors_detail"):
+                if not result.get(key) and s2.get(key):
+                    result[key] = s2[key]
+            if s2.get("metadata_source"):
+                result["metadata_source"] = "arxiv+s2"
+
+    return result
 
 
 # ── bioRxiv / medRxiv ─────────────────────────────────────────────────────────
@@ -154,8 +173,8 @@ def _fetch_biorxiv(doi: str, server: str = "biorxiv") -> dict | None:
         authors = [a.strip() for a in authors_raw.split(";") if a.strip()]
 
         return {
-            "title":          (paper.get("title") or "").strip(),
-            "abstract":       (paper.get("abstract") or "").strip() or None,
+            "title":          re.sub(r"\s+", " ", paper.get("title") or "").strip(),
+            "abstract":       re.sub(r"\s+", " ", paper.get("abstract") or "").strip() or None,
             "year":           year,
             "authors":        authors,
             "doi":            paper.get("doi") or doi,
@@ -229,6 +248,30 @@ def _fetch_pubmed(pmid: str) -> dict | None:
         return None
 
 
+# ── DOI resolver (S2 → CrossRef, merging gaps) ────────────────────────────────
+
+def _resolve_doi(doi: str) -> dict | None:
+    """Resolve a DOI via S2 then CrossRef, merging the two to fill any gaps."""
+    s2 = lookup_semantic_scholar(doi)
+    cr = lookup_crossref(doi)
+
+    if not s2 and not cr:
+        return None
+    if not s2:
+        return cr
+    if not cr:
+        return s2
+
+    # Both succeeded — start with S2 (richer: citation count, affiliations)
+    # then fill any missing fields from CrossRef
+    result = dict(s2)
+    for key in ("authors", "abstract", "year", "venue", "authors_detail"):
+        if not result.get(key) and cr.get(key):
+            log.info("Filling missing %s from CrossRef | doi=%s", key, doi)
+            result[key] = cr[key]
+    return result
+
+
 # ── Main resolver ─────────────────────────────────────────────────────────────
 
 def resolve_url(url: str) -> dict | None:
@@ -255,25 +298,30 @@ def resolve_url(url: str) -> dict | None:
     if m:
         doi = m.group(1).rstrip(".,;)")
         log.info("Resolving DOI URL | doi=%s", doi)
-        return lookup_semantic_scholar(doi) or lookup_crossref(doi)
+        return _resolve_doi(doi)
 
     # --- bare DOI (10.xxxx/...) --------------------------------------------
     m = _DOI_BARE.match(url)
     if m:
         doi = m.group(1).rstrip(".,;)")
         log.info("Resolving bare DOI | doi=%s", doi)
-        return lookup_semantic_scholar(doi) or lookup_crossref(doi)
+        return _resolve_doi(doi)
 
     # --- PubMed URL ---------------------------------------------------------
     m = _PUBMED_URL.search(url)
     if m:
         log.info("Resolving PubMed | pmid=%s", m.group(1))
         result = _fetch_pubmed(m.group(1))
-        # Upgrade via S2 if we got a DOI (richer metadata + citation count)
+        # Upgrade via S2/CrossRef if we got a DOI (richer metadata + citation count)
         if result and result.get("doi"):
-            s2 = lookup_semantic_scholar(result["doi"])
-            if s2 and s2.get("title"):
-                return s2
+            enriched = _resolve_doi(result["doi"])
+            if enriched and enriched.get("title"):
+                # Fill PubMed gaps from DOI lookup; PubMed abstract is usually best
+                for key in ("authors", "authors_detail", "citation_count", "venue"):
+                    if not result.get(key) and enriched.get(key):
+                        result[key] = enriched[key]
+                if not result.get("abstract") and enriched.get("abstract"):
+                    result["abstract"] = enriched["abstract"]
         return result
 
     # --- bioRxiv / medRxiv URL (DOI embedded in path) ----------------------
@@ -308,9 +356,11 @@ def fetch_pdf_bytes(url: str) -> bytes | None:
         pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
         log.info("Downloading arXiv PDF | url=%s", pdf_url)
         r = _get(pdf_url, timeout=60)
-        if r and r.headers.get("content-type", "").startswith("application/pdf"):
+        if r and r.content[:4] == b"%PDF":
             return r.content
-        log.warning("arXiv PDF download returned non-PDF content-type")
+        log.warning("arXiv PDF download is not a PDF | content-type=%s | first_bytes=%s",
+                    r.headers.get("content-type") if r else None,
+                    r.content[:20] if r else None)
         return None
 
     # bioRxiv / medRxiv → {content_url}.full.pdf
@@ -323,9 +373,25 @@ def fetch_pdf_bytes(url: str) -> bytes | None:
         ver = ver_m.group(1) if ver_m else ""
         pdf_url = f"https://www.{site}.org/content/{doi_path}{ver}.full.pdf"
         log.info("Downloading %s PDF | url=%s", site, pdf_url)
-        r = _get(pdf_url, timeout=60)
-        if r and r.headers.get("content-type", "").startswith("application/pdf"):
-            return r.content
-        log.warning("%s PDF download returned non-PDF content-type", site)
+        # bioRxiv CDN requires Referer + Accept headers to avoid 403
+        try:
+            r = httpx.get(
+                pdf_url,
+                headers={
+                    "User-Agent": _UA,
+                    "Referer": f"https://www.{site}.org/content/{doi_path}{ver}",
+                    "Accept": "application/pdf,*/*",
+                },
+                verify=_ssl_verify(),
+                timeout=60,
+                follow_redirects=True,
+            )
+            r.raise_for_status()
+            if r.content[:4] == b"%PDF":
+                return r.content
+            log.warning("%s PDF is not a PDF | content-type=%s | first_bytes=%s",
+                        site, r.headers.get("content-type"), r.content[:20])
+        except Exception as e:
+            log.warning("%s PDF download failed | url=%s | %s", site, pdf_url, e)
 
     return None

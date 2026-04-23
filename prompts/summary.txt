@@ -5,8 +5,10 @@ Given the following paper text, write a concise summary covering:
 2. **Method**: What approach or method do they use?
 3. **Key findings**: What are the main results or contributions?
 4. **Relevance**: Who would benefit from reading this?
+5. **Data**: Explain in great detail what exactly the input data is and what the output data is. In the context of the model.
+6. **Training data**: What exactly was used as training data? How many point what kind of data from where?
 
-Keep the summary under 300 words. Use plain language where possible.
+Keep the summary under 500 words. Use plain language where possible.
 
 Paper title: {title}
 

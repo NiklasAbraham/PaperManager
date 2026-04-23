@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { uploadPdf, ingestFromUrlFull, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects } from "../api/client";
+import { uploadPdf, ingestFromUrlFull, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, previewUrlPdf } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
@@ -59,6 +59,33 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   useEffect(() => {
     listProjects().then(setProjects).catch(() => {});
   }, []);
+
+  // PDF fallback (URL mode only) — download PDF and re-fill fields
+  const [pdfFallbackLoading, setPdfFallbackLoading] = useState(false);
+  const [pdfFallbackError, setPdfFallbackError]     = useState<string | null>(null);
+  const [pdfFallbackDone, setPdfFallbackDone]       = useState(false);
+
+  const handlePdfFallback = async () => {
+    if (!url) return;
+    setPdfFallbackLoading(true);
+    setPdfFallbackError(null);
+    try {
+      const meta = await previewUrlPdf(url);
+      if (meta.title && !title) setTitle(meta.title);
+      if (meta.authors?.length && !authors) setAuthors(meta.authors.join(", "));
+      if (meta.year && !year) setYear(String(meta.year));
+      if (meta.doi && !doi) setDoi(meta.doi);
+      if (meta.abstract && !abstract) setAbstract(meta.abstract);
+      // Also fill if already empty even if we have some partial data
+      if (meta.authors?.length && !authors) setAuthors(meta.authors.join(", "));
+      if (meta.abstract && !abstract) setAbstract(meta.abstract);
+      setPdfFallbackDone(true);
+    } catch (e) {
+      setPdfFallbackError(e instanceof Error ? e.message : "PDF extraction failed");
+    } finally {
+      setPdfFallbackLoading(false);
+    }
+  };
 
   // PDF-missing banner (URL mode only)
   const [pdfMissing, setPdfMissing]     = useState(false);
@@ -181,7 +208,8 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     try {
       let paper: T_IngestOut;
       if (urlMode) {
-        paper = await ingestFromUrlFull(url!, selectedProjectId || undefined, debug);
+        const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
+        paper = await ingestFromUrlFull(url!, selectedProjectId || undefined, debug, isDefault ? undefined : summaryInstructions);
       } else {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
         paper = await uploadPdf(file!, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions, debug);
@@ -715,6 +743,36 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
               </select>
             </Field>
           )}
+          {/* PDF fallback — shown in URL mode when authors or abstract are missing */}
+          {urlMode && (!authors.trim() || !abstract.trim()) && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-1.5">
+              <p className="text-xs font-medium text-amber-800">
+                {!authors.trim() && !abstract.trim()
+                  ? "Authors and abstract are missing."
+                  : !authors.trim() ? "Authors are missing." : "Abstract is missing."}
+                {" "}Try extracting them directly from the PDF.
+              </p>
+              {pdfFallbackDone ? (
+                <p className="text-xs text-green-700 font-medium">✓ Fields filled from PDF extraction.</p>
+              ) : (
+                <button
+                  onClick={handlePdfFallback}
+                  disabled={pdfFallbackLoading}
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                >
+                  {pdfFallbackLoading && (
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  )}
+                  {pdfFallbackLoading ? "Downloading PDF…" : "↓ Extract from PDF"}
+                </button>
+              )}
+              {pdfFallbackError && <p className="text-xs text-red-600">{pdfFallbackError}</p>}
+            </div>
+          )}
+
           {duplicate && (
             <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs">
               <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>

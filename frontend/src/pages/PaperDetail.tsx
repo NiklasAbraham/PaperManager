@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper } from "../api/client";
+import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
@@ -191,6 +191,8 @@ export default function PaperDetail() {
   const [deleting, setDeleting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [refetching, setRefetching] = useState(false);
+  const [refetchError, setRefetchError] = useState<string | null>(null);
   // Inline meta editing
   const [metaEdit, setMetaEdit] = useState<Partial<{ title: string; year: string; doi: string; venue: string; abstract: string }>>({});
 
@@ -650,7 +652,7 @@ export default function PaperDetail() {
                     <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
                       {authors.map((a) => (
                         <span key={a.id} className="group flex items-center gap-1 text-sm text-gray-600">
-                          <Link to={`/people`} className="hover:text-violet-600 transition-colors">
+                          <Link to={`/people?id=${a.id}`} className="hover:text-violet-600 transition-colors">
                             {a.name}
                           </Link>
                           {a.affiliation && (
@@ -755,7 +757,7 @@ export default function PaperDetail() {
                       {authors.map((a) => (
                         <div key={a.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-4 py-3">
                           <div>
-                            <Link to="/people" className="text-sm font-medium text-gray-800 hover:text-violet-600 transition-colors">
+                            <Link to={`/people?id=${a.id}`} className="text-sm font-medium text-gray-800 hover:text-violet-600 transition-colors">
                               {a.name}
                             </Link>
                             {a.affiliation && (
@@ -788,7 +790,7 @@ export default function PaperDetail() {
                       {involves.map((p) => (
                         <div key={`${p.id}-${p.role}`} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-4 py-3">
                           <div>
-                            <Link to="/people" className="text-sm font-medium text-gray-800 hover:text-violet-600 transition-colors">
+                            <Link to={`/people?id=${p.id}`} className="text-sm font-medium text-gray-800 hover:text-violet-600 transition-colors">
                               {p.name}
                             </Link>
                             {p.affiliation && (
@@ -871,6 +873,47 @@ export default function PaperDetail() {
                 </MetaSection>
 
                 {/* AI Summary */}
+                {/* Re-fetch PDF — shown when paper has no PDF or missing authors/abstract */}
+                {(paper.doi?.startsWith("arXiv:") || paper.doi?.startsWith("10.1101/")) && (
+                  <MetaSection title="PDF & extraction">
+                    <p className="text-xs text-gray-500 mb-2">
+                      {paper.drive_file_id
+                        ? "Re-download the PDF and re-run the full extraction pipeline (authors, abstract, summary, figures)."
+                        : "No PDF uploaded yet. Download the PDF and run the full extraction pipeline."}
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (!id || refetching) return;
+                        setRefetching(true);
+                        setRefetchError(null);
+                        try {
+                          const res = await refetchPdf(id);
+                          // Refresh paper + authors
+                          const updated = await apiFetch<PaperFull>(`/papers/${id}`);
+                          setPaper(updated);
+                          const updatedAuthors = await apiFetch<Person[]>(`/papers/${id}/authors`);
+                          setAuthors(updatedAuthors);
+                        } catch (e) {
+                          setRefetchError(e instanceof Error ? e.message : "Re-fetch failed");
+                        } finally {
+                          setRefetching(false);
+                        }
+                      }}
+                      disabled={refetching}
+                      className="text-xs px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 font-medium flex items-center gap-2"
+                    >
+                      {refetching && (
+                        <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                      )}
+                      {refetching ? "Downloading & extracting…" : "↓ Download PDF & re-extract"}
+                    </button>
+                    {refetchError && <p className="text-xs text-red-500 mt-1">{refetchError}</p>}
+                  </MetaSection>
+                )}
+
                 <MetaSection title="AI Summary">
                   <button
                     onClick={async () => {

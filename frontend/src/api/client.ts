@@ -45,6 +45,22 @@ export async function uploadPdf(
   return res.json();
 }
 
+export async function previewUrl(url: string): Promise<ParsedMeta> {
+  return apiFetch<ParsedMeta>("/papers/preview-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+}
+
+export async function previewUrlPdf(url: string): Promise<ParsedMeta> {
+  return apiFetch<ParsedMeta>("/papers/preview-url/pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+}
+
 export async function ingestFromUrl(url: string, projectId?: string, debug?: boolean): Promise<T_IngestOut> {
   return apiFetch<T_IngestOut>("/papers/from-url", {
     method: "POST",
@@ -53,11 +69,11 @@ export async function ingestFromUrl(url: string, projectId?: string, debug?: boo
   });
 }
 
-export async function ingestFromUrlFull(url: string, projectId?: string, debug?: boolean): Promise<T_IngestOut> {
+export async function ingestFromUrlFull(url: string, projectId?: string, debug?: boolean, summaryInstructions?: string): Promise<T_IngestOut> {
   return apiFetch<T_IngestOut>("/papers/from-url-full", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, project_id: projectId ?? null, debug: debug ?? false }),
+    body: JSON.stringify({ url, project_id: projectId ?? null, debug: debug ?? false, summary_instructions: summaryInstructions ?? null }),
   });
 }
 
@@ -70,8 +86,51 @@ export async function countDebugPapers(): Promise<number> {
   return Array.isArray(res) ? res.length : 0;
 }
 
+export async function exportRdf(): Promise<void> {
+  const res = await fetch(`${BASE}/export/rdf`);
+  if (!res.ok) throw new Error(`Export failed ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "papermanager.ttl"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function exportCsv(): Promise<void> {
+  const res = await fetch(`${BASE}/export/csv`);
+  if (!res.ok) throw new Error(`Export failed ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "papermanager_export.zip"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function importRdf(file: File): Promise<{ imported: Record<string, number> }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/export/import/rdf`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Import failed ${res.status}: ${detail}`);
+  }
+  return res.json();
+}
+
+export async function clearPapers(): Promise<Record<string, number>> {
+  return apiFetch("/admin/clear-papers", { method: "DELETE" });
+}
+
+export async function seedDefaults(): Promise<{ seeded: number }> {
+  return apiFetch("/admin/seed-defaults", { method: "POST" });
+}
+
 export async function regenerateSummary(paperId: string): Promise<{ summary: string }> {
   return apiFetch(`/papers/${paperId}/regenerate-summary`, { method: "POST" });
+}
+
+export async function refetchPdf(paperId: string): Promise<{ authors: string[]; drive_url?: string }> {
+  return apiFetch(`/papers/${paperId}/refetch-pdf`, { method: "POST" });
 }
 
 export async function deletePaper(paperId: string): Promise<void> {

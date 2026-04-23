@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import type { Person, Paper } from "../types";
 
@@ -52,8 +52,17 @@ export default function People() {
   const [newAffil, setNewAffil]   = useState("");
   const [saving, setSaving]       = useState(false);
 
+  const [searchParams] = useSearchParams();
+
   useEffect(() => {
-    apiFetch<PersonSummary[]>("/people").then(setPeople).catch(() => {});
+    const targetId = searchParams.get("id");
+    apiFetch<PersonSummary[]>("/people").then((list) => {
+      setPeople(list);
+      if (targetId) {
+        const target = list.find((p) => p.id === targetId);
+        if (target) selectPerson(target);
+      }
+    }).catch(() => {});
   }, []);
 
   const selectPerson = async (p: PersonSummary) => {
@@ -199,6 +208,39 @@ function PersonDetailPanel({ person, onChanged }: {
   onChanged: () => void;
 }) {
   const navigate = useNavigate();
+  const [editName, setEditName]   = useState(person.name);
+  const [editAffil, setEditAffil] = useState(person.affiliation ?? "");
+  const [saving, setSaving]       = useState(false);
+  const [editing, setEditing]     = useState(false);
+
+  // Keep local state in sync when person prop changes (e.g. after refresh)
+  useEffect(() => {
+    setEditName(person.name);
+    setEditAffil(person.affiliation ?? "");
+    setEditing(false);
+  }, [person.id]);
+
+  const handleSave = async () => {
+    if (!editName.trim()) return;
+    setSaving(true);
+    try {
+      await apiFetch(`/people/${person.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim(), affiliation: editAffil.trim() || null }),
+      });
+      setEditing(false);
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditName(person.name);
+    setEditAffil(person.affiliation ?? "");
+    setEditing(false);
+  };
 
   // Group papers by role
   const grouped = ROLES.map((r) => ({
@@ -219,19 +261,65 @@ function PersonDetailPanel({ person, onChanged }: {
   return (
     <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-gray-900">{person.name}</h2>
-        {person.affiliation && (
-          <p className="text-sm text-gray-500 mt-0.5">{person.affiliation}</p>
-        )}
-        {person.specialties.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {person.specialties.map((t) => (
-              <span key={t.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
-                {t.name}
-              </span>
-            ))}
-          </div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          {editing ? (
+            <div className="space-y-2">
+              <input
+                autoFocus
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") handleCancel(); }}
+                className="w-full text-xl font-bold text-gray-900 border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+              <input
+                value={editAffil}
+                onChange={(e) => setEditAffil(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") handleCancel(); }}
+                placeholder="Affiliation (optional)"
+                className="w-full text-sm text-gray-500 border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !editName.trim()}
+                  className="px-3 py-1 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-xl font-bold text-gray-900">{person.name}</h2>
+              {person.affiliation && (
+                <p className="text-sm text-gray-500 mt-0.5">{person.affiliation}</p>
+              )}
+            </>
+          )}
+          {person.specialties.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {person.specialties.map((t) => (
+                <span key={t.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                  {t.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        {!editing && (
+          <button
+            onClick={() => setEditing(true)}
+            className="shrink-0 text-xs text-gray-400 hover:text-violet-600 transition-colors mt-1"
+          >
+            Edit
+          </button>
         )}
       </div>
 

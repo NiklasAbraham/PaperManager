@@ -139,6 +139,7 @@ class IngestFromUrlBody(BaseModel):
     url: str
     project_id: str | None = None
     debug: bool = False
+    summary_instructions: str | None = None
 
 
 # ── References ─────────────────────────────────────────────────────────────────
