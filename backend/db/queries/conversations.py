@@ -9,6 +9,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def estimate_tokens_approx(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
 def create_conversation(driver: Driver, title: str) -> dict:
     now = _now()
     with driver.session() as session:
@@ -159,3 +163,85 @@ def delete_conversation(driver: Driver, conv_id: str) -> None:
             """,
             id=conv_id,
         )
+
+
+def rename_conversation(driver: Driver, conv_id: str, title: str) -> dict:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (c:Conversation {id: $id}) SET c.title = $title RETURN c",
+            id=conv_id, title=title,
+        )
+        row = result.single()
+        return dict(row["c"]) if row else {}
+
+
+# ── Per-paper conversations ────────────────────────────────────────────────────
+
+def create_paper_conversation(driver: Driver, paper_id: str, title: str) -> dict:
+    now = _now()
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (p:Paper {id: $paper_id})
+            CREATE (c:Conversation {
+                id: $id, title: $title, type: 'paper',
+                created_at: $now, updated_at: $now,
+                compacted: false
+            })
+            CREATE (c)-[:ABOUT_PAPER]->(p)
+            RETURN c
+            """,
+            id=str(uuid.uuid4()), paper_id=paper_id, title=title, now=now,
+        )
+        row = result.single()
+        if not row:
+            raise ValueError(f"Paper {paper_id} not found")
+        return dict(row["c"])
+
+
+def list_paper_conversations(driver: Driver, paper_id: str) -> list[dict]:
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (c:Conversation)-[:ABOUT_PAPER]->(p:Paper {id: $paper_id})
+            OPTIONAL MATCH (c)-[:HAS_MESSAGE]->(m:Message)
+            RETURN c, count(m) AS message_count
+            ORDER BY c.updated_at DESC
+            """,
+            paper_id=paper_id,
+        )
+        rows = []
+        for r in result:
+            d = dict(r["c"])
+            d["message_count"] = r["message_count"]
+            rows.append(d)
+        return rows
+
+
+def get_paper_context_snippets(driver: Driver, paper_id: str) -> dict:
+    """Return note content + compacted conversation summaries for a paper (for knowledge chat context)."""
+    with driver.session() as session:
+        # Note
+        note_result = session.run(
+            "MATCH (n:Note)-[:ABOUT]->(p:Paper {id: $id}) RETURN n.content AS content",
+            id=paper_id,
+        ).single()
+        note = note_result["content"] if note_result else None
+
+        # Conversation summaries (compacted ones) or recent messages
+        conv_result = session.run(
+            """
+            MATCH (c:Conversation)-[:ABOUT_PAPER]->(p:Paper {id: $id})
+            OPTIONAL MATCH (c)-[:HAS_MESSAGE]->(m:Message)
+            WITH c, m ORDER BY m.created_at ASC
+            WITH c, collect(m) AS messages
+            RETURN c.title AS title, c.compacted AS compacted,
+                   [msg IN messages | {role: msg.role, content: msg.content}] AS messages
+            ORDER BY c.updated_at DESC
+            LIMIT 5
+            """,
+            id=paper_id,
+        )
+        conversations = [dict(r) for r in conv_result]
+
+    return {"note": note, "conversations": conversations}

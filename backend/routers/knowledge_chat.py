@@ -12,6 +12,7 @@ from db.connection import get_driver
 from db.queries.conversations import (
     create_conversation, add_message, list_conversations,
     get_messages, compact_conversation, delete_conversation,
+    get_paper_context_snippets,
 )
 from models.schemas import KnowledgeChatRequest, ConversationOut, MessageOut
 from services.ai import knowledge_chat_stream, estimate_tokens, summarize_paper, CONTEXT_WINDOW
@@ -165,15 +166,42 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
     history_tokens = sum(estimate_tokens(m["content"]) for m in body.history)
     question_tokens = estimate_tokens(body.question)
 
+    # Enrich papers with their notes + conversation summaries
+    with driver.session() as session:
+        for p in all_papers:
+            snippets = get_paper_context_snippets(driver, p["id"])
+            if snippets.get("note"):
+                p["_note"] = snippets["note"]
+            if snippets.get("conversations"):
+                conv_texts = []
+                for conv in snippets["conversations"]:
+                    msgs = conv.get("messages") or []
+                    if not msgs:
+                        continue
+                    if conv.get("compacted") and msgs:
+                        conv_texts.append(f"[Conversation: {conv['title']}]\n{msgs[0]['content']}")
+                    else:
+                        excerpt = "\n".join(
+                            f"{m['role'].upper()}: {m['content'][:400]}"
+                            for m in msgs[-6:]  # last 3 exchanges
+                        )
+                        conv_texts.append(f"[Conversation: {conv['title']}]\n{excerpt}")
+                if conv_texts:
+                    p["_conversations"] = "\n\n".join(conv_texts)
+
     paper_infos = []
     for i, p in enumerate(all_papers):
-        text = " ".join(filter(None, [p.get("title"), p.get("abstract"), p.get("summary")]))
+        text_parts = [p.get("title"), p.get("abstract"), p.get("summary"),
+                      p.get("_note"), p.get("_conversations")]
+        text = " ".join(filter(None, text_parts))
         tok = estimate_tokens(text)
         paper_infos.append({
             "id": p["id"],
             "title": p.get("title") or "Untitled",
             "tokens": tok,
             "color": _PAPER_COLORS[i % len(_PAPER_COLORS)],
+            "has_note": bool(p.get("_note")),
+            "has_conversations": bool(p.get("_conversations")),
         })
 
     papers_tokens = sum(pi["tokens"] for pi in paper_infos)

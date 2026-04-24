@@ -129,8 +129,23 @@ export async function regenerateSummary(paperId: string): Promise<{ summary: str
   return apiFetch(`/papers/${paperId}/regenerate-summary`, { method: "POST" });
 }
 
+export async function reextractAbstract(paperId: string): Promise<{ abstract: string }> {
+  return apiFetch(`/papers/${paperId}/reextract-abstract`, { method: "POST" });
+}
+
 export async function refetchPdf(paperId: string): Promise<{ authors: string[]; drive_url?: string }> {
   return apiFetch(`/papers/${paperId}/refetch-pdf`, { method: "POST" });
+}
+
+export async function uploadPdfForPaper(paperId: string, file: File): Promise<{ drive_url?: string; authors_added: string[]; raw_text_len: number }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/papers/${paperId}/upload-pdf`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`PDF upload failed ${res.status}: ${detail}`);
+  }
+  return res.json();
 }
 
 export async function deletePaper(paperId: string): Promise<void> {
@@ -270,20 +285,80 @@ export async function removeAuthor(paperId: string, personId: string): Promise<v
   if (!res.ok) throw new Error(`Remove author failed ${res.status}`);
 }
 
-export async function listProjects(): Promise<{id: string; name: string; description?: string}[]> {
+export async function fetchPaperProjects(paperId: string): Promise<{id: string; name: string; description?: string; status?: string}[]> {
+  return apiFetch(`/papers/${paperId}/projects`);
+}
+
+export async function listProjects(): Promise<{id: string; name: string; description?: string; status?: string}[]> {
   return apiFetch("/projects");
+}
+
+export async function getProject(projectId: string): Promise<{id: string; name: string; description?: string; status?: string; papers: object[]}> {
+  return apiFetch(`/projects/${projectId}`);
+}
+
+export async function createProject(data: { name: string; description?: string; status?: string }): Promise<{id: string; name: string}> {
+  return apiFetch("/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
   await apiFetch(`/projects/${projectId}`, { method: "DELETE" });
 }
 
-export async function updateProject(projectId: string, data: { name?: string; description?: string }): Promise<void> {
+export async function updateProject(projectId: string, data: { name?: string; description?: string; status?: string }): Promise<void> {
   await apiFetch(`/projects/${projectId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+}
+
+export async function removePaperFromProject(projectId: string, paperId: string): Promise<void> {
+  await apiFetch(`/projects/${projectId}/papers/${paperId}`, { method: "DELETE" });
+}
+
+export async function addPaperToProject(projectId: string, paperId: string): Promise<void> {
+  await apiFetch(`/projects/${projectId}/papers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paper_id: paperId }),
+  });
+}
+
+export async function getProjectNote(projectId: string): Promise<{ content: string }> {
+  return apiFetch(`/projects/${projectId}/note`);
+}
+
+export async function saveProjectNote(projectId: string, content: string): Promise<{ content: string }> {
+  return apiFetch(`/projects/${projectId}/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function getProjectKeywords(projectId: string): Promise<{ content: string }> {
+  return apiFetch(`/projects/${projectId}/keywords`);
+}
+
+export async function saveProjectKeywords(projectId: string, content: string): Promise<{ content: string }> {
+  return apiFetch(`/projects/${projectId}/keywords`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
+export function projectBibtexUrl(projectId: string): string {
+  return `${BASE}/projects/${projectId}/export/bibtex`;
+}
+
+export function projectCsvUrl(projectId: string): string {
+  return `${BASE}/projects/${projectId}/export/csv`;
+}
+
+export function projectConversationsUrl(projectId: string): string {
+  return `${BASE}/projects/${projectId}/export/conversations`;
 }
 
 export async function createTag(paperId: string, name: string): Promise<void> {
@@ -298,6 +373,46 @@ export async function listReferences(
   paperId: string
 ): Promise<{ references: Reference[]; cited_by: Reference[] }> {
   return apiFetch(`/papers/${paperId}/references`);
+}
+
+// ── Per-paper conversations ───────────────────────────────────────────────────
+
+export async function listPaperConversations(paperId: string): Promise<import("../types").Conversation[]> {
+  return apiFetch(`/papers/${paperId}/conversations`);
+}
+
+export async function getPaperConversationMessages(paperId: string, convId: string): Promise<import("../types").KnowledgeMessage[]> {
+  return apiFetch(`/papers/${paperId}/conversations/${convId}/messages`);
+}
+
+export async function renamePaperConversation(paperId: string, convId: string, title: string): Promise<void> {
+  await apiFetch(`/papers/${paperId}/conversations/${convId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function compactPaperConversation(paperId: string, convId: string): Promise<void> {
+  await apiFetch(`/papers/${paperId}/conversations/${convId}/compact`, { method: "POST" });
+}
+
+export async function deletePaperConversation(paperId: string, convId: string): Promise<void> {
+  await apiFetch(`/papers/${paperId}/conversations/${convId}`, { method: "DELETE" });
+}
+
+export async function chatWithPaper(
+  paperId: string,
+  question: string,
+  history: { role: string; content: string }[],
+  model: string,
+  conversationId?: string,
+): Promise<{ answer: string; conversation_id: string }> {
+  return apiFetch(`/papers/${paperId}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history, model, conversation_id: conversationId ?? null }),
+  });
 }
 
 // ── Knowledge Chat ────────────────────────────────────────────────────────────
@@ -402,7 +517,7 @@ export async function putLiteratureKeywords(content: string): Promise<{ content:
 // ── Literature search ─────────────────────────────────────────────────────────
 
 export async function* searchLiterature(
-  body: { days: number; max_per_source: number; sources: string[] },
+  body: { days: number; max_per_source: number; sources: string[]; project_id?: string | null },
   signal?: AbortSignal,
 ): AsyncGenerator<LiteratureSseEvent> {
   const res = await fetch(`${BASE}/literature/search`, {

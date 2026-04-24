@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { uploadPdf, ingestFromUrlFull, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, previewUrlPdf } from "../api/client";
+import { uploadPdf, ingestFromUrlFull, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, previewUrlPdf, uploadPdfForPaper, parsePdf } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
@@ -54,11 +54,26 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const [newPersonEmail, setNewPersonEmail] = useState("");
 
   // Project selector
-  const [projects, setProjects] = useState<{id: string; name: string}[]>([]);
+  const [projects, setProjects] = useState<{id: string; name: string; description?: string}[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [suggestedProjectId, setSuggestedProjectId] = useState<string>("");
   useEffect(() => {
-    listProjects().then(setProjects).catch(() => {});
-  }, []);
+    listProjects().then((ps) => {
+      setProjects(ps);
+      // Auto-suggest: score each project by word overlap with paper title+abstract
+      if (ps.length === 0) return;
+      const paperText = `${meta.title ?? ""} ${meta.abstract ?? ""}`.toLowerCase();
+      const words = paperText.match(/\b\w{4,}\b/g) ?? [];
+      if (words.length === 0) return;
+      let best = { id: "", score: 0 };
+      for (const p of ps) {
+        const pText = `${p.name} ${p.description ?? ""}`.toLowerCase();
+        const hits = words.filter((w) => pText.includes(w)).length;
+        if (hits > best.score) best = { id: p.id, score: hits };
+      }
+      if (best.score >= 3) setSuggestedProjectId(best.id);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // PDF fallback (URL mode only) — download PDF and re-fill fields
   const [pdfFallbackLoading, setPdfFallbackLoading] = useState(false);
@@ -87,11 +102,28 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     }
   };
 
-  // PDF-missing banner (URL mode only)
+  // PDF-missing banner (URL mode only) — shown AFTER import on steps 3/4
   const [pdfMissing, setPdfMissing]     = useState(false);
   const [manualPdf, setManualPdf]       = useState<File | null>(null);
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [pdfUploaded, setPdfUploaded]   = useState(false);
+
+  // Manual PDF selected BEFORE import (when pdfFallbackError is set)
+  const [preImportPdf, setPreImportPdf]           = useState<File | null>(null);
+  const [preImportPdfLoading, setPreImportPdfLoading] = useState(false);
+
+  const handlePreImportPdf = async (f: File) => {
+    setPreImportPdf(f);
+    setPreImportPdfLoading(true);
+    try {
+      const extracted = await parsePdf(f);
+      if (extracted.authors?.length && !authors.trim()) setAuthors(extracted.authors.join(", "));
+      if (extracted.abstract && !abstract.trim()) setAbstract(extracted.abstract);
+      if (extracted.year && !year) setYear(String(extracted.year));
+      if (extracted.doi && !doi) setDoi(extracted.doi);
+    } catch { /* best-effort */ }
+    finally { setPreImportPdfLoading(false); }
+  };
 
   // Step 2: refs
   const [checkedRefs, setCheckedRefs] = useState<boolean[]>([]);
@@ -210,6 +242,10 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
       if (urlMode) {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
         paper = await ingestFromUrlFull(url!, selectedProjectId || undefined, debug, isDefault ? undefined : summaryInstructions);
+        // If user provided a PDF manually before import, attach it now
+        if (preImportPdf && paper.pdf_fetched === false) {
+          try { await uploadPdfForPaper(paper.id, preImportPdf); } catch { /* non-fatal */ }
+        }
       } else {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
         paper = await uploadPdf(file!, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions, debug);
@@ -254,7 +290,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     if (!manualPdf || !uploadedPaper) return;
     setUploadingPdf(true);
     try {
-      await uploadPdf(manualPdf, uploadedPaper.title);
+      await uploadPdfForPaper(uploadedPaper.id, manualPdf);
       setPdfUploaded(true);
       setPdfMissing(false);
     } catch (e) {
@@ -542,7 +578,9 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
       <p className="text-xs font-medium text-amber-800 mb-1.5">PDF not downloaded automatically</p>
       <p className="text-xs text-amber-700 mb-2">
-        arXiv and bioRxiv PDFs download automatically. For PubMed, DOI, or paywalled papers you can upload the PDF manually below — it will be matched by DOI and enrich the existing record.
+        The PDF couldn't be fetched (Cloudflare-protected or paywalled).{" "}
+        {url && <a href={url} target="_blank" rel="noreferrer" className="underline font-medium hover:text-amber-900">Open paper page ↗</a>}
+        {" "}— download the PDF manually and upload it below to enable full-text chat and search.
       </p>
       {pdfUploaded ? (
         <p className="text-xs text-green-700 font-medium">PDF uploaded successfully.</p>
@@ -729,47 +767,121 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
           <Field label="Abstract">
             <textarea value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={4} className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
           </Field>
-          {projects.length > 0 && (
-            <Field label="Add to project">
-              <select
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-gray-700"
-              >
-                <option value="">— None —</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </Field>
-          )}
-          {/* PDF fallback — shown in URL mode when authors or abstract are missing */}
-          {urlMode && (!authors.trim() || !abstract.trim()) && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-1.5">
-              <p className="text-xs font-medium text-amber-800">
-                {!authors.trim() && !abstract.trim()
-                  ? "Authors and abstract are missing."
-                  : !authors.trim() ? "Authors are missing." : "Abstract is missing."}
-                {" "}Try extracting them directly from the PDF.
-              </p>
+          <Field label="Add to project">
+            {projects.length === 0 ? (
+              <p className="text-xs text-gray-400 italic">No projects yet — create one in the Projects page.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {suggestedProjectId && !selectedProjectId && (
+                  <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
+                    <span className="text-xs text-violet-700 flex-1">
+                      ✦ Suggested: <strong>{projects.find((p) => p.id === suggestedProjectId)?.name}</strong>
+                    </span>
+                    <button
+                      onClick={() => setSelectedProjectId(suggestedProjectId)}
+                      className="text-xs bg-violet-600 text-white px-2.5 py-0.5 rounded-full hover:bg-violet-700 font-medium"
+                    >
+                      Add
+                    </button>
+                    <button onClick={() => setSuggestedProjectId("")} className="text-violet-400 hover:text-violet-700 text-xs">✕</button>
+                  </div>
+                )}
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => { setSelectedProjectId(e.target.value); setSuggestedProjectId(""); }}
+                  className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-gray-700"
+                >
+                  <option value="">— None —</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </Field>
+          {/* PDF attachment — always available in URL mode */}
+          {urlMode && (
+            <div className={`rounded-lg border px-3 py-2.5 space-y-1.5 ${
+              !authors.trim() || !abstract.trim()
+                ? "border-amber-200 bg-amber-50"
+                : "border-gray-200 bg-gray-50"
+            }`}>
+              {(!authors.trim() || !abstract.trim()) && (
+                <p className="text-xs font-medium text-amber-800">
+                  {!authors.trim() && !abstract.trim()
+                    ? "Authors and abstract are missing."
+                    : !authors.trim() ? "Authors are missing." : "Abstract is missing."}
+                  {" "}Try extracting them from the PDF.
+                </p>
+              )}
               {pdfFallbackDone ? (
                 <p className="text-xs text-green-700 font-medium">✓ Fields filled from PDF extraction.</p>
+              ) : pdfFallbackError ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-red-700">
+                    Auto-download blocked (Cloudflare/paywalled).{" "}
+                    <a href={url} target="_blank" rel="noreferrer" className="underline font-medium hover:text-red-900">
+                      Open paper page ↗
+                    </a>
+                    {" "}— download the PDF manually and upload it here:
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePreImportPdf(f); }}
+                      />
+                      <span className="px-2.5 py-1.5 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700 cursor-pointer flex items-center gap-1.5">
+                        {preImportPdfLoading && (
+                          <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                          </svg>
+                        )}
+                        {preImportPdfLoading ? "Extracting…" : preImportPdf ? `✓ ${preImportPdf.name}` : "Upload PDF"}
+                      </span>
+                    </label>
+                    {preImportPdf && <p className="text-xs text-green-700">PDF ready — will be attached on import.</p>}
+                  </div>
+                </div>
               ) : (
-                <button
-                  onClick={handlePdfFallback}
-                  disabled={pdfFallbackLoading}
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
-                >
-                  {pdfFallbackLoading && (
-                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                  )}
-                  {pdfFallbackLoading ? "Downloading PDF…" : "↓ Extract from PDF"}
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={handlePdfFallback}
+                    disabled={pdfFallbackLoading}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                  >
+                    {pdfFallbackLoading && (
+                      <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                    )}
+                    {pdfFallbackLoading ? "Downloading…" : "↓ Fetch PDF automatically"}
+                  </button>
+                  <span className="text-xs text-gray-400">or</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      className="hidden"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePreImportPdf(f); }}
+                    />
+                    <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:border-violet-400 hover:text-violet-700 transition-colors cursor-pointer">
+                      {preImportPdfLoading && (
+                        <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                      )}
+                      {preImportPdfLoading ? "Reading…" : preImportPdf ? `✓ ${preImportPdf.name}` : "Upload PDF manually"}
+                    </span>
+                  </label>
+                  {preImportPdf && <p className="text-xs text-green-700">PDF will be attached on import.</p>}
+                </div>
               )}
-              {pdfFallbackError && <p className="text-xs text-red-600">{pdfFallbackError}</p>}
             </div>
           )}
 
