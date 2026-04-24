@@ -189,7 +189,7 @@ def random_paper(driver: Driver, reading_status: str | None = None) -> dict | No
                 """
                 MATCH (p:Paper)
                 WHERE p.reading_status = $status
-                  AND NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+                  AND NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
                 WITH p, rand() AS r ORDER BY r LIMIT 1
                 RETURN p
                 """,
@@ -199,7 +199,7 @@ def random_paper(driver: Driver, reading_status: str | None = None) -> dict | No
             result = session.run(
                 """
                 MATCH (p:Paper)
-                WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+                WHERE NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
                 WITH p, rand() AS r ORDER BY r LIMIT 1
                 RETURN p
                 """

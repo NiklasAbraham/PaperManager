@@ -23,7 +23,6 @@ export interface AppSettings {
   showSourceStep: boolean;
   showSummaryPromptStep: boolean;
   autoSaveReferences: boolean;
-  showTagsStep: boolean;
   defaultSummaryInstructions: string;
 
   // Figures
@@ -47,7 +46,6 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   showSourceStep: true,
   showSummaryPromptStep: true,
   autoSaveReferences: false,
-  showTagsStep: false,
   defaultSummaryInstructions: DEFAULT_SUMMARY_INSTRUCTIONS,
   figureCaptionMethod: "docling",
   defaultGraphMode: "full",

@@ -199,13 +199,6 @@ export default function Settings() {
           />
         </Row>
 
-        <Row label="Tags step" description="Show the tag suggestion step after upload.">
-          <Toggle
-            value={settings.showTagsStep}
-            onChange={(v) => update({ showTagsStep: v })}
-          />
-        </Row>
-
         <div className="px-5 py-4 space-y-2">
           <div className="flex items-center justify-between">
             <div>
