@@ -29,6 +29,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const [year, setYear]         = useState(meta.year?.toString() ?? "");
   const [doi, setDoi]           = useState(meta.doi ?? "");
   const [abstract, setAbstract] = useState(meta.abstract ?? "");
+  const [documentType, setDocumentType] = useState<"paper" | "book" | "lecture_deck">("paper");
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<Paper | null>(null);
@@ -224,7 +225,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
         }
       } else {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
-        paper = await uploadPdf(file!, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions, debug);
+        paper = await uploadPdf(file!, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions, debug, documentType !== "paper" ? documentType : undefined);
       }
       await applySource(paper.id);
       if (urlMode && paper.pdf_fetched === false) setPdfMissing(true);
@@ -646,6 +647,27 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
               </div>
             )}
           </Field>
+          {!urlMode && (
+            <Field label="Document type">
+              <div className="flex gap-2">
+                {([ ["paper", "📄 Paper"], ["book", "📚 Book"], ["lecture_deck", "🎓 Lecture deck"] ] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setDocumentType(val)}
+                    className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg border transition-colors ${documentType === val ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {documentType !== "paper" && (
+                <p className="mt-1.5 text-xs text-violet-600">
+                  📌 References & figure extraction will be skipped. After upload, use the <strong>Chapters</strong> tab to auto-detect chapter structure and summaries.
+                </p>
+              )}
+            </Field>
+          )}
           {/* PDF attachment — always available in URL mode */}
           {urlMode && (
             <div className={`rounded-lg border px-3 py-2.5 space-y-1.5 ${

@@ -244,6 +244,92 @@ def knowledge_chat_stream(
     )
 
 
+def summarize_chapter(title: str, text: str) -> str:
+    """Return a markdown summary of a book/lecture chapter using Claude."""
+    if not text or not text.strip():
+        return "_No text available for this chapter._"
+
+    prompt = _load_prompt("chapter_summary.txt").format(
+        title=title or "(untitled chapter)",
+        text=text[:20000],
+    )
+    client = _personal_client()
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text
+
+
+def chat_with_chapter(
+    chapter_title: str,
+    chapter_text: str,
+    question: str,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    """Answer *question* about a specific chapter using Claude."""
+    system = _load_prompt("chapter_chat_system.txt").format(
+        title=chapter_title or "(untitled chapter)",
+        text=chapter_text[:30000],
+    )
+    client = _personal_client()
+    messages: list[dict[str, Any]] = list(history or [])
+    messages.append({"role": "user", "content": question})
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=1024,
+        system=system,
+        messages=messages,
+    )
+    return response.content[0].text
+
+
+def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
+    """
+    Use Claude to propose a chapter structure from a book/lecture PDF text.
+    Returns a list of dicts: [{number, title, level, start_hint}, ...].
+    Falls back to [] on any error.
+    """
+    import json, re
+
+    if not text or not text.strip():
+        return []
+
+    prompt = (
+        "You are a book indexer. Given the following text from a book or lecture deck, "
+        "identify the main chapters (and sub-chapters if clearly present). "
+        "Return a JSON object with key 'chapters', each item having: "
+        "number (int), title (str), level (1=chapter, 2=sub-chapter).\n\n"
+        f"Document title: {title or '(unknown)'}\n\n"
+        f"Document text (first 6000 words):\n{text[:30000]}"
+    )
+    client = _personal_client()
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw_text = message.content[0].text.strip()
+    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group())
+        chapters = data.get("chapters") or []
+        return [
+            {
+                "number": int(c.get("number", i + 1)),
+                "title": str(c.get("title", f"Chapter {i + 1}")),
+                "level": int(c.get("level", 1)),
+            }
+            for i, c in enumerate(chapters)
+            if c.get("title")
+        ]
+    except Exception:
+        return []
+
+
 def extract_affiliations_with_ollama(author_names: list[str], text: str) -> dict[str, str | None]:
     """Use Ollama to extract institutional affiliations for authors from paper text.
     Returns {author_name: affiliation_or_None}.

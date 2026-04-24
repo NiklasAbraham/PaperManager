@@ -5,6 +5,7 @@ import { apiFetch, extractReferences, saveReferences, listReferences, ingestFrom
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
+import BookChapters from "../components/BookChapters";
 import UploadConfirmModal from "../components/UploadConfirmModal";
 import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
@@ -32,7 +33,7 @@ export default function PaperDetail() {
   const [newTag, setNewTag]   = useState("");
   const [newTopic, setNewTopic] = useState("");
   const [tab, setTab]           = useState<RightTab>("notes");
-  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "summary" | "references" | "graph" | "people" | "meta">("abstract");
+  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "chapters" | "summary" | "references" | "graph" | "people" | "meta">("abstract");
   // Figures
   const [figures, setFigures]         = useState<Figure[]>([]);
   const [figuresLoaded, setFiguresLoaded] = useState(false);
@@ -680,6 +681,18 @@ export default function PaperDetail() {
             >
               {figuresLoaded && figures.length > 0 ? `Figures (${figures.length})` : "Figures"}
             </button>
+            {(paper.document_type === "book" || paper.document_type === "lecture_deck") && (
+              <button
+                onClick={() => setLeftTab("chapters")}
+                className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                  leftTab === "chapters"
+                    ? "border-violet-600 text-violet-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                📚 Chapters
+              </button>
+            )}
             <button
               onClick={() => setLeftTab("summary")}
               className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
@@ -753,11 +766,18 @@ export default function PaperDetail() {
               <div className="max-w-2xl mx-auto px-8 py-10 space-y-6">
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 leading-snug">{paper.title}</h2>
-                  {paper.year || paper.venue ? (
-                    <p className="text-xs text-gray-400 mt-1">
-                      {paper.year}{paper.venue ? ` · ${paper.venue}` : ""}
-                    </p>
-                  ) : null}
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {paper.year || paper.venue ? (
+                      <p className="text-xs text-gray-400">
+                        {paper.year}{paper.venue ? ` · ${paper.venue}` : ""}
+                      </p>
+                    ) : null}
+                    {paper.document_type && paper.document_type !== "paper" && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${paper.document_type === "book" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
+                        {paper.document_type === "book" ? "📚 Book" : "🎓 Lecture deck"}
+                      </span>
+                    )}
+                  </div>
                   {authors.length > 0 && (
                     <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
                       {authors.map((a) => (
@@ -1599,6 +1619,15 @@ export default function PaperDetail() {
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Chapters tab (book/lecture deck only) */}
+          {leftTab === "chapters" && id && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-5">
+                <BookChapters paperId={id} />
               </div>
             </div>
           )}
