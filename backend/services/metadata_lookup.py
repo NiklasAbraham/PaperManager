@@ -1,4 +1,5 @@
 import logging
+import re
 import httpx
 from difflib import SequenceMatcher
 
@@ -9,6 +10,15 @@ log = logging.getLogger(__name__)
 _SS_BASE = "https://api.semanticscholar.org/graph/v1/paper"
 _CR_BASE = "https://api.crossref.org/works"
 _FIELDS = "title,authors,authors.affiliations,year,venue,abstract,externalIds,citationCount"
+
+
+def _strip_jats(text: str | None) -> str | None:
+    """Strip JATS XML tags from CrossRef abstracts (e.g. <jats:p>, <jats:title>)."""
+    if not text:
+        return text
+    cleaned = re.sub(r"<[^>]+>", " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or None
 
 
 def _ssl():
@@ -134,7 +144,7 @@ def lookup_crossref(doi: str) -> dict | None:
             "title": title_list[0].strip() if title_list else "",
             "year": year,
             "venue": container[0] if container else None,
-            "abstract": msg.get("abstract"),
+            "abstract": _strip_jats(msg.get("abstract")),
             "doi": doi,
             "citation_count": None,
             "authors": authors,

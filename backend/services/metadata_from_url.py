@@ -334,7 +334,7 @@ def resolve_url(url: str) -> dict | None:
         result = _fetch_biorxiv(doi, server)
         if result and result.get("title"):
             return result
-        return lookup_semantic_scholar(doi) or lookup_crossref(doi)
+        return _resolve_doi(doi)
 
     log.warning("Could not identify URL type | url=%.80s", url)
     return None

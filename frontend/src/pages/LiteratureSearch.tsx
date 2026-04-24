@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { LitPaper, LiteratureSseEvent, T_IngestOut } from "../types";
-import { searchLiterature, getLiteratureKeywords, putLiteratureKeywords } from "../api/client";
+import { searchLiterature, getLiteratureKeywords, putLiteratureKeywords, listProjects, getProjectKeywords } from "../api/client";
 import UploadConfirmModal from "../components/UploadConfirmModal";
+import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -149,9 +150,26 @@ export default function LiteratureSearch() {
   const [kwSaving, setKwSaving] = useState(false);
   const [kwDraft, setKwDraft] = useState<string>("");
 
+  // Project selector
+  const [projects, setProjects] = useState<{id: string; name: string}[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projectKwCount, setProjectKwCount] = useState<number | null>(null);
+
   useEffect(() => {
     getLiteratureKeywords().then(r => setKwText(r.content)).catch(() => {});
+    listProjects().then(setProjects).catch(() => {});
   }, []);
+
+  // When project selection changes, fetch its keyword count
+  useEffect(() => {
+    if (!selectedProjectId) { setProjectKwCount(null); return; }
+    getProjectKeywords(selectedProjectId)
+      .then(r => {
+        const count = r.content.split("\n").filter(l => l.trim() && !l.trim().startsWith("#")).length;
+        setProjectKwCount(count);
+      })
+      .catch(() => setProjectKwCount(0));
+  }, [selectedProjectId]);
 
   async function saveKeywords() {
     setKwSaving(true);
@@ -187,7 +205,7 @@ export default function LiteratureSearch() {
 
     try {
       for await (const event of searchLiterature(
-        { days, max_per_source: maxPerSource, sources: activeSources },
+        { days, max_per_source: maxPerSource, sources: activeSources, project_id: selectedProjectId ?? null },
         abortRef.current.signal,
       )) {
         if ("done" in event && event.done) {
@@ -223,9 +241,10 @@ export default function LiteratureSearch() {
     abortRef.current?.abort();
   }
 
-  // ── Import modal state ───────────────────────────────────────────────────────
+  // ── Import state ──────────────────────────────────────────────────────────────
 
   const [importingPaper, setImportingPaper] = useState<ResultPaper | null>(null);
+  const [onboardingPaper, setOnboardingPaper] = useState<T_IngestOut | null>(null);
 
   function handleImport(paper: ResultPaper) {
     setImportingPaper(paper);
@@ -241,6 +260,7 @@ export default function LiteratureSearch() {
       )
     );
     setImportingPaper(null);
+    setOnboardingPaper(result);
   }
 
   function handleImportCancel() {
@@ -385,6 +405,33 @@ export default function LiteratureSearch() {
               </div>
             </div>
 
+            {/* Project context selector */}
+            {projects.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-gray-500 font-medium">Keyword context</label>
+                <select
+                  value={selectedProjectId ?? ""}
+                  onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                  disabled={status === "searching"}
+                  className="h-[42px] rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50"
+                >
+                  <option value="">Default keywords</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {selectedProjectId && (
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {projectKwCount === null
+                      ? "Loading…"
+                      : projectKwCount === 0
+                      ? "No project keywords — using default"
+                      : `${projectKwCount} project keyword(s)`}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Keywords button */}
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-500 font-medium invisible">kw</label>
@@ -397,7 +444,7 @@ export default function LiteratureSearch() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6-6 3 3-6 6H9v-3z" />
                   </svg>
                 </span>
-                <span>Keywords</span>
+                <span>Default keywords</span>
                 {kwList.length > 0 && (
                   <span className="ml-1 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-gray-500 ring-1 ring-gray-200">
                     {kwList.length}
@@ -527,6 +574,14 @@ export default function LiteratureSearch() {
           onConfirmed={handleImportConfirmed}
           onCancel={handleImportCancel}
           debug={settings.debugMode}
+        />
+      )}
+
+      {/* Onboarding modal */}
+      {onboardingPaper && (
+        <OnboardingModal
+          paper={onboardingPaper}
+          onClose={() => setOnboardingPaper(null)}
         />
       )}
 

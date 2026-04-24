@@ -171,10 +171,12 @@ class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = []
     model: str = "claude"  # "claude" | "ollama"
+    conversation_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
+    conversation_id: str | None = None
 
 
 # ── Knowledge Chat ──────────────────────────────────────────────────────────────
