@@ -4,6 +4,7 @@ import { apiFetch, deletePaper } from "../api/client";
 import PaperCard from "../components/PaperCard";
 import PaperDrop from "../components/PaperDrop";
 import EditPaperModal from "../components/EditPaperModal";
+import OnboardingModal from "../components/OnboardingModal";
 import EntityPanel from "../components/EntityPanel";
 import type { EntityType } from "../components/EntityPanel";
 import { useAppSettings } from "../contexts/SettingsContext";
@@ -21,6 +22,7 @@ export default function Library() {
   const [viewMode, setViewMode]     = useState<ViewMode>(settings.defaultView);
   const [page, setPage]             = useState(1);
   const [editingPaper, setEditingPaper] = useState<Paper | null>(null);
+  const [onboardingPaper, setOnboardingPaper] = useState<T_IngestOut | null>(null);
   const [activePanel, setActivePanel]   = useState<EntityType | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [surprisingMe, setSurprisingMe] = useState(false);
@@ -211,6 +213,7 @@ export default function Library() {
             <PaperDrop onUploaded={(p: T_IngestOut) => {
               setPapers((prev) => [p, ...prev]);
               refreshStats();
+              setOnboardingPaper(p);
             }} debug={settings.debugMode} />
           </div>
         </div>
@@ -308,6 +311,13 @@ export default function Library() {
           paper={editingPaper}
           onSaved={handleUpdated}
           onClose={() => setEditingPaper(null)}
+        />
+      )}
+
+      {onboardingPaper && (
+        <OnboardingModal
+          paper={onboardingPaper}
+          onClose={() => setOnboardingPaper(null)}
         />
       )}
 

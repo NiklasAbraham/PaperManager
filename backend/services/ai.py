@@ -207,12 +207,19 @@ def knowledge_chat_stream(
     Caller is responsible for building the system prompt via _load_prompt.
     Returns the anthropic stream context manager (use with `with` statement).
     """
-    papers_block = "\n\n".join(
-        f"### {p.get('title', 'Untitled')}\n"
-        + (f"Abstract: {p['abstract']}\n" if p.get("abstract") else "")
-        + (f"Summary: {p['summary']}" if p.get("summary") else "")
-        for p in papers
-    )
+    def _paper_block(p: dict) -> str:
+        parts = [f"### {p.get('title', 'Untitled')}"]
+        if p.get("abstract"):
+            parts.append(f"Abstract: {p['abstract']}")
+        if p.get("summary"):
+            parts.append(f"Summary: {p['summary']}")
+        if p.get("_note"):
+            parts.append(f"My note on this paper:\n{p['_note']}")
+        if p.get("_conversations"):
+            parts.append(f"Previous chat history about this paper:\n{p['_conversations']}")
+        return "\n".join(parts)
+
+    papers_block = "\n\n".join(_paper_block(p) for p in papers)
     system = _load_prompt("knowledge_chat_system.txt").format(papers_block=papers_block)
 
     messages: list[dict[str, Any]] = list(history)

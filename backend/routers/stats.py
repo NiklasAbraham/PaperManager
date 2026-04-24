@@ -36,7 +36,7 @@ def get_stats(driver: Driver = Depends(get_driver)):
         recent = session.run("""
             MATCH (p:Paper)
             WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
-            OPTIONAL MATCH (p)<-[:AUTHORED]-(a:Person)
+            OPTIONAL MATCH (p)-[:AUTHORED_BY]->(a:Person)
             WITH p, collect(a.name) AS authors
             ORDER BY p.created_at DESC LIMIT 6
             RETURN p.id AS id, p.title AS title, p.year AS year,

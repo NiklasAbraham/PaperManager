@@ -29,15 +29,34 @@ class LiteratureSearchBody(BaseModel):
     days: int = 7
     max_per_source: int = 100
     sources: list[str] = ["arxiv", "pubmed", "biorxiv"]
+    project_id: str | None = None
 
 
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+def _load_project_keywords(driver, project_id: str) -> list[str]:
+    """Load keywords from a Project node. Falls back to global keywords if empty."""
+    with driver.session() as session:
+        r = session.run(
+            "MATCH (p:Project {id: $id}) RETURN p.keywords AS keywords, p.name AS name",
+            id=project_id,
+        ).single()
+    if r and r["keywords"] and r["keywords"].strip():
+        lines = r["keywords"].splitlines()
+        kws = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
+        if kws:
+            return kws
+    return load_keywords()
+
+
 async def _stream_search(body: LiteratureSearchBody) -> AsyncGenerator[str, None]:
     driver = get_driver()
-    keywords = load_keywords()
+    if body.project_id:
+        keywords = _load_project_keywords(driver, body.project_id)
+    else:
+        keywords = load_keywords()
     end   = date.today()
     start = end - timedelta(days=body.days)
     counts: dict[str, int] = {}

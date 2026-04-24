@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf } from "../api/client";
+import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
+import UploadConfirmModal from "../components/UploadConfirmModal";
+import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
-import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData } from "../types";
+import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut } from "../types";
 
 const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
   paper: "#7c3aed", person: "#2563eb", topic: "#16a34a",
@@ -19,7 +21,7 @@ interface PaperFull extends Paper {
   tags?: Tag[];
 }
 
-type RightTab = "notes" | "chat" | "references";
+type RightTab = "notes" | "chat";
 
 export default function PaperDetail() {
   const { id } = useParams<{ id: string }>();
@@ -30,7 +32,7 @@ export default function PaperDetail() {
   const [newTag, setNewTag]   = useState("");
   const [newTopic, setNewTopic] = useState("");
   const [tab, setTab]           = useState<RightTab>("notes");
-  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "graph" | "people" | "meta">("abstract");
+  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "summary" | "references" | "graph" | "people" | "meta">("abstract");
   // Figures
   const [figures, setFigures]         = useState<Figure[]>([]);
   const [figuresLoaded, setFiguresLoaded] = useState(false);
@@ -60,6 +62,22 @@ export default function PaperDetail() {
   const [pendingRefs, setPendingRefs]   = useState<Reference[] | null>(null);
   const [checkedRefs, setCheckedRefs]   = useState<boolean[]>([]);
   const [pullingDoi, setPullingDoi]     = useState<string | null>(null);
+  const [pullingAll, setPullingAll]     = useState(false);
+  const [pullAllProgress, setPullAllProgress] = useState<{done: number; total: number} | null>(null);
+  // Inline URL import for refs without DOI
+  const [refUrlInput, setRefUrlInput]       = useState<Record<number, string>>({});
+  const [refUrlPulling, setRefUrlPulling]   = useState<number | null>(null);
+  const [refUrlOpen, setRefUrlOpen]         = useState<number | null>(null);
+  const [onboardingPaper, setOnboardingPaper] = useState<T_IngestOut | null>(null);
+  // Ref confirm modal (Pull ↓ and Import ↓ go through UploadConfirmModal)
+  const [refConfirmUrl, setRefConfirmUrl] = useState<string | null>(null);
+  const [refConfirmMeta, setRefConfirmMeta] = useState<ParsedMeta | null>(null);
+  // Upload PDF for a reference
+  const [refUploadFile, setRefUploadFile]   = useState<File | null>(null);
+  const [refUploadMeta, setRefUploadMeta]   = useState<ParsedMeta | null>(null);
+  const [refUploadParsing, setRefUploadParsing] = useState(false);
+  const refUploadInputRef = useRef<HTMLInputElement>(null);
+  const pendingRefForUpload = useRef<Reference | null>(null);
   const [suggestingTags, setSuggestingTags] = useState(false);
   const [suggestedExisting, setSuggestedExisting] = useState<string[]>([]);
   const [suggestedNew, setSuggestedNew]     = useState<string[]>([]);
@@ -71,6 +89,11 @@ export default function PaperDetail() {
   const [suggestedTopics, setSuggestedTopics] = useState<string[]>([]);
   const [selectedSugTopics, setSelectedSugTopics] = useState<Set<string>>(new Set());
   const [topicSuggestOpen, setTopicSuggestOpen] = useState(false);
+  // Projects
+  const [paperProjects, setPaperProjects] = useState<{id: string; name: string; description?: string}[]>([]);
+  const [allProjects, setAllProjects]     = useState<{id: string; name: string; description?: string}[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [addingProject, setAddingProject] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -90,6 +113,15 @@ export default function PaperDetail() {
       fetchFigures(id).then((figs) => { setFigures(figs); setFiguresLoaded(true); }).catch(() => setFiguresLoaded(true));
     }
   }, [leftTab, id, figuresLoaded]);
+
+  // Load projects lazily when meta tab is first opened
+  useEffect(() => {
+    if (leftTab === "meta" && id && !projectsLoaded) {
+      Promise.all([fetchPaperProjects(id), listProjects()])
+        .then(([pp, all]) => { setPaperProjects(pp); setAllProjects(all); setProjectsLoaded(true); })
+        .catch(() => setProjectsLoaded(true));
+    }
+  }, [leftTab, id, projectsLoaded]);
 
   // Load involves lazily when people tab is first opened
   useEffect(() => {
@@ -193,6 +225,8 @@ export default function PaperDetail() {
   const [regenerating, setRegenerating] = useState(false);
   const [refetching, setRefetching] = useState(false);
   const [refetchError, setRefetchError] = useState<string | null>(null);
+  const [extractingAbstract, setExtractingAbstract] = useState(false);
+  const [extractAbstractError, setExtractAbstractError] = useState<string | null>(null);
   // Inline meta editing
   const [metaEdit, setMetaEdit] = useState<Partial<{ title: string; year: string; doi: string; venue: string; abstract: string }>>({});
 
@@ -314,18 +348,78 @@ export default function PaperDetail() {
     setSelectedSugTopics(new Set());
   };
 
-  const handlePullReference = async (doi: string) => {
+  const handlePullReference = async (doi: string, refTitle?: string, refYear?: number | null) => {
     setPullingDoi(doi);
     try {
-      await ingestFromUrl(doi);
-      // Reload references so the pulled ref gets its id + full metadata
-      const { references: refs, cited_by } = await listReferences(id!);
-      setReferences(refs);
-      setCitedBy(cited_by);
+      let meta: ParsedMeta;
+      try {
+        meta = await previewUrl(doi);
+      } catch {
+        meta = { title: refTitle ?? "", doi, year: refYear ?? undefined, authors: [], metadata_source: "doi" };
+      }
+      setRefConfirmUrl(doi);
+      setRefConfirmMeta(meta);
+    } catch { /* ignore */ }
+    finally { setPullingDoi(null); }
+  };
+
+  const handlePullAllRefs = async () => {
+    if (!id || pullingAll) return;
+    const stubs = references.filter((ref) => !(ref as any).summary && !!ref.doi);
+    if (stubs.length === 0) return;
+    setPullingAll(true);
+    setPullAllProgress({ done: 0, total: stubs.length });
+    for (let i = 0; i < stubs.length; i++) {
+      try { await ingestFromUrl(stubs[i].doi!); } catch { /* skip failed */ }
+      setPullAllProgress({ done: i + 1, total: stubs.length });
+    }
+    const { references: refs, cited_by } = await listReferences(id);
+    setReferences(refs);
+    setCitedBy(cited_by);
+    setPullingAll(false);
+    setPullAllProgress(null);
+  };
+
+  const handlePullRefByUrl = async (idx: number) => {
+    const url = refUrlInput[idx]?.trim();
+    if (!url || !id) return;
+    setRefUrlPulling(idx);
+    try {
+      const meta = await previewUrl(url);
+      setRefUrlOpen(null);
+      setRefUrlInput((prev) => { const n = { ...prev }; delete n[idx]; return n; });
+      setRefConfirmUrl(url);
+      setRefConfirmMeta(meta);
+    } catch { /* leave input open so user can correct */ }
+    finally { setRefUrlPulling(null); }
+  };
+
+  const handleRefFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || !pendingRefForUpload.current) return;
+    const ref = pendingRefForUpload.current;
+    setRefUploadParsing(true);
+    try {
+      const parsed = await parsePdf(f);
+      setRefUploadMeta({
+        ...parsed,
+        title: parsed.title || ref.title || "",
+        doi:   parsed.doi   || ref.doi   || null,
+        year:  parsed.year  || ref.year  || null,
+      });
+      setRefUploadFile(f);
     } catch {
-      // ignore — stub stays in place
+      setRefUploadMeta({
+        title: ref.title || "",
+        doi:   ref.doi   || null,
+        year:  ref.year  || null,
+        authors: [],
+        source: "heuristic",
+      });
+      setRefUploadFile(f);
     } finally {
-      setPullingDoi(null);
+      setRefUploadParsing(false);
     }
   };
 
@@ -544,12 +638,6 @@ export default function PaperDetail() {
             .bib
           </button>
 
-          <button
-            onClick={() => setEditOpen(true)}
-            className="text-xs text-gray-400 hover:text-violet-600 transition-colors"
-          >
-            Edit metadata
-          </button>
         </div>
       </div>
 
@@ -591,6 +679,28 @@ export default function PaperDetail() {
               }`}
             >
               {figuresLoaded && figures.length > 0 ? `Figures (${figures.length})` : "Figures"}
+            </button>
+            <button
+              onClick={() => setLeftTab("summary")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "summary"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Summary
+            </button>
+            <button
+              onClick={() => setLeftTab("references")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "references"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {references.length > 0 || citedBy.length > 0
+                ? `References (${references.length + citedBy.length})`
+                : "References"}
             </button>
             <button
               onClick={() => setLeftTab("graph")}
@@ -673,21 +783,34 @@ export default function PaperDetail() {
                   )}
                 </div>
 
-                {paper.abstract && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Abstract</p>
-                    <p className="text-sm text-gray-700 leading-relaxed">{paper.abstract}</p>
-                  </div>
-                )}
-
-                {paper.summary && (
-                  <div className="bg-violet-50 border border-violet-100 rounded-xl p-5">
-                    <p className="text-xs font-semibold text-violet-400 uppercase tracking-wide mb-2">AI Summary</p>
-                    <div className="prose prose-sm max-w-none text-gray-700 prose-headings:text-gray-800 prose-a:text-violet-600">
-                      <ReactMarkdown>{paper.summary}</ReactMarkdown>
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Abstract</p>
+                  {paper.abstract ? (
+                    <textarea
+                      defaultValue={paper.abstract}
+                      onBlur={async (e) => {
+                        const val = e.target.value.trim();
+                        if (val === (paper.abstract ?? "").trim() || !id) return;
+                        const updated = await updatePaper(id, { abstract: val || null });
+                        setPaper((p) => p ? { ...p, ...updated } : p);
+                      }}
+                      rows={14}
+                      className="w-full text-sm text-gray-700 leading-relaxed border border-transparent hover:border-gray-200 focus:border-violet-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 resize-y bg-transparent focus:bg-white transition-colors"
+                    />
+                  ) : (
+                    <textarea
+                      placeholder="No abstract — click to add one…"
+                      onBlur={async (e) => {
+                        const val = e.target.value.trim();
+                        if (!val || !id) return;
+                        const updated = await updatePaper(id, { abstract: val });
+                        setPaper((p) => p ? { ...p, ...updated } : p);
+                      }}
+                      rows={8}
+                      className="w-full text-sm text-gray-400 leading-relaxed border border-dashed border-gray-200 hover:border-violet-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 resize-y bg-transparent focus:bg-white focus:text-gray-700 transition-colors"
+                    />
+                  )}
+                </div>
 
                 {paper.doi && (
                   <p className="text-xs text-gray-400">
@@ -728,6 +851,226 @@ export default function PaperDetail() {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Summary tab */}
+          {leftTab === "summary" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-2xl mx-auto px-8 py-10 space-y-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">AI Summary</p>
+                  <button
+                    onClick={async () => {
+                      if (!id || regenerating) return;
+                      setRegenerating(true);
+                      try {
+                        const res = await regenerateSummary(id);
+                        setPaper((p) => p ? { ...p, summary: res.summary } : p);
+                      } catch (e) {
+                        alert(e instanceof Error ? e.message : "Failed to regenerate summary");
+                      } finally {
+                        setRegenerating(false);
+                      }
+                    }}
+                    disabled={regenerating}
+                    className="text-xs px-3 py-1.5 bg-violet-50 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 font-medium flex items-center gap-1.5"
+                  >
+                    {regenerating && (
+                      <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                    )}
+                    {regenerating ? "Regenerating…" : "✦ Re-generate"}
+                  </button>
+                </div>
+                {paper.summary ? (
+                  <div className="prose prose-sm max-w-none text-gray-700 prose-headings:text-gray-800 prose-a:text-violet-600">
+                    <ReactMarkdown>{paper.summary}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 italic">
+                    No summary yet. Click "✦ Re-generate" to create one using AI.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* References tab */}
+          {leftTab === "references" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-2xl mx-auto px-8 py-8 space-y-5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={handleExtract}
+                    disabled={extracting || pullingAll}
+                    className="text-xs py-2 px-4 bg-violet-50 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 font-medium"
+                  >
+                    {extracting ? "Extracting…" : "Extract from PDF"}
+                  </button>
+                  {references.some((ref) => !(ref as any).summary && ref.doi) && (
+                    <button
+                      onClick={handlePullAllRefs}
+                      disabled={pullingAll || extracting}
+                      className="text-xs py-2 px-4 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 font-medium flex items-center gap-1.5"
+                    >
+                      {pullingAll && (
+                        <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                      )}
+                      {pullingAll
+                        ? `Pulling ${pullAllProgress?.done}/${pullAllProgress?.total}…`
+                        : `Pull all into library (${references.filter((r) => !(r as any).summary && r.doi).length})`}
+                    </button>
+                  )}
+                </div>
+
+                {pendingRefs && (
+                  <div className="border border-violet-200 rounded-xl overflow-hidden">
+                    <div className="bg-violet-50 px-4 py-2.5 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-violet-700">
+                        {pendingRefs.length} found — pick which to save
+                      </span>
+                      <button
+                        onClick={() => setCheckedRefs(checkedRefs.every(Boolean) ? checkedRefs.map(() => false) : checkedRefs.map(() => true))}
+                        className="text-[10px] text-violet-500 hover:text-violet-700 underline"
+                      >
+                        {checkedRefs.every(Boolean) ? "Deselect all" : "Select all"}
+                      </button>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {pendingRefs.map((ref, i) => (
+                        <label key={i} className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${checkedRefs[i] ? "bg-white" : "bg-gray-50"} hover:bg-violet-50`}>
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 shrink-0 accent-violet-600"
+                            checked={checkedRefs[i] ?? true}
+                            onChange={(e) => { const next = [...checkedRefs]; next[i] = e.target.checked; setCheckedRefs(next); }}
+                          />
+                          <div className="min-w-0">
+                            <p className={`text-xs leading-snug ${checkedRefs[i] ? "text-gray-800 font-medium" : "text-gray-400"}`}>{ref.title}</p>
+                            {(ref.year || ref.doi) && (
+                              <p className="text-[10px] text-gray-400 mt-0.5">{[ref.year, ref.doi].filter(Boolean).join(" · ")}</p>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-100 bg-gray-50">
+                      <button onClick={() => setPendingRefs(null)} className="text-xs text-gray-400 hover:text-gray-600">Discard</button>
+                      <button
+                        onClick={handleSaveRefs}
+                        disabled={checkedRefs.every((c) => !c)}
+                        className="ml-auto text-xs bg-violet-600 text-white px-4 py-1.5 rounded-lg hover:bg-violet-700 disabled:opacity-40 font-medium"
+                      >
+                        Save {checkedRefs.filter(Boolean).length}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {references.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">Cites · {references.length}</p>
+                    <div className="space-y-1.5">
+                      {references.map((ref, i) => {
+                        const isPulled = !!(ref as any).summary;
+                        const doi = ref.doi;
+                        const isStub = !isPulled && !!doi;
+                        const isNoDoi = !isPulled && !doi;
+                        const isPulling = pullingDoi === doi;
+                        return (
+                          <div
+                            key={i}
+                            className={`rounded-lg border px-3 py-2.5 group transition-colors ${isPulled ? "border-violet-100 bg-violet-50 hover:bg-violet-100 cursor-pointer" : "border-gray-100 bg-white"}`}
+                            onClick={() => isPulled && navigate(`/paper/${ref.id}`)}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-xs font-medium text-gray-800 leading-snug">{ref.title}</p>
+                              {isPulled && <span className="shrink-0 text-[10px] text-green-600 font-semibold mt-0.5">✓ In library</span>}
+                              {isStub && (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handlePullReference(doi!, ref.title, ref.year); }}
+                                    disabled={isPulling || refUploadParsing}
+                                    className="text-[10px] font-medium bg-white border border-violet-200 text-violet-600 px-2 py-0.5 rounded-full hover:bg-violet-50 disabled:opacity-50"
+                                  >
+                                    {isPulling ? "…" : "Pull ↓"}
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); pendingRefForUpload.current = ref; refUploadInputRef.current?.click(); }}
+                                    disabled={refUploadParsing}
+                                    title="Upload PDF for this reference"
+                                    className="text-[10px] font-medium bg-white border border-gray-200 text-gray-500 px-2 py-0.5 rounded-full hover:border-violet-300 hover:text-violet-600 disabled:opacity-50"
+                                  >
+                                    {refUploadParsing && pendingRefForUpload.current === ref ? "…" : "PDF ↑"}
+                                  </button>
+                                </div>
+                              )}
+                              {isNoDoi && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setRefUrlOpen(refUrlOpen === i ? null : i); }}
+                                  className="shrink-0 text-[10px] font-medium bg-white border border-gray-200 text-gray-500 px-2 py-0.5 rounded-full hover:border-violet-300 hover:text-violet-600"
+                                >
+                                  Import ↓
+                                </button>
+                              )}
+                            </div>
+                            {isNoDoi && refUrlOpen === i && (
+                              <div className="mt-2 flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  autoFocus
+                                  value={refUrlInput[i] ?? ""}
+                                  onChange={(e) => setRefUrlInput((prev) => ({ ...prev, [i]: e.target.value }))}
+                                  onKeyDown={(e) => { if (e.key === "Enter") handlePullRefByUrl(i); if (e.key === "Escape") setRefUrlOpen(null); }}
+                                  placeholder="Paste URL or DOI…"
+                                  className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-300"
+                                />
+                                <button
+                                  onClick={() => handlePullRefByUrl(i)}
+                                  disabled={refUrlPulling === i || !refUrlInput[i]?.trim()}
+                                  className="text-[10px] px-2 py-1 bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50"
+                                >
+                                  {refUrlPulling === i ? "…" : "Pull"}
+                                </button>
+                              </div>
+                            )}
+                            {(ref.year || doi) && (
+                              <p className="text-[10px] text-gray-400 mt-1">{[ref.year, doi?.replace("arXiv:", "arXiv: ")].filter(Boolean).join(" · ")}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {citedBy.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">Cited by · {citedBy.length}</p>
+                    <div className="space-y-1.5">
+                      {citedBy.map((ref, i) => (
+                        <div
+                          key={i}
+                          className={`rounded-lg border px-3 py-2.5 transition-colors ${ref.id ? "border-violet-100 bg-violet-50 hover:bg-violet-100 cursor-pointer" : "border-gray-100 bg-white"}`}
+                          onClick={() => ref.id && navigate(`/paper/${ref.id}`)}
+                        >
+                          <p className="text-xs font-medium text-gray-800 leading-snug">{ref.title}</p>
+                          {ref.year && <p className="text-[10px] text-gray-400 mt-1">{ref.year}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {references.length === 0 && citedBy.length === 0 && !pendingRefs && (
+                  <p className="text-xs text-gray-400 text-center pt-6">No references saved yet.</p>
+                )}
               </div>
             </div>
           )}
@@ -827,6 +1170,7 @@ export default function PaperDetail() {
                         <div key={field}>
                           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">{field}</p>
                           {field === "abstract" ? (
+                            <div className="space-y-1">
                             <textarea
                               value={editVal}
                               onChange={(e) => setMetaEdit((s) => ({ ...s, [field]: e.target.value }))}
@@ -839,6 +1183,34 @@ export default function PaperDetail() {
                               rows={4}
                               className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 resize-none"
                             />
+                            <button
+                              onClick={async () => {
+                                if (!id || extractingAbstract) return;
+                                setExtractingAbstract(true);
+                                setExtractAbstractError(null);
+                                try {
+                                  const res = await reextractAbstract(id);
+                                  setPaper((p) => p ? { ...p, abstract: res.abstract } : p);
+                                  setMetaEdit((s) => { const n = { ...s }; delete n.abstract; return n; });
+                                } catch (e) {
+                                  setExtractAbstractError(e instanceof Error ? e.message : "Extraction failed");
+                                } finally {
+                                  setExtractingAbstract(false);
+                                }
+                              }}
+                              disabled={extractingAbstract}
+                              className="text-[10px] px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-violet-100 hover:text-violet-700 disabled:opacity-50 flex items-center gap-1 transition-colors"
+                            >
+                              {extractingAbstract && (
+                                <svg className="animate-spin h-2.5 w-2.5" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                </svg>
+                              )}
+                              {extractingAbstract ? "Extracting…" : "↺ Re-extract from PDF"}
+                            </button>
+                            {extractAbstractError && <p className="text-[10px] text-red-500">{extractAbstractError}</p>}
+                            </div>
                           ) : (
                             <input
                               type="text"
@@ -914,30 +1286,6 @@ export default function PaperDetail() {
                   </MetaSection>
                 )}
 
-                <MetaSection title="AI Summary">
-                  <button
-                    onClick={async () => {
-                      if (!id || regenerating) return;
-                      setRegenerating(true);
-                      try {
-                        const res = await regenerateSummary(id);
-                        setPaper((p) => p ? { ...p, summary: res.summary } : p);
-                      } catch (e) {
-                        alert(e instanceof Error ? e.message : "Failed to regenerate summary");
-                      } finally {
-                        setRegenerating(false);
-                      }
-                    }}
-                    disabled={regenerating}
-                    className="text-xs px-3 py-1.5 bg-violet-50 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 font-medium"
-                  >
-                    {regenerating ? "Regenerating…" : "✦ Re-generate summary with AI"}
-                  </button>
-                  {!paper.summary && !regenerating && (
-                    <p className="text-xs text-gray-400 mt-1">No summary yet.</p>
-                  )}
-                </MetaSection>
-
                 {/* Topics */}
                 <MetaSection title="Topics">
                   <div className="flex flex-wrap gap-1">
@@ -988,6 +1336,58 @@ export default function PaperDetail() {
                         </button>
                       </div>
                     </div>
+                  )}
+                </MetaSection>
+
+                {/* Projects */}
+                <MetaSection title="Projects">
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {paperProjects.map((proj) => (
+                      <span key={proj.id} className="flex items-center gap-1 text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">
+                        {proj.name}
+                        <button
+                          onClick={async () => {
+                            if (!id) return;
+                            await removePaperFromProject(proj.id, id);
+                            setPaperProjects((prev) => prev.filter((p) => p.id !== proj.id));
+                          }}
+                          className="text-violet-400 hover:text-red-500 leading-none transition-colors"
+                        >×</button>
+                      </span>
+                    ))}
+                    {paperProjects.length === 0 && !addingProject && (
+                      <span className="text-xs text-gray-400 italic">Not in any project</span>
+                    )}
+                  </div>
+                  {addingProject ? (
+                    <select
+                      autoFocus
+                      defaultValue=""
+                      onChange={async (e) => {
+                        const projectId = e.target.value;
+                        if (!projectId || !id) return;
+                        await addPaperToProject(projectId, id);
+                        const proj = allProjects.find((p) => p.id === projectId);
+                        if (proj) setPaperProjects((prev) => [...prev, proj]);
+                        setAddingProject(false);
+                      }}
+                      onBlur={() => setAddingProject(false)}
+                      className="w-full text-xs border border-violet-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white"
+                    >
+                      <option value="">— Select a project —</option>
+                      {allProjects
+                        .filter((p) => !paperProjects.some((pp) => pp.id === p.id))
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                    </select>
+                  ) : (
+                    <button
+                      onClick={() => setAddingProject(true)}
+                      className="text-xs text-violet-600 hover:text-violet-800 transition-colors mt-0.5"
+                    >
+                      + Add to project
+                    </button>
                   )}
                 </MetaSection>
 
@@ -1213,9 +1613,9 @@ export default function PaperDetail() {
         {/* RIGHT — metadata + notes/chat */}
         <div className="shrink-0 flex flex-col bg-white overflow-hidden" style={{ width: rightWidth }}>
 
-          {/* Tabs: Notes / Chat / References */}
+          {/* Tabs: Notes / Chat */}
           <div className="flex border-b border-gray-100 shrink-0">
-            {(["notes", "chat", "references"] as RightTab[]).map((t) => (
+            {(["notes", "chat"] as RightTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -1232,156 +1632,61 @@ export default function PaperDetail() {
 
           {/* Tab content */}
           <div className="flex-1 overflow-hidden p-3">
-            {tab === "notes" && id && <NoteEditor paperId={id} />}
+            {tab === "notes" && id && <NoteEditor paperId={id} compact />}
             {tab === "chat"  && id && <ChatPanel paperId={id} />}
-            {tab === "references" && (
-              <div className="h-full overflow-y-auto space-y-5 pb-4">
-
-                {/* Extract button */}
-                <button
-                  onClick={handleExtract}
-                  disabled={extracting}
-                  className="w-full text-xs py-2 px-3 bg-violet-50 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 font-medium"
-                >
-                  {extracting ? "Extracting…" : "Extract references from PDF"}
-                </button>
-
-                {/* Pending refs */}
-                {pendingRefs && (
-                  <div className="border border-violet-200 rounded-xl overflow-hidden">
-                    <div className="bg-violet-50 px-4 py-2.5 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-violet-700">
-                        {pendingRefs.length} found — pick which to save
-                      </span>
-                      <button
-                        onClick={() => setCheckedRefs(checkedRefs.every(Boolean) ? checkedRefs.map(() => false) : checkedRefs.map(() => true))}
-                        className="text-[10px] text-violet-500 hover:text-violet-700 underline"
-                      >
-                        {checkedRefs.every(Boolean) ? "Deselect all" : "Select all"}
-                      </button>
-                    </div>
-
-                    <div className="divide-y divide-gray-100">
-                      {pendingRefs.map((ref, i) => (
-                        <label key={i} className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${checkedRefs[i] ? "bg-white" : "bg-gray-50"} hover:bg-violet-50`}>
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 shrink-0 accent-violet-600"
-                            checked={checkedRefs[i] ?? true}
-                            onChange={(e) => {
-                              const next = [...checkedRefs];
-                              next[i] = e.target.checked;
-                              setCheckedRefs(next);
-                            }}
-                          />
-                          <div className="min-w-0">
-                            <p className={`text-xs leading-snug ${checkedRefs[i] ? "text-gray-800 font-medium" : "text-gray-400"}`}>
-                              {ref.title}
-                            </p>
-                            {(ref.year || ref.doi) && (
-                              <p className="text-[10px] text-gray-400 mt-0.5">
-                                {[ref.year, ref.doi].filter(Boolean).join(" · ")}
-                              </p>
-                            )}
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-100 bg-gray-50">
-                      <button onClick={() => setPendingRefs(null)} className="text-xs text-gray-400 hover:text-gray-600">
-                        Discard
-                      </button>
-                      <button
-                        onClick={handleSaveRefs}
-                        disabled={checkedRefs.every((c) => !c)}
-                        className="ml-auto text-xs bg-violet-600 text-white px-4 py-1.5 rounded-lg hover:bg-violet-700 disabled:opacity-40 font-medium"
-                      >
-                        Save {checkedRefs.filter(Boolean).length}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Saved references */}
-                {references.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">
-                      Cites · {references.length}
-                    </p>
-                    <div className="space-y-1.5">
-                      {references.map((ref, i) => {
-                        const isPulled = !!(ref as any).metadata_source || !!(ref as any).abstract;
-                        const doi = ref.doi;
-                        const isStub = !isPulled && !!doi;
-                        const isPulling = pullingDoi === doi;
-                        return (
-                          <div
-                            key={i}
-                            className={`rounded-lg border px-3 py-2.5 group transition-colors ${
-                              isPulled || ref.id
-                                ? "border-violet-100 bg-violet-50 hover:bg-violet-100 cursor-pointer"
-                                : "border-gray-100 bg-white"
-                            }`}
-                            onClick={() => (isPulled || ref.id) && navigate(`/paper/${ref.id}`)}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="text-xs font-medium text-gray-800 leading-snug">{ref.title}</p>
-                              {isPulled && (
-                                <span className="shrink-0 text-[10px] text-green-600 font-semibold mt-0.5">✓ In library</span>
-                              )}
-                              {isStub && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handlePullReference(doi!); }}
-                                  disabled={isPulling}
-                                  className="shrink-0 text-[10px] font-medium bg-white border border-violet-200 text-violet-600 px-2 py-0.5 rounded-full hover:bg-violet-50 disabled:opacity-50"
-                                >
-                                  {isPulling ? "…" : "Pull ↓"}
-                                </button>
-                              )}
-                            </div>
-                            {(ref.year || doi) && (
-                              <p className="text-[10px] text-gray-400 mt-1">
-                                {[ref.year, doi?.replace("arXiv:", "arXiv: ")].filter(Boolean).join(" · ")}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Cited by */}
-                {citedBy.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">
-                      Cited by · {citedBy.length}
-                    </p>
-                    <div className="space-y-1.5">
-                      {citedBy.map((ref, i) => (
-                        <div
-                          key={i}
-                          className={`rounded-lg border px-3 py-2.5 transition-colors ${ref.id ? "border-violet-100 bg-violet-50 hover:bg-violet-100 cursor-pointer" : "border-gray-100 bg-white"}`}
-                          onClick={() => ref.id && navigate(`/paper/${ref.id}`)}
-                        >
-                          <p className="text-xs font-medium text-gray-800 leading-snug">{ref.title}</p>
-                          {ref.year && <p className="text-[10px] text-gray-400 mt-1">{ref.year}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {references.length === 0 && citedBy.length === 0 && !pendingRefs && (
-                  <p className="text-xs text-gray-400 text-center pt-6">No references saved yet.</p>
-                )}
-              </div>
-            )}
-
           </div>
         </div>
       </div>
+
+      {/* Hidden file input for reference PDF upload */}
+      <input
+        ref={refUploadInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={handleRefFileChosen}
+      />
+
+      {refUploadFile && refUploadMeta && (
+        <UploadConfirmModal
+          file={refUploadFile}
+          meta={refUploadMeta}
+          onConfirmed={async (paper: T_IngestOut) => {
+            setRefUploadFile(null);
+            setRefUploadMeta(null);
+            pendingRefForUpload.current = null;
+            const { references: refs, cited_by } = await listReferences(id!);
+            setReferences(refs);
+            setCitedBy(cited_by);
+            setOnboardingPaper(paper);
+          }}
+          onCancel={() => { setRefUploadFile(null); setRefUploadMeta(null); pendingRefForUpload.current = null; }}
+        />
+      )}
+
+      {refConfirmUrl && refConfirmMeta && (
+        <UploadConfirmModal
+          file={null}
+          url={refConfirmUrl}
+          meta={refConfirmMeta}
+          onConfirmed={async (paper) => {
+            setRefConfirmUrl(null);
+            setRefConfirmMeta(null);
+            const { references: refs, cited_by } = await listReferences(id!);
+            setReferences(refs);
+            setCitedBy(cited_by);
+            setOnboardingPaper(paper);
+          }}
+          onCancel={() => { setRefConfirmUrl(null); setRefConfirmMeta(null); }}
+        />
+      )}
+
+      {onboardingPaper && (
+        <OnboardingModal
+          paper={onboardingPaper}
+          onClose={() => setOnboardingPaper(null)}
+        />
+      )}
 
       {editOpen && (
         <EditPaperModal

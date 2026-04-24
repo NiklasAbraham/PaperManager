@@ -1,6 +1,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -11,6 +12,11 @@ from db.queries.people import get_or_create_person, get_or_create_person_with_af
 from db.queries.topics import get_or_create_topic, link_paper_topic
 from db.queries.tags import tag_paper
 from db.queries.projects import add_paper_to_project
+from db.queries.conversations import (
+    create_paper_conversation, list_paper_conversations, get_messages,
+    add_message, compact_conversation, delete_conversation, rename_conversation,
+    estimate_tokens_approx,
+)
 from db.queries.references import create_or_link_reference, get_references, get_cited_by
 from db.queries.figures import list_figures, delete_figures_for_paper
 from services.note_parser import parse_mentions
@@ -685,6 +691,17 @@ def list_all(skip: int = 0, limit: int = 20):
     return list_papers(get_driver(), skip=skip, limit=limit)
 
 
+@router.get("/{paper_id}/projects")
+def get_paper_projects(paper_id: str):
+    driver = get_driver()
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (proj:Project)-[:CONTAINS]->(p:Paper {id: $id}) RETURN proj",
+            id=paper_id,
+        )
+        return [dict(r["proj"]) for r in result]
+
+
 @router.get("/{paper_id}", response_model=PaperOut)
 def get_one(paper_id: str):
     paper = get_paper(get_driver(), paper_id)
@@ -738,6 +755,28 @@ def delete(paper_id: str):
 
     delete_paper(driver, paper_id)
     log.info("Paper deleted | id=%s | title=%.60s", paper_id, paper.get("title"))
+
+
+@router.post("/{paper_id}/reextract-abstract")
+def reextract_abstract(paper_id: str):
+    """Re-extract the abstract from the paper's stored raw_text (regex then AI fallback)."""
+    from services.pdf_parser import extract_abstract_from_text, extract_abstract_with_ai
+
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    raw_text = paper.get("raw_text") or ""
+    if not raw_text.strip():
+        raise HTTPException(status_code=422, detail="No extracted text stored for this paper — upload the PDF first")
+
+    abstract = extract_abstract_from_text(raw_text) or extract_abstract_with_ai(raw_text[:6000])
+    if not abstract:
+        raise HTTPException(status_code=422, detail="Could not extract an abstract from the paper text")
+
+    updated = update_paper(driver, paper_id, {"abstract": abstract})
+    return {"abstract": updated.get("abstract") if updated else abstract}
 
 
 @router.post("/{paper_id}/regenerate-summary")
@@ -862,6 +901,82 @@ async def refetch_pdf(paper_id: str):
     }
 
 
+@router.post("/{paper_id}/upload-pdf")
+async def upload_pdf_for_paper(paper_id: str, file: UploadFile = File(...)):
+    """
+    Attach a manually uploaded PDF to an existing paper.
+    Runs the full extraction pipeline, uploads to Drive, and enriches the paper record.
+    """
+    from services.ai import summarize_paper as _summarize
+
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    pdf_bytes = await file.read()
+    if not pdf_bytes:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty")
+
+    log.info("upload-pdf | paper_id=%s | size=%d bytes", paper_id, len(pdf_bytes))
+
+    # Run extraction
+    pdf_meta = extract_metadata(pdf_bytes)
+    raw_text = pdf_meta.get("raw_text", "")
+
+    # Fill gaps: only update fields that are currently missing on the paper
+    updates: dict = {}
+    for field in ("abstract", "venue", "year"):
+        if not paper.get(field) and pdf_meta.get(field):
+            updates[field] = pdf_meta[field]
+
+    # Upload PDF to Drive
+    try:
+        filename = f"{paper.get('title', 'paper')[:60]}.pdf"
+        drive_file_id = upload_pdf(pdf_bytes, filename)
+        updates["drive_file_id"] = drive_file_id
+    except Exception as exc:
+        log.warning("Drive upload failed (non-fatal) | %s", exc)
+        drive_file_id = paper.get("drive_file_id")
+
+    updates["raw_text"] = raw_text
+
+    # Regenerate summary if paper has none
+    if raw_text and not paper.get("summary"):
+        try:
+            updates["summary"] = _summarize(raw_text, paper.get("title", ""))
+        except Exception as exc:
+            log.warning("Summary failed (non-fatal) | %s", exc)
+
+    update_paper(driver, paper_id, updates)
+
+    # Add any new authors found by PDF extraction
+    existing_author_ids = {
+        r["person"]["id"]
+        for r in driver.session().run(
+            "MATCH (p:Paper {id:$id})-[:AUTHORED_BY]->(a:Person) RETURN a AS person", id=paper_id
+        )
+    }
+    authors_added = []
+    for name in pdf_meta.get("authors") or []:
+        if not name:
+            continue
+        aff_map = {d["name"]: d.get("affiliation") for d in (pdf_meta.get("authors_detail") or [])}
+        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        if person["id"] not in existing_author_ids:
+            link_author(driver, paper_id, person["id"])
+            authors_added.append(name)
+
+    log.info("upload-pdf done | paper_id=%s | new_authors=%d | raw_text_len=%d",
+             paper_id, len(authors_added), len(raw_text))
+
+    return {
+        "drive_url": get_file_url(drive_file_id) if drive_file_id else None,
+        "authors_added": authors_added,
+        "raw_text_len": len(raw_text),
+    }
+
+
 @router.get("/{paper_id}/note", response_model=NoteOut)
 def get_note(paper_id: str):
     note = get_paper_note(get_driver(), paper_id)
@@ -872,7 +987,8 @@ def get_note(paper_id: str):
 
 @router.post("/{paper_id}/chat", response_model=ChatResponse)
 def chat(paper_id: str, body: ChatRequest):
-    paper = get_paper(get_driver(), paper_id)
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
     raw_text = paper.get("raw_text") or ""
@@ -884,7 +1000,62 @@ def chat(paper_id: str, body: ChatRequest):
         answer = chat_with_paper_work(**kwargs)
     else:
         answer = chat_with_paper(**kwargs)
-    return {"answer": answer}
+
+    # Persist to Neo4j conversation
+    conv_id = body.conversation_id
+    try:
+        if not conv_id:
+            title = body.question[:60] + ("…" if len(body.question) > 60 else "")
+            conv = create_paper_conversation(driver, paper_id, title)
+            conv_id = conv["id"]
+        add_message(driver, conv_id, "user", body.question, [paper_id],
+                    estimate_tokens_approx(body.question))
+        add_message(driver, conv_id, "assistant", answer, [paper_id],
+                    estimate_tokens_approx(answer))
+    except Exception as exc:
+        log.warning("Failed to save chat to Neo4j: %s", exc)
+
+    return {"answer": answer, "conversation_id": conv_id}
+
+
+# ── Per-paper conversation management ─────────────────────────────────────────
+
+class ConvRenameBody(BaseModel):
+    title: str
+
+
+@router.get("/{paper_id}/conversations")
+def list_convs(paper_id: str):
+    return list_paper_conversations(get_driver(), paper_id)
+
+
+@router.get("/{paper_id}/conversations/{conv_id}/messages")
+def get_conv_messages(paper_id: str, conv_id: str):
+    return get_messages(get_driver(), conv_id)
+
+
+@router.patch("/{paper_id}/conversations/{conv_id}")
+def rename_conv(paper_id: str, conv_id: str, body: ConvRenameBody):
+    return rename_conversation(get_driver(), conv_id, body.title)
+
+
+@router.post("/{paper_id}/conversations/{conv_id}/compact")
+def compact_conv(paper_id: str, conv_id: str):
+    from services.ai import summarize_paper
+    msgs = get_messages(get_driver(), conv_id)
+    if not msgs:
+        raise HTTPException(status_code=404, detail="Conversation not found or empty")
+    full_text = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in msgs)
+    try:
+        summary = summarize_paper(full_text, title="Conversation summary")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Summarisation failed: {exc}")
+    return compact_conversation(get_driver(), conv_id, summary)
+
+
+@router.delete("/{paper_id}/conversations/{conv_id}", status_code=204)
+def delete_conv(paper_id: str, conv_id: str):
+    delete_conversation(get_driver(), conv_id)
 
 
 @router.put("/{paper_id}/note", response_model=NoteOut)
