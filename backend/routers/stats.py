@@ -8,9 +8,9 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 @router.get("")
 def get_stats(driver: Driver = Depends(get_driver)):
     with driver.session() as session:
-        # Exclude stub papers pulled in via reference scanning
+        # Exclude reference stubs (from-references without a PDF)
         papers   = session.run("""
-            MATCH (n:Paper) WHERE NOT (n)-[:TAGGED]->(:Tag {name: 'from-references'})
+            MATCH (n:Paper) WHERE NOT ((n)-[:TAGGED]->(:Tag {name: 'from-references'}) AND n.drive_file_id IS NULL)
             RETURN count(n) AS c
         """).single()["c"]
         authors  = session.run("MATCH (n:Person)  RETURN count(n) AS c").single()["c"]
@@ -21,22 +21,22 @@ def get_stats(driver: Driver = Depends(get_driver)):
         by_year = session.run("""
             MATCH (p:Paper)
             WHERE p.year IS NOT NULL
-              AND NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+              AND NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
             RETURN p.year AS year, count(p) AS count
             ORDER BY year ASC
         """).data()
 
         top_topics = session.run("""
             MATCH (t:Topic)<-[:ABOUT]-(p:Paper)
-            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+            WHERE NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
             RETURN t.name AS name, count(p) AS count
             ORDER BY count DESC LIMIT 8
         """).data()
 
         recent = session.run("""
             MATCH (p:Paper)
-            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
-            OPTIONAL MATCH (p)<-[:AUTHORED]-(a:Person)
+            WHERE NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
+            OPTIONAL MATCH (p)-[:AUTHORED_BY]->(a:Person)
             WITH p, collect(a.name) AS authors
             ORDER BY p.created_at DESC LIMIT 6
             RETURN p.id AS id, p.title AS title, p.year AS year,
@@ -46,7 +46,7 @@ def get_stats(driver: Driver = Depends(get_driver)):
 
         reading_status = session.run("""
             MATCH (p:Paper)
-            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+            WHERE NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
             RETURN coalesce(p.reading_status, 'unread') AS status, count(p) AS count
             ORDER BY status
         """).data()
@@ -54,7 +54,7 @@ def get_stats(driver: Driver = Depends(get_driver)):
         bookmarked_count = session.run("""
             MATCH (p:Paper)
             WHERE p.bookmarked = true
-              AND NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+              AND NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
             RETURN count(p) AS c
         """).single()["c"]
 

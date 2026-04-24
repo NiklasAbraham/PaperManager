@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
-import { apiFetch } from "../api/client";
-import type { ChatMessage } from "../types";
+import {
+  listPaperConversations, getPaperConversationMessages,
+  renamePaperConversation, compactPaperConversation,
+  deletePaperConversation, chatWithPaper,
+} from "../api/client";
+import type { Conversation, KnowledgeMessage } from "../types";
 
 type Model = "claude" | "claude-work" | "ollama";
 
@@ -16,11 +20,51 @@ interface Props {
 }
 
 export default function ChatPanel({ paperId }: Props) {
-  const [history, setHistory] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState<Model>("claude");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvId, setActiveConvId]   = useState<string | null>(null);
+  const [messages, setMessages]           = useState<KnowledgeMessage[]>([]);
+  const [input, setInput]                 = useState("");
+  const [loading, setLoading]             = useState(false);
+  const [loadingMsgs, setLoadingMsgs]     = useState(false);
+  const [error, setError]                 = useState<string | null>(null);
+  const [model, setModel]                 = useState<Model>("claude");
+
+  // Title editing
+  const [editingTitle, setEditingTitle]   = useState(false);
+  const [titleDraft, setTitleDraft]       = useState("");
+
+  // Compact
+  const [compacting, setCompacting]       = useState(false);
+
+  // Saved-to-note feedback
+  const [savedMsgIdx, setSavedMsgIdx]     = useState<number | null>(null);
+
+  const bottomRef   = useRef<HTMLDivElement>(null);
+  const inputRef    = useRef<HTMLInputElement>(null);
+
+  // Load conversation list
+  useEffect(() => {
+    listPaperConversations(paperId)
+      .then(setConversations)
+      .catch(() => {});
+  }, [paperId]);
+
+  // Load messages when active conversation changes
+  useEffect(() => {
+    if (!activeConvId) { setMessages([]); return; }
+    setLoadingMsgs(true);
+    getPaperConversationMessages(paperId, activeConvId)
+      .then(setMessages)
+      .catch(() => setMessages([]))
+      .finally(() => setLoadingMsgs(false));
+  }, [activeConvId, paperId]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  const activeConv = conversations.find((c) => c.id === activeConvId) ?? null;
 
   const send = async () => {
     const question = input.trim();
@@ -28,117 +72,299 @@ export default function ChatPanel({ paperId }: Props) {
     setInput("");
     setError(null);
 
-    const newHistory: ChatMessage[] = [...history, { role: "user", content: question }];
-    setHistory(newHistory);
+    // Optimistic append
+    const userMsg: KnowledgeMessage = {
+      id: `tmp-${Date.now()}`, role: "user", content: question,
+      created_at: new Date().toISOString(), paper_refs: [],
+    };
+    setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
 
     try {
-      const res = await apiFetch<{ answer: string }>(`/papers/${paperId}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, history, model }),
-      });
-      setHistory([...newHistory, { role: "assistant", content: res.answer }]);
-    } catch (e: unknown) {
+      const history = messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      const res = await chatWithPaper(paperId, question, history, model, activeConvId ?? undefined);
+
+      const assistantMsg: KnowledgeMessage = {
+        id: `tmp-a-${Date.now()}`, role: "assistant", content: res.answer,
+        created_at: new Date().toISOString(), paper_refs: [],
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+
+      // If this was a new conversation, update the list
+      if (!activeConvId && res.conversation_id) {
+        setActiveConvId(res.conversation_id);
+        const newConv: Conversation = {
+          id: res.conversation_id,
+          title: question.slice(0, 60) + (question.length > 60 ? "…" : ""),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          compacted: false,
+          message_count: 2,
+        };
+        setConversations((prev) => [newConv, ...prev]);
+      } else if (activeConvId) {
+        setConversations((prev) =>
+          prev.map((c) => c.id === activeConvId
+            ? { ...c, message_count: c.message_count + 2, updated_at: new Date().toISOString() }
+            : c
+          )
+        );
+      }
+    } catch (e) {
       setError(e instanceof Error ? e.message : "Chat failed");
-      setHistory(history); // revert
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
     } finally {
       setLoading(false);
+      inputRef.current?.focus();
     }
   };
 
-  const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
+  const saveToNote = async (content: string, idx: number) => {
+    try {
+      const note = await (await fetch(
+        `${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/papers/${paperId}/note`
+      )).json() as { content: string };
+      const append = `\n\n---\n**Claude (${new Date().toLocaleDateString()}):**\n\n${content}`;
+      await fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/papers/${paperId}/note`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: (note.content ?? "") + append }),
+      });
+      setSavedMsgIdx(idx);
+      setTimeout(() => setSavedMsgIdx(null), 2000);
+    } catch { /* silent */ }
+  };
 
+  const handleCompact = async () => {
+    if (!activeConvId || compacting) return;
+    setCompacting(true);
+    try {
+      await compactPaperConversation(paperId, activeConvId);
+      // Reload messages
+      const msgs = await getPaperConversationMessages(paperId, activeConvId);
+      setMessages(msgs);
+      setConversations((prev) =>
+        prev.map((c) => c.id === activeConvId ? { ...c, compacted: true } : c)
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Compact failed");
+    } finally {
+      setCompacting(false);
+    }
+  };
+
+  const handleRename = async () => {
+    if (!activeConvId || !titleDraft.trim()) return;
+    await renamePaperConversation(paperId, activeConvId, titleDraft.trim());
+    setConversations((prev) =>
+      prev.map((c) => c.id === activeConvId ? { ...c, title: titleDraft.trim() } : c)
+    );
+    setEditingTitle(false);
+  };
+
+  const handleDeleteConv = async (convId: string) => {
+    await deletePaperConversation(paperId, convId);
+    setConversations((prev) => prev.filter((c) => c.id !== convId));
+    if (activeConvId === convId) { setActiveConvId(null); setMessages([]); }
+  };
+
+  // ── Conversation list view ─────────────────────────────────────────────────
+  if (!activeConvId) {
+    return (
+      <div className="flex flex-col h-full gap-3">
+        <div className="flex items-center justify-between shrink-0">
+          <h2 className="text-sm font-semibold text-gray-700">Chat</h2>
+          <button
+            onClick={() => { setActiveConvId(null); setMessages([]); inputRef.current?.focus(); }}
+            className="text-xs bg-violet-600 text-white px-3 py-1 rounded-lg hover:bg-violet-700 font-medium"
+            onClick={() => {
+              // Start new conversation inline — clear activeConvId so send() creates one
+              setMessages([]);
+              setActiveConvId(null);
+              setEditingTitle(false);
+              // Jump straight to input
+              setTimeout(() => inputRef.current?.focus(), 50);
+            }}
+          >
+            + New chat
+          </button>
+        </div>
+
+        {conversations.length === 0 ? (
+          <p className="text-xs text-gray-400 text-center mt-6">No conversations yet.<br/>Ask your first question below.</p>
+        ) : (
+          <div className="flex-1 overflow-y-auto space-y-1 min-h-0">
+            {conversations.map((c) => (
+              <div
+                key={c.id}
+                className="group flex items-start gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2.5 hover:border-violet-200 transition-colors cursor-pointer"
+                onClick={() => setActiveConvId(c.id)}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-gray-800 truncate">{c.title}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {c.message_count} message{c.message_count !== 1 ? "s" : ""}
+                    {c.compacted && " · compacted"}
+                    {" · "}{new Date(c.updated_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteConv(c.id); }}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 text-sm leading-none transition-all"
+                >×</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Input for new conversation */}
+        <div className="flex gap-2 shrink-0">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+            disabled={loading}
+            placeholder="Ask a new question…"
+            className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50"
+          />
+          <button onClick={send} disabled={loading || !input.trim()}
+            className="px-3 py-1.5 bg-violet-600 text-white text-sm rounded hover:bg-violet-700 disabled:opacity-50">
+            Ask
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Active conversation view ───────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full gap-2">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-gray-700 mr-auto">Chat</h2>
-        {/* Model selector */}
-        <div className="flex rounded-md border border-gray-200 overflow-hidden text-xs">
-          {(["claude", "claude-work", "ollama"] as Model[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setModel(m)}
-              className={`px-2 py-1 transition-colors ${
-                model === m
-                  ? "bg-violet-600 text-white"
-                  : "text-gray-500 hover:bg-gray-50"
-              }`}
-            >
-              {MODEL_LABELS[m]}
-            </button>
-          ))}
-        </div>
-        {history.length > 0 && (
-          <button
-            onClick={() => setHistory([])}
-            className="text-xs text-gray-400 hover:text-gray-600"
-          >
-            Clear
-          </button>
-        )}
-      </div>
+      {/* Header */}
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          onClick={() => { setActiveConvId(null); setEditingTitle(false); }}
+          className="text-gray-400 hover:text-gray-600 text-xs shrink-0"
+          title="Back to conversation list"
+        >
+          ← Back
+        </button>
 
-      <div className="flex-1 overflow-auto space-y-3 min-h-0">
-        {history.length === 0 && (
-          <p className="text-xs text-gray-400 text-center mt-4">
-            Ask a question about this paper
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleRename(); if (e.key === "Escape") setEditingTitle(false); }}
+            onBlur={handleRename}
+            className="flex-1 text-xs border border-violet-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+          />
+        ) : (
+          <p
+            className="flex-1 text-xs font-medium text-gray-700 truncate cursor-pointer hover:text-violet-600 transition-colors"
+            title="Click to rename"
+            onClick={() => { setTitleDraft(activeConv?.title ?? ""); setEditingTitle(true); }}
+          >
+            {activeConv?.title ?? "Chat"}
+            <span className="text-gray-300 ml-1 text-[10px]">✎</span>
           </p>
         )}
-        {history.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm relative group ${
-                msg.role === "user"
-                  ? "bg-violet-600 text-white"
-                  : "bg-white border border-gray-200 text-gray-800"
-              }`}
-            >
-              {msg.role === "assistant" ? (
-                <>
-                  <div className="prose prose-sm max-w-none">
+
+        <div className="flex items-center gap-1 shrink-0">
+          <div className="flex rounded border border-gray-200 overflow-hidden text-[10px]">
+            {(["claude", "claude-work", "ollama"] as Model[]).map((m) => (
+              <button key={m} onClick={() => setModel(m)}
+                className={`px-1.5 py-0.5 transition-colors ${model === m ? "bg-violet-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
+                {MODEL_LABELS[m]}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={handleCompact}
+            disabled={compacting || messages.length < 4}
+            title="Summarise this conversation to save context space"
+            className="text-[10px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 disabled:opacity-40 transition-colors"
+          >
+            {compacting ? "…" : "Compact"}
+          </button>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
+        {loadingMsgs ? (
+          <p className="text-xs text-gray-400 text-center mt-4">Loading…</p>
+        ) : messages.length === 0 ? (
+          <p className="text-xs text-gray-400 text-center mt-4">Ask a question about this paper.</p>
+        ) : (
+          messages.map((msg, i) => (
+            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              {msg.role === "system" ? (
+                <div className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  <span className="font-semibold text-amber-800">Compacted summary</span>
+                  <div className="mt-1 prose prose-xs max-w-none">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
-                  <button
-                    onClick={() => copyToClipboard(msg.content)}
-                    className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-600 text-xs"
-                    title="Copy"
-                  >
-                    ⎘
-                  </button>
-                </>
+                </div>
               ) : (
-                msg.content
+                <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm relative group ${
+                  msg.role === "user"
+                    ? "bg-violet-600 text-white"
+                    : "bg-white border border-gray-200 text-gray-800"
+                }`}>
+                  {msg.role === "assistant" ? (
+                    <>
+                      <div className="prose prose-sm max-w-none">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => navigator.clipboard.writeText(msg.content)}
+                          className="text-[10px] text-gray-400 hover:text-gray-600">
+                          ⎘ Copy
+                        </button>
+                        <span className="text-gray-200">·</span>
+                        <button onClick={() => saveToNote(msg.content, i)}
+                          className={`text-[10px] transition-colors ${savedMsgIdx === i ? "text-green-600" : "text-gray-400 hover:text-violet-600"}`}>
+                          {savedMsgIdx === i ? "✓ Saved to note" : "📌 Save to note"}
+                        </button>
+                      </div>
+                    </>
+                  ) : msg.content}
+                </div>
               )}
             </div>
-          </div>
-        ))}
+          ))
+        )}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-400">
+            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-400 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
               {MODEL_LABELS[model]} is thinking…
             </div>
           </div>
         )}
+        <div ref={bottomRef} />
       </div>
 
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-red-500 shrink-0">{error}</p>}
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 shrink-0">
         <input
+          ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
           disabled={loading}
-          placeholder="Ask a question…"
+          placeholder="Ask a follow-up…"
           className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50"
         />
-        <button
-          onClick={send}
-          disabled={loading || !input.trim()}
-          className="px-3 py-1.5 bg-violet-600 text-white text-sm rounded hover:bg-violet-700 disabled:opacity-50"
-        >
+        <button onClick={send} disabled={loading || !input.trim()}
+          className="px-3 py-1.5 bg-violet-600 text-white text-sm rounded hover:bg-violet-700 disabled:opacity-50">
           Ask
         </button>
       </div>
