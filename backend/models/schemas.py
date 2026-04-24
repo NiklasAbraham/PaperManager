@@ -14,6 +14,7 @@ class PaperCreate(BaseModel):
     doi: str | None = None
     abstract: str | None = None
     venue: str | None = None
+    document_type: str | None = None   # "paper" | "book" | "lecture_deck"
 
 
 class PaperUpdate(BaseModel):
@@ -28,6 +29,7 @@ class PaperUpdate(BaseModel):
     rating: int | None = None           # 1-5
     bookmarked: bool | None = None
     color: str | None = None            # hex color string or named color
+    document_type: str | None = None   # "paper" | "book" | "lecture_deck"
 
 
 class PaperOut(BaseModel):
@@ -46,6 +48,7 @@ class PaperOut(BaseModel):
     rating: int | None = None
     bookmarked: bool | None = None
     color: str | None = None
+    document_type: str | None = None   # "paper" | "book" | "lecture_deck"
 
 
 # ── People ────────────────────────────────────────────────────────────────────
@@ -214,6 +217,30 @@ class FigureOut(BaseModel):
     drive_url: str | None = None
     page_number: int
     created_at: str
+
+
+# ── Chapters (book support) ──────────────────────────────────────────────────
+
+class ChapterOut(BaseModel):
+    id: str
+    paper_id: str
+    number: int
+    title: str
+    level: int                # 1 = chapter, 2 = sub-chapter
+    summary: str | None = None
+    start_page: int | None = None
+    end_page: int | None = None
+    created_at: str
+    updated_at: str
+
+
+class ChapterDetectRequest(BaseModel):
+    use_ai: bool = False      # when True, also run AI-based chapter detection
+
+
+class ChapterChatRequest(BaseModel):
+    question: str
+    history: list[ChatMessage] = []
 
 
 class FigureChatRequest(BaseModel):

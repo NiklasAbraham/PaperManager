@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -29,6 +29,7 @@ export async function uploadPdf(
   captionMethod?: string,
   summaryInstructions?: string,
   debug?: boolean,
+  documentType?: string,
 ): Promise<T_IngestOut> {
   const form = new FormData();
   form.append("file", file);
@@ -37,6 +38,7 @@ export async function uploadPdf(
   if (captionMethod) form.append("caption_method", captionMethod);
   if (summaryInstructions) form.append("summary_instructions", summaryInstructions);
   if (debug) form.append("debug", "true");
+  if (documentType) form.append("document_type", documentType);
   const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form });
   if (!res.ok) {
     const detail = await res.text();
@@ -576,4 +578,52 @@ export async function chatWithFigure(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, model }),
   });
+}
+
+// ── Chapters (book support) ───────────────────────────────────────────────────
+
+export async function listChapters(paperId: string): Promise<Chapter[]> {
+  return apiFetch<Chapter[]>(`/papers/${paperId}/chapters`);
+}
+
+export async function detectChapters(paperId: string, useAi = false): Promise<Chapter[]> {
+  return apiFetch<Chapter[]>(`/papers/${paperId}/chapters/detect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ use_ai: useAi }),
+  });
+}
+
+export async function regenerateChapterSummary(paperId: string, chapterId: string): Promise<Chapter> {
+  return apiFetch<Chapter>(`/papers/${paperId}/chapters/${chapterId}/summarize`, {
+    method: "POST",
+  });
+}
+
+export async function chatWithChapter(
+  paperId: string,
+  chapterId: string,
+  question: string,
+  history: { role: string; content: string }[] = [],
+): Promise<{ answer: string }> {
+  return apiFetch(`/papers/${paperId}/chapters/${chapterId}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history }),
+  });
+}
+
+/**
+ * Returns the URL for a chapter's PDF slice.
+ * The URL can be used directly as an iframe src or anchor href.
+ */
+export function getChapterPdfUrl(paperId: string, chapterId: string): string {
+  return `${BASE}/papers/${paperId}/chapters/${chapterId}/pdf`;
+}
+
+/**
+ * Returns the URL for the full book PDF.
+ */
+export function getPaperPdfUrl(paperId: string): string {
+  return `${BASE}/papers/${paperId}/pdf`;
 }

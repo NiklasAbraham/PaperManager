@@ -82,6 +82,7 @@ def merge_paper_by_doi(driver: Driver, data: dict) -> dict:
               p.citation_count = $citation_count,
               p.metadata_source = $metadata_source,
               p.venue        = $venue,
+              p.document_type = $document_type,
               p.created_at   = $now,
               p.updated_at   = $now
             ON MATCH SET
@@ -92,6 +93,7 @@ def merge_paper_by_doi(driver: Driver, data: dict) -> dict:
               p.citation_count = COALESCE($citation_count, p.citation_count),
               p.metadata_source = $metadata_source,
               p.venue        = COALESCE($venue, p.venue),
+              p.document_type = COALESCE($document_type, p.document_type),
               p.updated_at   = $now
             RETURN p
             """,
@@ -106,6 +108,7 @@ def merge_paper_by_doi(driver: Driver, data: dict) -> dict:
             citation_count=data.get("citation_count"),
             metadata_source=data.get("metadata_source"),
             venue=data.get("venue"),
+            document_type=data.get("document_type"),
             now=_now(),
         )
         return dict(result.single()["p"])
@@ -125,6 +128,7 @@ def create_paper(driver: Driver, data: dict) -> dict:
         "citation_count": data.get("citation_count"),
         "metadata_source": data.get("metadata_source"),
         "venue": data.get("venue"),
+        "document_type": data.get("document_type"),
         "created_at": _now(),
         "updated_at": _now(),
     }
