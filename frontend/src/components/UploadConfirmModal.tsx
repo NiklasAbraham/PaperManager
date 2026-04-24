@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { uploadPdf, ingestFromUrlFull, saveReferences, suggestTags, applyTags, createStandaloneTag, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, previewUrlPdf, uploadPdfForPaper, parsePdf } from "../api/client";
+import { uploadPdf, ingestFromUrlFull, saveReferences, applyTags, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, previewUrlPdf, uploadPdfForPaper, parsePdf } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
@@ -34,7 +34,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const [duplicate, setDuplicate] = useState<Paper | null>(null);
   const dupCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [step, setStep]                   = useState<0 | 1 | 2 | 3 | 4>(settings.showSourceStep ? 0 : 1);
+  const [step, setStep]                   = useState<0 | 1 | 2 | 3>(settings.showSourceStep ? 0 : 1);
   const [uploadedPaper, setUploadedPaper] = useState<T_IngestOut | null>(null);
 
   // Step 2: summary prompt
@@ -129,14 +129,6 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const [checkedRefs, setCheckedRefs] = useState<boolean[]>([]);
   const [savingRefs, setSavingRefs]   = useState(false);
 
-  // Step 3: tags
-  const [allTags, setAllTags]           = useState<string[]>([]);
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
-  const [newTagInput, setNewTagInput]   = useState("");
-  const [pendingNew, setPendingNew]     = useState<string[]>([]);
-  const [loadingTags, setLoadingTags]   = useState(false);
-  const [applyingTags, setApplyingTags] = useState(false);
-
   const source = SOURCE_LABELS[meta.metadata_source] ?? { label: meta.metadata_source, color: "bg-gray-100 text-gray-500" };
 
   // Debounced duplicate check whenever DOI or title changes
@@ -209,26 +201,10 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     }
   };
 
-  // ── Advance to tag step ────────────────────────────────────────────────────
+  // ── After refs: call onConfirmed ──────────────────────────────────────────
 
-  const goToTagStep = async (paper: T_IngestOut) => {
-    setUploadedPaper(paper);
-    if (!settings.showTagsStep) {
-      onConfirmed(paper);
-      return;
-    }
-    setStep(4);
-    setLoadingTags(true);
-    try {
-      const result = await suggestTags(paper.title, (paper as any).abstract ?? meta.abstract ?? undefined);
-      setAllTags(result.all_tags);
-      setSelectedTags(new Set(result.existing));
-      setPendingNew(result.new);
-    } catch {
-      setAllTags([]);
-    } finally {
-      setLoadingTags(false);
-    }
+  const goToTagStep = (paper: T_IngestOut) => {
+    onConfirmed(paper);
   };
 
   // ── Step 1: upload ─────────────────────────────────────────────────────────
@@ -262,7 +238,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
         if (hasRefs && settings.autoSaveReferences) {
           try { await saveReferences(paper.id, paper.references_found as Reference[]); } catch { /* best-effort */ }
         }
-        await goToTagStep(paper);
+        goToTagStep(paper);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Upload failed";
@@ -310,43 +286,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
       try { await saveReferences(uploadedPaper.id, selected as Reference[]); } catch { /* best-effort */ }
     }
     setSavingRefs(false);
-    await goToTagStep(uploadedPaper);
-  };
-
-  // ── Step 3: tags ───────────────────────────────────────────────────────────
-
-  const toggleTag = (name: string) => {
-    setSelectedTags((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
-      return next;
-    });
-  };
-
-  const addPendingTag = (name: string) => {
-    const clean = name.toLowerCase().replace(/\s+/g, "-").slice(0, 20);
-    if (!clean) return;
-    setPendingNew((prev) => prev.includes(clean) ? prev : [...prev, clean]);
-    setSelectedTags((prev) => new Set([...prev, clean]));
-    setNewTagInput("");
-  };
-
-  const finishTags = async () => {
-    if (!uploadedPaper) return;
-    setApplyingTags(true);
-    try {
-      // Create any new tags first
-      const newToCreate = pendingNew.filter((t) => selectedTags.has(t) && !allTags.includes(t));
-      for (const name of newToCreate) {
-        await createStandaloneTag(name);
-      }
-      // Apply all selected tags to the paper
-      if (selectedTags.size > 0) {
-        await applyTags(uploadedPaper.id, [...selectedTags]);
-      }
-    } catch { /* best-effort */ }
-    setApplyingTags(false);
-    onConfirmed(uploadedPaper);
+    goToTagStep(uploadedPaper);
   };
 
   // ── Render: Step 0 (source) ────────────────────────────────────────────────
@@ -639,99 +579,6 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     );
   }
 
-  // ── Render: Step 4 (tags) ──────────────────────────────────────────────────
-
-  if (step === 4 && uploadedPaper) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-          <ModalHeader step={4} title="Add tags" subtitle="Ollama suggested tags based on the abstract. Click to toggle, or add your own." />
-          {pdfMissingBanner}
-          <div className="px-6 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
-            {loadingTags ? (
-              <div className="flex items-center gap-2 text-violet-600 text-sm py-4 justify-center">
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Asking Ollama for suggestions…
-              </div>
-            ) : (
-              <>
-                {/* Suggested new tags from Ollama */}
-                {pendingNew.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                      ✦ New tags suggested by AI
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {pendingNew.map((t) => (
-                        <button key={t} onClick={() => toggleTag(t)}
-                          className={`text-xs px-2.5 py-1 rounded-full border transition-colors font-medium
-                            ${selectedTags.has(t)
-                              ? "bg-violet-600 border-violet-600 text-white"
-                              : "border-dashed border-violet-400 text-violet-600 hover:bg-violet-50"}`}>
-                          + {t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* All existing tags */}
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                    All tags {selectedTags.size > 0 && <span className="text-violet-600">· {selectedTags.size} selected</span>}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {allTags.map((t) => (
-                      <button key={t} onClick={() => toggleTag(t)}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors
-                          ${selectedTags.has(t)
-                            ? "bg-violet-600 border-violet-600 text-white font-medium"
-                            : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"}`}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Custom tag input */}
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Create new tag</p>
-                  <div className="flex gap-2">
-                    <input
-                      value={newTagInput}
-                      onChange={(e) => setNewTagInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPendingTag(newTagInput); } }}
-                      placeholder="new-tag-name"
-                      className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                    />
-                    <button onClick={() => addPendingTag(newTagInput)} disabled={!newTagInput.trim()}
-                      className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 disabled:opacity-50">
-                      Add
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-            <button onClick={() => onConfirmed(uploadedPaper)} disabled={applyingTags}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50">
-              Skip
-            </button>
-            <button onClick={finishTags} disabled={applyingTags || loadingTags}
-              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
-              {applyingTags ? "Saving…" : selectedTags.size > 0 ? `Apply ${selectedTags.size} tag${selectedTags.size !== 1 ? "s" : ""}` : "Done"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // ── Render: Step 1 ─────────────────────────────────────────────────────────
 
   return (
@@ -942,7 +789,7 @@ function ModalHeader({ step, title, subtitle }: { step: number; title: string; s
 function StepDots({ current }: { current: number }) {
   return (
     <div className="flex gap-1 items-center">
-      {[0, 1, 2, 3, 4].map((n) => (
+      {[0, 1, 2, 3].map((n) => (
         <span key={n} className={`w-1.5 h-1.5 rounded-full transition-colors ${n === current ? "bg-violet-600" : n < current ? "bg-violet-300" : "bg-gray-200"}`} />
       ))}
     </div>
