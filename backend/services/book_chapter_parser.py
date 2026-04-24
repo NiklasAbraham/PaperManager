@@ -81,8 +81,8 @@ def detect_chapters(raw_text: str) -> list[ChapterCandidate]:
         title = m.group(3).strip()
         candidates.append(ChapterCandidate(number=num, title=title, level=2, start_char=m.start()))
 
-    # If no "Chapter N" style but we found numbered sections, treat them as chapters
-    if not any(c.level == 1 for c in candidates) and not candidates:
+    # If no "Chapter N" style, try numbered sections for top-level chapters
+    if not any(c.level == 1 for c in candidates):
         for m in _NUMBERED_SECTION_RE.finditer(raw_text):
             num = float(m.group(1))
             title = m.group(2).strip()
@@ -189,3 +189,51 @@ def extract_chapters_with_splits(raw_text: str) -> list[dict]:
             seq += 1
 
     return result
+
+
+def assign_page_numbers(chapters: list[dict], pdf_bytes: bytes) -> list[dict]:
+    """
+    Given a list of chapter dicts (with 'title' and 'text') and the raw PDF bytes,
+    determine which pages each chapter spans and set 'start_page' / 'end_page'.
+
+    Uses pypdf to extract per-page text and matches chapter headings to pages.
+    Returns the chapters with start_page/end_page filled in (1-indexed).
+    """
+    try:
+        from pypdf import PdfReader  # type: ignore
+        from io import BytesIO
+
+        reader = PdfReader(BytesIO(pdf_bytes))
+        page_texts = [page.extract_text() or "" for page in reader.pages]
+    except Exception as exc:
+        log.warning("PDF page parsing failed; skipping page number assignment | %s", exc)
+        return chapters
+
+    total_pages = len(page_texts)
+    if total_pages == 0:
+        return chapters
+
+    def _find_page_for_text(heading: str) -> int | None:
+        """Return 1-indexed page number where heading first appears."""
+        norm = re.sub(r"\s+", " ", heading.strip().lower())
+        for i, pt in enumerate(page_texts):
+            if norm in re.sub(r"\s+", " ", pt.lower()):
+                return i + 1  # 1-indexed
+        return None
+
+    # Assign start pages
+    for ch in chapters:
+        page = _find_page_for_text(ch.get("title", ""))
+        if page is not None:
+            ch["start_page"] = page
+
+    # Assign end pages: each chapter ends where the next one starts
+    for i, ch in enumerate(chapters):
+        if "start_page" not in ch:
+            continue
+        if i + 1 < len(chapters) and "start_page" in chapters[i + 1]:
+            ch["end_page"] = max(ch["start_page"], chapters[i + 1]["start_page"] - 1)
+        else:
+            ch["end_page"] = total_pages
+
+    return chapters

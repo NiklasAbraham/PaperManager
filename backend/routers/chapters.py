@@ -1,6 +1,7 @@
 """Chapters router — book/lecture chapter management."""
 import logging
-from fastapi import APIRouter, HTTPException, status
+import re
+from fastapi import APIRouter, HTTPException, Response, status
 
 log = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ from db.queries.chapters import (
     update_chapter,
     delete_chapters_for_paper,
 )
-from services.book_chapter_parser import extract_chapters_with_splits
+from services.book_chapter_parser import extract_chapters_with_splits, assign_page_numbers
 from services.ai import summarize_chapter, chat_with_chapter, detect_chapters_with_ai
 from models.schemas import ChapterOut, ChapterDetectRequest, ChapterChatRequest, ChatResponse
 
@@ -34,7 +35,7 @@ def get_chapters(paper_id: str):
 def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
     """
     Detect chapters from the stored raw_text of a book/lecture document.
-    Existing chapters for this paper are replaced.
+    Existing chapters for this paper are replaced only on success.
     Each chapter receives an AI-generated summary automatically.
     If body.use_ai is True, Claude is also consulted to refine the chapter list.
     """
@@ -47,19 +48,23 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
     if not raw_text.strip():
         raise HTTPException(status_code=422, detail="No raw text available for this document; cannot detect chapters.")
 
-    # Delete existing chapters first
-    deleted = delete_chapters_for_paper(driver, paper_id)
-    if deleted:
-        log.info("Deleted %d existing chapters for paper %s", deleted, paper_id)
+    # --- Detect first, delete only if we succeed ---
 
     # Detect chapters via heuristics
     chapter_dicts = extract_chapters_with_splits(raw_text)
 
-    # Optional: refine with AI
+    # Optional: refine with AI when heuristics fail
     if body.use_ai and not chapter_dicts:
         ai_chapters = detect_chapters_with_ai(paper.get("title", ""), raw_text)
         if ai_chapters:
-            # AI only gives titles/numbers — extract text slices heuristically per title
+            # AI returns {number, title, level} — slice text by searching for each title
+            for ch in ai_chapters:
+                title = ch.get("title", "")
+                idx = raw_text.find(title) if title else -1
+                if idx != -1:
+                    ch["text"] = raw_text[idx:idx + 8000]
+                else:
+                    ch["text"] = ""
             chapter_dicts = ai_chapters
 
     if not chapter_dicts:
@@ -68,7 +73,21 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
             detail="Could not detect any chapters in this document. Try uploading a document with clearer chapter headings.",
         )
 
+    # Try to assign page numbers from the stored PDF (best-effort)
+    if paper.get("drive_file_id"):
+        try:
+            from services.drive import download_pdf
+            pdf_bytes = download_pdf(paper["drive_file_id"])
+            chapter_dicts = assign_page_numbers(chapter_dicts, pdf_bytes)
+        except Exception as exc:
+            log.warning("Page number assignment failed (non-fatal) | paper_id=%s | %s", paper_id, exc)
+
     log.info("Detected %d chapters for paper %s", len(chapter_dicts), paper_id)
+
+    # Detection succeeded — now replace existing chapters
+    deleted = delete_chapters_for_paper(driver, paper_id)
+    if deleted:
+        log.info("Deleted %d existing chapters for paper %s", deleted, paper_id)
 
     created: list[dict] = []
     for ch in chapter_dicts:
@@ -86,6 +105,8 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
             "level": ch.get("level", 1),
             "text": ch.get("text", ""),
             "summary": summary,
+            "start_page": ch.get("start_page"),
+            "end_page": ch.get("end_page"),
         })
         created.append(node)
 
@@ -101,6 +122,65 @@ def get_single_chapter(paper_id: str, chapter_id: str):
     if not chapter or chapter.get("paper_id") != paper_id:
         raise HTTPException(status_code=404, detail="Chapter not found")
     return chapter
+
+
+@router.get("/{paper_id}/chapters/{chapter_id}/pdf")
+def get_chapter_pdf(paper_id: str, chapter_id: str):
+    """
+    Return a PDF containing only the pages for this chapter.
+
+    Uses the start_page / end_page stored on the chapter node.
+    Falls back to returning the full book PDF if page info is not available.
+    """
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    chapter = get_chapter(driver, chapter_id)
+    if not chapter or chapter.get("paper_id") != paper_id:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    file_id = paper.get("drive_file_id")
+    if not file_id:
+        raise HTTPException(status_code=404, detail="No PDF stored for this document")
+
+    try:
+        from services.drive import download_pdf
+        pdf_bytes = download_pdf(file_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Drive download failed: {exc}")
+
+    start_page = chapter.get("start_page")
+    end_page = chapter.get("end_page")
+
+    # If we have page info, slice the PDF; otherwise serve the full PDF
+    if start_page and end_page:
+        try:
+            from pypdf import PdfReader, PdfWriter  # type: ignore
+            from io import BytesIO
+
+            reader = PdfReader(BytesIO(pdf_bytes))
+            writer = PdfWriter()
+            total = len(reader.pages)
+            # Pages are 1-indexed; clamp to valid range
+            p_start = max(1, int(start_page)) - 1  # convert to 0-indexed
+            p_end = min(total, int(end_page))        # 1-indexed inclusive
+            for i in range(p_start, p_end):
+                writer.add_page(reader.pages[i])
+            out = BytesIO()
+            writer.write(out)
+            pdf_bytes = out.getvalue()
+        except Exception as exc:
+            log.warning("PDF split failed, falling back to full PDF | %s", exc)
+
+    safe_title = re.sub(r"[^\w\s-]", "", chapter.get("title", "chapter"))[:40].strip()
+    filename = f"{safe_title}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("/{paper_id}/chapters/{chapter_id}/summarize", response_model=ChapterOut)

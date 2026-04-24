@@ -612,3 +612,18 @@ export async function chatWithChapter(
     body: JSON.stringify({ question, history }),
   });
 }
+
+/**
+ * Returns the URL for a chapter's PDF slice.
+ * The URL can be used directly as an iframe src or anchor href.
+ */
+export function getChapterPdfUrl(paperId: string, chapterId: string): string {
+  return `${BASE}/papers/${paperId}/chapters/${chapterId}/pdf`;
+}
+
+/**
+ * Returns the URL for the full book PDF.
+ */
+export function getPaperPdfUrl(paperId: string): string {
+  return `${BASE}/papers/${paperId}/pdf`;
+}
