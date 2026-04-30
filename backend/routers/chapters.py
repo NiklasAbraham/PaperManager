@@ -14,9 +14,13 @@ from db.queries.chapters import (
     update_chapter,
     delete_chapters_for_paper,
 )
-from services.book_chapter_parser import extract_chapters_with_splits, assign_page_numbers
+from services.book_chapter_parser import (
+    detect_chapters_docling,
+    extract_chapters_with_splits,
+    assign_page_numbers,
+)
 from services.ai import summarize_chapter, chat_with_chapter, detect_chapters_with_ai
-from models.schemas import ChapterOut, ChapterDetectRequest, ChapterChatRequest, ChatResponse
+from models.schemas import ChapterOut, ChapterDetectRequest, ChapterSummarizeRequest, ChapterChatRequest, ChatResponse
 
 router = APIRouter(prefix="/papers", tags=["chapters"])
 
@@ -34,10 +38,11 @@ def get_chapters(paper_id: str):
 @router.post("/{paper_id}/chapters/detect", response_model=list[ChapterOut], status_code=status.HTTP_201_CREATED)
 def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
     """
-    Detect chapters from the stored raw_text of a book/lecture document.
-    Existing chapters for this paper are replaced only on success.
-    Each chapter receives an AI-generated summary automatically.
-    If body.use_ai is True, Claude is also consulted to refine the chapter list.
+    Detect chapters from a book/lecture document.
+    Strategy 1: Docling structural PDF parsing (best quality, requires stored PDF).
+    Strategy 2: Regex on raw text (fallback).
+    Strategy 3: Ollama AI (use_ai=true, last resort).
+    Existing chapters are replaced only on success. Summaries generated via Ollama.
     """
     driver = get_driver()
     paper = get_paper(driver, paper_id)
@@ -50,21 +55,42 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
 
     # --- Detect first, delete only if we succeed ---
 
-    # Detect chapters via heuristics
-    chapter_dicts = extract_chapters_with_splits(raw_text)
+    chapter_dicts: list[dict] = []
+    pdf_bytes: bytes | None = None
 
-    # Optional: refine with AI when heuristics fail
+    # Strategy 1: Docling structural detection (best quality, requires PDF)
+    if paper.get("drive_file_id"):
+        try:
+            from services.drive import download_pdf
+            pdf_bytes = download_pdf(paper["drive_file_id"])
+            chapter_dicts = detect_chapters_docling(pdf_bytes)
+            if chapter_dicts:
+                log.info("Docling detected %d chapters for paper %s", len(chapter_dicts), paper_id)
+        except Exception as exc:
+            log.warning("Docling detection failed, falling back to regex | paper_id=%s | %s", paper_id, exc)
+
+    # Strategy 2: Regex on raw text (fallback when no PDF or Docling found nothing)
+    if not chapter_dicts:
+        chapter_dicts = extract_chapters_with_splits(raw_text)
+
+        # Assign page numbers from PDF if we have it (best-effort)
+        if chapter_dicts and paper.get("drive_file_id"):
+            try:
+                if pdf_bytes is None:
+                    from services.drive import download_pdf
+                    pdf_bytes = download_pdf(paper["drive_file_id"])
+                chapter_dicts = assign_page_numbers(chapter_dicts, pdf_bytes)
+            except Exception as exc:
+                log.warning("Page number assignment failed (non-fatal) | paper_id=%s | %s", paper_id, exc)
+
+    # Strategy 3: Ollama AI fallback (use_ai flag, last resort)
     if body.use_ai and not chapter_dicts:
         ai_chapters = detect_chapters_with_ai(paper.get("title", ""), raw_text)
         if ai_chapters:
-            # AI returns {number, title, level} — slice text by searching for each title
             for ch in ai_chapters:
                 title = ch.get("title", "")
                 idx = raw_text.find(title) if title else -1
-                if idx != -1:
-                    ch["text"] = raw_text[idx:idx + 8000]
-                else:
-                    ch["text"] = ""
+                ch["text"] = raw_text[idx:idx + 8000] if idx != -1 else ""
             chapter_dicts = ai_chapters
 
     if not chapter_dicts:
@@ -72,15 +98,6 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
             status_code=422,
             detail="Could not detect any chapters in this document. Try uploading a document with clearer chapter headings.",
         )
-
-    # Try to assign page numbers from the stored PDF (best-effort)
-    if paper.get("drive_file_id"):
-        try:
-            from services.drive import download_pdf
-            pdf_bytes = download_pdf(paper["drive_file_id"])
-            chapter_dicts = assign_page_numbers(chapter_dicts, pdf_bytes)
-        except Exception as exc:
-            log.warning("Page number assignment failed (non-fatal) | paper_id=%s | %s", paper_id, exc)
 
     log.info("Detected %d chapters for paper %s", len(chapter_dicts), paper_id)
 
@@ -94,7 +111,7 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
         # Generate AI summary per chapter (best-effort)
         summary = None
         try:
-            summary = summarize_chapter(ch.get("title", ""), ch.get("text", ""))
+            summary = summarize_chapter(ch.get("title", ""), ch.get("text", ""), model=body.model)
         except Exception as exc:
             log.warning("Chapter summary failed (non-fatal) | chapter=%s | %s", ch.get("title"), exc)
 
@@ -184,7 +201,7 @@ def get_chapter_pdf(paper_id: str, chapter_id: str):
 
 
 @router.post("/{paper_id}/chapters/{chapter_id}/summarize", response_model=ChapterOut)
-def regenerate_chapter_summary(paper_id: str, chapter_id: str):
+def regenerate_chapter_summary(paper_id: str, chapter_id: str, body: ChapterSummarizeRequest = ChapterSummarizeRequest()):
     """Re-generate the AI summary for a single chapter."""
     driver = get_driver()
     chapter = get_chapter(driver, chapter_id)
@@ -192,7 +209,7 @@ def regenerate_chapter_summary(paper_id: str, chapter_id: str):
         raise HTTPException(status_code=404, detail="Chapter not found")
 
     try:
-        summary = summarize_chapter(chapter.get("title", ""), chapter.get("text", ""))
+        summary = summarize_chapter(chapter.get("title", ""), chapter.get("text", ""), model=body.model)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"AI summarization failed: {exc}")
 

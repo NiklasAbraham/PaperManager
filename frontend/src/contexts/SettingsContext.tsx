@@ -25,6 +25,9 @@ export interface AppSettings {
   autoSaveReferences: boolean;
   defaultSummaryInstructions: string;
 
+  // Books & Chapters
+  chapterSummaryModel: string;
+
   // Figures
   figureCaptionMethod: "docling" | "ollama" | "claude-vision";
 
@@ -47,6 +50,7 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   showSummaryPromptStep: true,
   autoSaveReferences: false,
   defaultSummaryInstructions: DEFAULT_SUMMARY_INSTRUCTIONS,
+  chapterSummaryModel: "llama3.2:3b",
   figureCaptionMethod: "docling",
   defaultGraphMode: "full",
   graphNodeSize: 16,

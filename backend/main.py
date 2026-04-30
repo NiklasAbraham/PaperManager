@@ -30,6 +30,8 @@ from routers.bulk_import import router as bulk_import_router
 from routers.literature import router as literature_router
 from routers.admin import router as admin_router
 from routers.chapters import router as chapters_router
+from routers.blogs import router as blogs_router
+from routers.annotations import router as annotations_router
 
 
 @asynccontextmanager
@@ -76,6 +78,21 @@ app.include_router(bulk_import_router)
 app.include_router(literature_router)
 app.include_router(admin_router)
 app.include_router(chapters_router)
+app.include_router(blogs_router)
+app.include_router(annotations_router)
+
+
+@app.get("/ollama/models", response_model=list[str])
+def list_ollama_models():
+    """Return the names of locally available Ollama models."""
+    try:
+        import ollama
+        models_resp = ollama.list()
+        # ollama.list() returns an object with a .models list of model objects
+        names = [m.model for m in models_resp.models if m.model]
+        return sorted(names)
+    except Exception:
+        return []
 
 
 @app.get("/health", response_model=HealthResponse)

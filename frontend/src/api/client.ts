@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -586,18 +586,24 @@ export async function listChapters(paperId: string): Promise<Chapter[]> {
   return apiFetch<Chapter[]>(`/papers/${paperId}/chapters`);
 }
 
-export async function detectChapters(paperId: string, useAi = false): Promise<Chapter[]> {
+export async function detectChapters(paperId: string, useAi = false, model?: string): Promise<Chapter[]> {
   return apiFetch<Chapter[]>(`/papers/${paperId}/chapters/detect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ use_ai: useAi }),
+    body: JSON.stringify({ use_ai: useAi, model: model || null }),
   });
 }
 
-export async function regenerateChapterSummary(paperId: string, chapterId: string): Promise<Chapter> {
+export async function regenerateChapterSummary(paperId: string, chapterId: string, model?: string): Promise<Chapter> {
   return apiFetch<Chapter>(`/papers/${paperId}/chapters/${chapterId}/summarize`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: model || null }),
   });
+}
+
+export async function listOllamaModels(): Promise<string[]> {
+  return apiFetch<string[]>("/ollama/models");
 }
 
 export async function chatWithChapter(
@@ -626,4 +632,177 @@ export function getChapterPdfUrl(paperId: string, chapterId: string): string {
  */
 export function getPaperPdfUrl(paperId: string): string {
   return `${BASE}/papers/${paperId}/pdf`;
+}
+
+// ── Blogs ─────────────────────────────────────────────────────────────────────
+
+export function listBlogs(): Promise<Blog[]> {
+  return apiFetch("/blogs");
+}
+
+export function registerBlog(url: string): Promise<Blog> {
+  return apiFetch("/blogs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+}
+
+export function deleteBlog(blogId: string): Promise<void> {
+  return apiFetch(`/blogs/${blogId}`, { method: "DELETE" });
+}
+
+export function fetchBlogPosts(blogId: string): Promise<{ new_posts: number; total_fetched: number }> {
+  return apiFetch(`/blogs/${blogId}/fetch`, { method: "POST" });
+}
+
+export function listBlogPosts(blogId: string, status?: string): Promise<BlogPost[]> {
+  const qs = status ? `?status=${status}` : "";
+  return apiFetch(`/blogs/${blogId}/posts${qs}`);
+}
+
+export function getRandomBlogPost(status = "unread"): Promise<BlogPost> {
+  return apiFetch(`/blogs/posts/random?status=${status}`);
+}
+
+export function getBlogPost(postId: string): Promise<BlogPost> {
+  return apiFetch(`/blogs/posts/${postId}`);
+}
+
+export function updateBlogPost(postId: string, data: { reading_status?: string }): Promise<BlogPost> {
+  return apiFetch(`/blogs/posts/${postId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteBlogPost(postId: string): Promise<void> {
+  return apiFetch(`/blogs/posts/${postId}`, { method: "DELETE" });
+}
+
+export function importBlogPost(postId: string): Promise<{ imported: boolean; content_length: number }> {
+  return apiFetch(`/blogs/posts/${postId}/import`, { method: "POST" });
+}
+
+export function summarizeBlogPost(postId: string): Promise<{ summary: string; post: BlogPost }> {
+  return apiFetch(`/blogs/posts/${postId}/summarize`, { method: "POST" });
+}
+
+export function chatWithBlogPost(
+  postId: string,
+  question: string,
+  history: { role: string; content: string }[] = [],
+): Promise<{ answer: string }> {
+  return apiFetch(`/blogs/posts/${postId}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history }),
+  });
+}
+
+export function getBlogPostNote(postId: string): Promise<Note> {
+  return apiFetch(`/blogs/posts/${postId}/note`);
+}
+
+export function saveBlogPostNote(postId: string, content: string): Promise<Note> {
+  return apiFetch(`/blogs/posts/${postId}/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
+// ── Blog post tags ─────────────────────────────────────────────────────────────
+
+export function getBlogPostTags(postId: string): Promise<{ id: string; name: string }[]> {
+  return apiFetch(`/blogs/posts/${postId}/tags`);
+}
+
+export function addBlogPostTag(postId: string, tagName: string): Promise<{ id: string; name: string }> {
+  return apiFetch(`/blogs/posts/${postId}/tags/${encodeURIComponent(tagName)}`, { method: "POST" });
+}
+
+export function removeBlogPostTag(postId: string, tagName: string): Promise<void> {
+  return apiFetch(`/blogs/posts/${postId}/tags/${encodeURIComponent(tagName)}`, { method: "DELETE" });
+}
+
+// ── Blog post people ───────────────────────────────────────────────────────────
+
+export function getBlogPostPeople(postId: string): Promise<{ id: string; name: string; role: string }[]> {
+  return apiFetch(`/blogs/posts/${postId}/people`);
+}
+
+export function linkPersonToBlogPost(postId: string, name: string, role = "author"): Promise<{ id: string; name: string }> {
+  return apiFetch(`/blogs/posts/${postId}/people`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, role }),
+  });
+}
+
+export function unlinkPersonFromBlogPost(postId: string, personId: string): Promise<void> {
+  return apiFetch(`/blogs/posts/${postId}/people/${personId}`, { method: "DELETE" });
+}
+
+// ── Blog post projects ─────────────────────────────────────────────────────────
+
+export function getBlogPostProjects(postId: string): Promise<{ id: string; name: string }[]> {
+  return apiFetch(`/blogs/posts/${postId}/projects`);
+}
+
+export function addBlogPostToProject(postId: string, projectId: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/blogs/posts/${postId}/projects/${projectId}`, { method: "POST" });
+}
+
+export function removeBlogPostFromProject(postId: string, projectId: string): Promise<void> {
+  return apiFetch(`/blogs/posts/${postId}/projects/${projectId}`, { method: "DELETE" });
+}
+
+// ── Blog reimport ──────────────────────────────────────────────────────────────
+
+export function reimportAllBlogPosts(blogId: string): Promise<{ updated: number; errors: number }> {
+  return apiFetch(`/blogs/${blogId}/reimport-all`, { method: "POST" });
+}
+
+// ── Annotations ───────────────────────────────────────────────────────────────
+
+export function listAnnotations(paperId: string): Promise<Annotation[]> {
+  return apiFetch<Annotation[]>(`/papers/${paperId}/annotations`);
+}
+
+export function createAnnotation(
+  paperId: string,
+  body: {
+    page_number: number;
+    highlighted_text: string;
+    color: AnnotationColor;
+    note: string;
+    position_json: string;
+  },
+): Promise<Annotation> {
+  return apiFetch<Annotation>(`/papers/${paperId}/annotations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateAnnotation(
+  paperId: string,
+  annotationId: string,
+  body: { note?: string; color?: AnnotationColor },
+): Promise<Annotation> {
+  return apiFetch<Annotation>(`/papers/${paperId}/annotations/${annotationId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteAnnotation(paperId: string, annotationId: string): Promise<void> {
+  const res = await fetch(`${BASE}/papers/${paperId}/annotations/${annotationId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Delete annotation failed ${res.status}`);
 }

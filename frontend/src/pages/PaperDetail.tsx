@@ -413,10 +413,10 @@ export default function PaperDetail() {
     } catch {
       setRefUploadMeta({
         title: ref.title || "",
-        doi:   ref.doi   || null,
-        year:  ref.year  || null,
+        doi:   ref.doi   ?? undefined,
+        year:  ref.year  ?? undefined,
         authors: [],
-        source: "heuristic",
+        metadata_source: "heuristic",
       });
       setRefUploadFile(f);
     } finally {

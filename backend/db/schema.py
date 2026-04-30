@@ -13,6 +13,9 @@ _CONSTRAINTS = [
     "CREATE CONSTRAINT conversation_id IF NOT EXISTS FOR (n:Conversation) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT message_id IF NOT EXISTS FOR (n:Message) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT figure_id IF NOT EXISTS FOR (n:Figure) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT blog_id IF NOT EXISTS FOR (n:Blog) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT blogpost_id IF NOT EXISTS FOR (n:BlogPost) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT annotation_id IF NOT EXISTS FOR (a:Annotation) REQUIRE a.id IS UNIQUE",
 ]
 
 _INDEXES = [

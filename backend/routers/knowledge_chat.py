@@ -28,7 +28,7 @@ def _sse(event: dict) -> str:
 
 # ── @mention parsing ──────────────────────────────────────────────────────────
 
-_MENTION_RE = re.compile(r"@(project|tag|topic|paper):([^\s@,]+)", re.IGNORECASE)
+_MENTION_RE = re.compile(r"@(project|tag|topic|paper|blog):([^\s@,]+)", re.IGNORECASE)
 
 # Paper colour palette for context bar (cycled)
 _PAPER_COLORS = [
@@ -97,6 +97,16 @@ def _fetch_papers_for_mention(
         desc = f"Fetching paper matching '{value}'"
         result = session.run(cypher, val=value_clean)
 
+    elif mention_type == "blog":
+        cypher = (
+            "MATCH (bp:BlogPost)-[:FROM_BLOG]->(b:Blog) "
+            "WHERE toLower(b.name) CONTAINS $val OR toLower(bp.title) CONTAINS $val "
+            "RETURN bp.id AS id, bp.title AS title, bp.description AS abstract, bp.summary AS summary "
+            "LIMIT 20"
+        )
+        desc = f"Fetching blog posts matching '{value}'"
+        result = session.run(cypher, val=value_clean)
+
     else:
         return [], "", ""
 
@@ -105,13 +115,20 @@ def _fetch_papers_for_mention(
 
 
 def _fallback_all_papers(session) -> list[dict]:
-    """When no @mentions, use the 10 most recently added papers."""
-    cypher = (
+    """When no @mentions, use the 10 most recently added papers + 5 most recent blog posts."""
+    cypher_papers = (
         "MATCH (p:Paper) WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'}) "
         "RETURN p.id AS id, p.title AS title, p.abstract AS abstract, p.summary AS summary "
         "ORDER BY p.created_at DESC LIMIT 10"
     )
-    return [dict(r) for r in session.run(cypher)]
+    cypher_posts = (
+        "MATCH (bp:BlogPost) WHERE bp.imported = true "
+        "RETURN bp.id AS id, bp.title AS title, bp.description AS abstract, bp.summary AS summary "
+        "ORDER BY bp.created_at DESC LIMIT 5"
+    )
+    papers = [dict(r) for r in session.run(cypher_papers)]
+    posts = [dict(r) for r in session.run(cypher_posts)]
+    return papers + posts
 
 
 # ── SSE stream generator ──────────────────────────────────────────────────────
@@ -147,7 +164,7 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
             )
             yield _sse({
                 "type": "step",
-                "description": "No @mentions — using 10 most recent papers as context",
+                "description": "No @mentions — using 10 most recent papers + 5 recent blog posts as context",
                 "cypher": cypher,
                 "count": None,
             })

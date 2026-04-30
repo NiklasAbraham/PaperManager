@@ -244,22 +244,35 @@ def knowledge_chat_stream(
     )
 
 
-def summarize_chapter(title: str, text: str) -> str:
-    """Return a markdown summary of a book/lecture chapter using Claude."""
+def summarize_chapter(title: str, text: str, model: str | None = None) -> str:
+    """Return a markdown summary of a book/lecture chapter.
+
+    Routes to Anthropic when model starts with 'claude-', otherwise Ollama.
+    """
     if not text or not text.strip():
         return "_No text available for this chapter._"
 
+    effective_model = model or settings.ollama_model
     prompt = _load_prompt("chapter_summary.txt").format(
         title=title or "(untitled chapter)",
-        text=text[:20000],
+        text=text[:20000] if effective_model.startswith("claude-") else text[:8000],
     )
-    client = _personal_client()
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+
+    if effective_model.startswith("claude-"):
+        client = _personal_client()
+        message = client.messages.create(
+            model=effective_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text
+    else:
+        import ollama
+        response = ollama.chat(
+            model=effective_model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response["message"]["content"].strip()
 
 
 def chat_with_chapter(
@@ -287,11 +300,11 @@ def chat_with_chapter(
 
 def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
     """
-    Use Claude to propose a chapter structure from a book/lecture PDF text.
-    Returns a list of dicts: [{number, title, level, start_hint}, ...].
+    Use Ollama to propose a chapter structure from a book/lecture PDF text.
+    Returns a list of dicts: [{number, title, level}, ...].
     Falls back to [] on any error.
     """
-    import json, re
+    import json, re, ollama
 
     if not text or not text.strip():
         return []
@@ -302,15 +315,13 @@ def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
         "Return a JSON object with key 'chapters', each item having: "
         "number (int), title (str), level (1=chapter, 2=sub-chapter).\n\n"
         f"Document title: {title or '(unknown)'}\n\n"
-        f"Document text (first 6000 words):\n{text[:30000]}"
+        f"Document text (first 6000 words):\n{text[:15000]}"
     )
-    client = _personal_client()
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
+    response = ollama.chat(
+        model=settings.ollama_model,
         messages=[{"role": "user", "content": prompt}],
     )
-    raw_text = message.content[0].text.strip()
+    raw_text = response["message"]["content"].strip()
     match = re.search(r'\{.*\}', raw_text, re.DOTALL)
     if not match:
         return []
@@ -361,3 +372,55 @@ def extract_affiliations_with_ollama(author_names: list[str], text: str) -> dict
     except Exception as exc:
         log.warning("Ollama affiliation extraction failed: %s", exc)
         return {}
+
+
+# ── Blog post AI ───────────────────────────────────────────────────────────────
+
+def summarize_blog_post(content: str, title: str = "") -> str:
+    """Summarize a blog post using Claude Haiku (fast, cheap)."""
+    if not content or not content.strip():
+        return "_No content available to summarize._"
+
+    prompt = (
+        f"Summarize the following blog post concisely in 3-5 bullet points. "
+        f"Focus on the key ideas, insights, and takeaways. "
+        f"Use markdown formatting.\n\n"
+        f"Title: {title or '(unknown)'}\n\n"
+        f"Content:\n{content[:30000]}"
+    )
+
+    client = _personal_client()
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=800,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text
+
+
+def chat_with_blog_post(
+    content: str,
+    title: str,
+    question: str,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    """Answer a question about a blog post using its content as context."""
+    system = (
+        f"You are an expert assistant helping the user understand a blog post.\n\n"
+        f"Blog post title: {title or '(unknown)'}\n\n"
+        f"Blog post content:\n{content[:60000]}\n\n"
+        f"Answer the user's questions about this blog post concisely and accurately. "
+        f"If the answer is not in the blog post, say so."
+    )
+
+    client = _personal_client()
+    messages: list[dict[str, Any]] = list(history or [])
+    messages.append({"role": "user", "content": question})
+
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=1024,
+        system=system,
+        messages=messages,
+    )
+    return response.content[0].text

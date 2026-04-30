@@ -13,5 +13,7 @@ google-auth-oauthlib
 mcp[cli]
 ollama
 httpx
+beautifulsoup4
+lxml
 pytest
 pytest-asyncio

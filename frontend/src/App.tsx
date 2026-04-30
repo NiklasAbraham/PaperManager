@@ -7,6 +7,8 @@ import Projects from "./pages/Projects";
 import Settings from "./pages/Settings";
 import BulkImport from "./pages/BulkImport";
 import LiteratureSearch from "./pages/LiteratureSearch";
+import Blogs from "./pages/Blogs";
+import BlogPostDetail from "./pages/BlogPostDetail";
 import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
@@ -33,6 +35,7 @@ function NavBar() {
       <NavLink to="/knowledge" className={cls}>Knowledge</NavLink>
       <NavLink to="/literature" className={cls}>Literature</NavLink>
       <NavLink to="/bulk-import" className={cls}>Bulk Import</NavLink>
+      <NavLink to="/blogs" className={cls}>Blogs</NavLink>
       <NavLink to="/settings" className={cls}>Settings</NavLink>
       <div className="ml-auto">
         <button
@@ -71,6 +74,8 @@ export default function App() {
               <Route path="/knowledge" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><KnowledgeChat /></Suspense>} />
               <Route path="/literature" element={<LiteratureSearch />} />
               <Route path="/bulk-import" element={<BulkImport />} />
+              <Route path="/blogs" element={<Blogs />} />
+              <Route path="/blogs/posts/:postId" element={<BlogPostDetail />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </div>

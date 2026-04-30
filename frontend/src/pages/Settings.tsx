@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults, listOllamaModels } from "../api/client";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures";
@@ -19,6 +19,7 @@ export default function Settings() {
   const [clearResult, setClearResult] = useState<Record<string, number> | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{ seeded: number } | null>(null);
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [debugCount, setDebugCount] = useState<number | null>(null);
   const [debugDeleting, setDebugDeleting] = useState(false);
   const [debugDeleteResult, setDebugDeleteResult] = useState<{ deleted: number; figures_deleted: number } | null>(null);
@@ -26,6 +27,7 @@ export default function Settings() {
 
   useEffect(() => {
     countDebugPapers().then(setDebugCount).catch(() => setDebugCount(null));
+    listOllamaModels().then(setOllamaModels).catch(() => setOllamaModels([]));
   }, []);
   const [backfill, setBackfill] = useState<Record<BackfillOp, BackfillState>>({
     topics:  { status: "idle" },
@@ -173,6 +175,34 @@ export default function Settings() {
             ]}
             onChange={(v) => update({ figureCaptionMethod: v as AppSettings["figureCaptionMethod"] })}
           />
+        </Row>
+      </Section>
+
+      {/* ── Books & Chapters ── */}
+      <Section title="Books & Chapters" description="Settings for chapter detection and AI summarisation.">
+        <Row label="Summary model" description="Model used to generate per-chapter summaries. Claude models use the personal API key; Ollama models run locally.">
+          {(() => {
+            const CLAUDE_OPTIONS = [
+              { value: "claude-opus-4-6",         label: "Claude Opus 4.6" },
+              { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+            ];
+            const localOptions = ollamaModels.map((m) => ({ value: m, label: m }));
+            const allOptions = [
+              ...CLAUDE_OPTIONS,
+              ...(localOptions.length > 0 ? [{ value: "─────────", label: "─────────" }, ...localOptions] : []),
+              // keep current value if it's not in any known list
+              ...(!CLAUDE_OPTIONS.some(o => o.value === settings.chapterSummaryModel) && !ollamaModels.includes(settings.chapterSummaryModel)
+                ? [{ value: settings.chapterSummaryModel, label: settings.chapterSummaryModel }]
+                : []),
+            ];
+            return (
+              <Select
+                value={settings.chapterSummaryModel}
+                options={allOptions}
+                onChange={(v) => { if (v !== "─────────") update({ chapterSummaryModel: v }); }}
+              />
+            );
+          })()}
         </Row>
       </Section>
 
