@@ -6,6 +6,7 @@ import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
 import BookChapters from "../components/BookChapters";
+import PdfAnnotator from "../components/PdfAnnotator";
 import UploadConfirmModal from "../components/UploadConfirmModal";
 import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
@@ -1096,13 +1097,11 @@ export default function PaperDetail() {
           )}
 
           {/* PDF tab */}
-          {leftTab === "pdf" && driveEmbed && (
-            <iframe
-              src={driveEmbed}
-              className="flex-1 w-full border-0"
-              allow="autoplay"
-              title="PDF viewer"
-            />
+          {leftTab === "pdf" && paper?.drive_file_id && (
+            <PdfAnnotator paperId={id!} pdfUrl={`${BASE}/papers/${id}/pdf`} />
+          )}
+          {leftTab === "pdf" && !paper?.drive_file_id && (
+            <p className="text-xs text-gray-400 text-center pt-6">No PDF available.</p>
           )}
 
           {/* People tab */}
