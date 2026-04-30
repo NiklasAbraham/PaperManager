@@ -1,3 +1,4 @@
+from typing import Literal
 from pydantic import BaseModel
 
 
@@ -236,6 +237,11 @@ class ChapterOut(BaseModel):
 
 class ChapterDetectRequest(BaseModel):
     use_ai: bool = False      # when True, also run AI-based chapter detection
+    model: str | None = None  # Ollama model for summaries; None = server default
+
+
+class ChapterSummarizeRequest(BaseModel):
+    model: str | None = None  # Ollama model; None = server default
 
 
 class ChapterChatRequest(BaseModel):
@@ -250,3 +256,76 @@ class FigureChatRequest(BaseModel):
 
 class FigureExtractRequest(BaseModel):
     caption_method: str = "ollama"  # "ollama" | "claude-vision"
+
+
+# ── Blogs ─────────────────────────────────────────────────────────────────────
+
+class BlogRegisterBody(BaseModel):
+    url: str
+
+
+class BlogOut(BaseModel):
+    id: str
+    name: str
+    url: str
+    feed_url: str
+    description: str | None = None
+    parser: str
+    created_at: str
+    post_count: int = 0
+
+
+class BlogPostOut(BaseModel):
+    id: str
+    blog_id: str
+    title: str
+    url: str
+    author: str | None = None
+    published_at: str | None = None
+    description: str | None = None
+    content: str | None = None      # omitted in list views
+    summary: str | None = None
+    reading_status: str = "unread"  # "unread" | "reading" | "read"
+    imported: bool = False
+    created_at: str
+    updated_at: str
+    blog_name: str | None = None    # populated in random / detail
+
+
+class BlogPostUpdate(BaseModel):
+    reading_status: str | None = None
+    summary: str | None = None
+
+
+class BlogPostChatRequest(BaseModel):
+    question: str
+    history: list[ChatMessage] = []
+
+
+# ── Annotations ───────────────────────────────────────────────────────────────
+
+AnnotationColor = Literal["yellow", "green", "blue", "red", "purple"]
+
+
+class AnnotationCreate(BaseModel):
+    page_number: int
+    highlighted_text: str
+    color: AnnotationColor = "yellow"
+    note: str = ""
+    position_json: str  # JSON string — opaque to backend
+
+
+class AnnotationUpdate(BaseModel):
+    note: str | None = None
+    color: AnnotationColor | None = None
+
+
+class AnnotationOut(BaseModel):
+    id: str
+    page_number: int
+    highlighted_text: str
+    color: str
+    note: str
+    position_json: str
+    created_at: str
+    updated_at: str

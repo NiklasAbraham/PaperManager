@@ -216,3 +216,49 @@ export type LiteratureSseEvent =
   | { done?: false; source: string; paper: LitPaper }
   | { done?: false; source: string; error: string }
   | { done: true; counts: Record<string, number> };
+
+// ── Blogs ─────────────────────────────────────────────────────────────────────
+
+export interface Blog {
+  id: string;
+  name: string;
+  url: string;
+  feed_url: string;
+  description?: string;
+  parser: string;
+  created_at: string;
+  post_count: number;
+}
+
+export interface BlogPost {
+  id: string;
+  blog_id: string;
+  title: string;
+  url: string;
+  author?: string;
+  published_at?: string;
+  description?: string;
+  content?: string;
+  content_md?: string;         // Ollama-formatted markdown
+  figures?: string[];          // image URLs extracted from the page
+  references_json?: string;    // JSON: [{title, url}]
+  summary?: string;
+  reading_status: "unread" | "reading" | "read";
+  imported: boolean;
+  created_at: string;
+  updated_at: string;
+  blog_name?: string;
+}
+
+export type AnnotationColor = "yellow" | "green" | "blue" | "red" | "purple";
+
+export interface Annotation {
+  id: string;
+  page_number: number;
+  highlighted_text: string;
+  color: AnnotationColor;
+  note: string;
+  position_json: string;
+  created_at: string;
+  updated_at: string;
+}

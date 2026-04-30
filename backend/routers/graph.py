@@ -7,12 +7,14 @@ from db.connection import get_driver
 router = APIRouter(prefix="/graph", tags=["graph"])
 
 _NODE_TYPES = {
-    "Paper":   "paper",
-    "Person":  "person",
-    "Topic":   "topic",
-    "Tag":     "tag",
-    "Project": "project",
-    "Note":    "note",
+    "Paper":    "paper",
+    "Person":   "person",
+    "Topic":    "topic",
+    "Tag":      "tag",
+    "Project":  "project",
+    "Note":     "note",
+    "BlogPost": "blogpost",
+    "Blog":     "blog",
 }
 
 
@@ -29,7 +31,7 @@ def _node_dict(node) -> dict:
         "id":    props.get("id") or str(node.element_id),
         "label": props.get("title") or props.get("name") or props.get("id", "?"),
         "type":  _node_type(list(node.labels)),
-        **{k: v for k, v in props.items() if k not in ("raw_text",)},
+        **{k: v for k, v in props.items() if k not in ("raw_text", "content", "content_md")},
     }
 
 
