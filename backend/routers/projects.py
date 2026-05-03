@@ -72,6 +72,27 @@ def remove_paper(project_id: str, paper_id: str):
     remove_paper_from_project(get_driver(), paper_id, project_id)
 
 
+@router.get("/{project_id}/tags")
+def get_tags(project_id: str):
+    """Return all tags across papers in this project, with counts and paper IDs."""
+    driver = get_driver()
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (p:Paper)-[:IN_PROJECT]->(proj:Project {id: $pid})
+            MATCH (p)-[:TAGGED]->(t:Tag)
+            WITH t.name AS tag, collect(p.id) AS paper_ids
+            RETURN tag, paper_ids, size(paper_ids) AS count
+            ORDER BY count DESC, tag ASC
+            """,
+            pid=project_id,
+        )
+        return [
+            {"name": r["tag"], "count": r["count"], "paper_ids": list(r["paper_ids"])}
+            for r in result
+        ]
+
+
 @router.post("/{project_a_id}/related/{project_b_id}", status_code=status.HTTP_201_CREATED)
 def relate(project_a_id: str, project_b_id: str):
     link_projects(get_driver(), project_a_id, project_b_id)

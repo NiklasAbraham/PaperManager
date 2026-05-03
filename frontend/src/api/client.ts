@@ -135,6 +135,14 @@ export async function reextractAbstract(paperId: string): Promise<{ abstract: st
   return apiFetch(`/papers/${paperId}/reextract-abstract`, { method: "POST" });
 }
 
+export async function reextractMetadata(paperId: string): Promise<{
+  title?: string; authors?: string[]; year?: number | null;
+  doi?: string | null; venue?: string | null; abstract?: string | null;
+  metadata_source?: string;
+}> {
+  return apiFetch(`/papers/${paperId}/reextract-metadata`, { method: "POST" });
+}
+
 export async function refetchPdf(paperId: string): Promise<{ authors: string[]; drive_url?: string }> {
   return apiFetch(`/papers/${paperId}/refetch-pdf`, { method: "POST" });
 }
@@ -325,6 +333,10 @@ export async function addPaperToProject(projectId: string, paperId: string): Pro
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paper_id: paperId }),
   });
+}
+
+export async function getProjectTags(projectId: string): Promise<{ name: string; count: number; paper_ids: string[] }[]> {
+  return apiFetch(`/projects/${projectId}/tags`);
 }
 
 export async function getProjectNote(projectId: string): Promise<{ content: string }> {
