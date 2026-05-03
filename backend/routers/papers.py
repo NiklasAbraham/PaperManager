@@ -777,6 +777,61 @@ def delete(paper_id: str):
     log.info("Paper deleted | id=%s | title=%.60s", paper_id, paper.get("title"))
 
 
+@router.post("/{paper_id}/reextract-metadata")
+def reextract_metadata_endpoint(paper_id: str):
+    """Re-extract all metadata fields from the stored raw_text using the full pipeline."""
+    from services.pdf_parser import (
+        find_doi, extract_metadata_with_llm,
+        extract_abstract_from_text, extract_abstract_with_ai,
+    )
+    from services.metadata_lookup import (
+        lookup_semantic_scholar, lookup_crossref, search_semantic_scholar_by_title,
+    )
+
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    raw_text = paper.get("raw_text") or ""
+    if not raw_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No extracted text stored for this paper — upload the PDF first",
+        )
+
+    # Layer 1: DOI-based API lookup
+    doi = paper.get("doi") or find_doi(raw_text)
+    extracted: dict = {}
+    if doi:
+        extracted = lookup_semantic_scholar(doi) or lookup_crossref(doi) or {}
+
+    # Layer 2: LLM fallback
+    if not extracted.get("title"):
+        llm = extract_metadata_with_llm(raw_text[:3000])
+        if llm and llm.get("title"):
+            extracted = llm
+            # Try S2 title upgrade
+            s2 = search_semantic_scholar_by_title(llm["title"])
+            if s2:
+                extracted = s2
+
+    if not extracted:
+        raise HTTPException(status_code=422, detail="Could not extract metadata from the stored text")
+
+    # Fill abstract if missing
+    if not extracted.get("abstract"):
+        extracted["abstract"] = (
+            extract_abstract_from_text(raw_text)
+            or extract_abstract_with_ai(raw_text[:6000])
+        )
+
+    extracted.pop("raw_text", None)
+    extracted.pop("authors_detail", None)
+    log.info("Metadata re-extracted | paper=%s | source=%s", paper_id, extracted.get("metadata_source"))
+    return extracted
+
+
 @router.post("/{paper_id}/reextract-abstract")
 def reextract_abstract(paper_id: str):
     """Re-extract the abstract from the paper's stored raw_text (regex then AI fallback)."""
