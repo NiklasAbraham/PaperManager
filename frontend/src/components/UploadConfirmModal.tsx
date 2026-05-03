@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { uploadPdf, ingestFromUrlFull, saveReferences, applyTags, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, previewUrlPdf, uploadPdfForPaper, parsePdf } from "../api/client";
+import { uploadPdf, ingestFromUrlFull, saveReferences, applyTags, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, addPaperToProject, previewUrlPdf, uploadPdfForPaper, parsePdf, suggestTags, createTag } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
+const INVOLVE_ROLES = ["shared_by", "supervisor", "collaborating", "reviewer", "colleague"] as const;
+
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
-  semantic_scholar: { label: "Semantic Scholar", color: "bg-green-100 text-green-700" },
-  crossref:         { label: "Crossref",          color: "bg-green-100 text-green-700" },
+  semantic_scholar: { label: "Semantic Scholar", color: "bg-accent-lo text-accent" },
+  crossref:         { label: "Crossref",          color: "bg-accent-lo text-accent" },
   llm:              { label: "AI extracted — please review", color: "bg-yellow-100 text-yellow-700" },
-  heuristic:        { label: "Guessed — please correct",     color: "bg-red-100 text-red-700" },
+  heuristic:        { label: "Guessed — please correct",     color: "bg-red-100 text-coral" },
 };
 
 interface Props {
@@ -35,7 +37,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const [duplicate, setDuplicate] = useState<Paper | null>(null);
   const dupCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [step, setStep]                   = useState<0 | 1 | 2 | 3>(settings.showSourceStep ? 0 : 1);
+  const [step, setStep]                   = useState<0 | 1 | 2 | 3 | 4 | 5 | 6>(settings.showSourceStep ? 0 : 1);
   const [uploadedPaper, setUploadedPaper] = useState<T_IngestOut | null>(null);
 
   // Step 2: summary prompt
@@ -54,26 +56,10 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const [newPersonAffiliation, setNewPersonAffiliation] = useState("");
   const [newPersonEmail, setNewPersonEmail] = useState("");
 
-  // Project selector
+  // Project list (used in Step 5 onboarding)
   const [projects, setProjects] = useState<{id: string; name: string; description?: string}[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-  const [suggestedProjectId, setSuggestedProjectId] = useState<string>("");
   useEffect(() => {
-    listProjects().then((ps) => {
-      setProjects(ps);
-      // Auto-suggest: score each project by word overlap with paper title+abstract
-      if (ps.length === 0) return;
-      const paperText = `${meta.title ?? ""} ${meta.abstract ?? ""}`.toLowerCase();
-      const words = paperText.match(/\b\w{4,}\b/g) ?? [];
-      if (words.length === 0) return;
-      let best = { id: "", score: 0 };
-      for (const p of ps) {
-        const pText = `${p.name} ${p.description ?? ""}`.toLowerCase();
-        const hits = words.filter((w) => pText.includes(w)).length;
-        if (hits > best.score) best = { id: p.id, score: hits };
-      }
-      if (best.score >= 3) setSuggestedProjectId(best.id);
-    }).catch(() => {});
+    listProjects().then(setProjects).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // PDF fallback (URL mode only) — download PDF and re-fill fields
@@ -126,11 +112,29 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     finally { setPreImportPdfLoading(false); }
   };
 
-  // Step 2: refs
+  // Step 4: tags
+  const [tagSuggestions, setTagSuggestions] = useState<{ existing: string[]; new: string[] }>({ existing: [], new: [] });
+  const [appliedTags, setAppliedTags]       = useState<Set<string>>(new Set());
+  const [tagsLoading, setTagsLoading]       = useState(false);
+  const [customTag, setCustomTag]           = useState("");
+  const [addingTag, setAddingTag]           = useState(false);
+
+  // Step 5: project (onboarding)
+  const [projectOnboardSelectedId, setProjectOnboardSelectedId] = useState<string>("");
+  const [projectOnboardAdding, setProjectOnboardAdding]         = useState(false);
+  const [projectOnboardAdded, setProjectOnboardAdded]           = useState(false);
+
+  // Step 6: people
+  const [linkedPeople, setLinkedPeople]   = useState<{ name: string; role: string }[]>([]);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [newPersonRole, setNewPersonRole] = useState("shared_by");
+  const [linkingPerson, setLinkingPerson] = useState(false);
+
+  // Step 3: refs
   const [checkedRefs, setCheckedRefs] = useState<boolean[]>([]);
   const [savingRefs, setSavingRefs]   = useState(false);
 
-  const source = SOURCE_LABELS[meta.metadata_source] ?? { label: meta.metadata_source, color: "bg-gray-100 text-gray-500" };
+  const source = SOURCE_LABELS[meta.metadata_source] ?? { label: meta.metadata_source, color: "bg-raised text-ink-3" };
 
   // Debounced duplicate check whenever DOI or title changes
   useEffect(() => {
@@ -202,10 +206,53 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     }
   };
 
-  // ── After refs: call onConfirmed ──────────────────────────────────────────
+  // ── After refs: go to Tags step ───────────────────────────────────────────
 
   const goToTagStep = (paper: T_IngestOut) => {
-    onConfirmed(paper);
+    setUploadedPaper(paper);
+    setStep(4);
+    setTagsLoading(true);
+    Promise.all([
+      apiFetch<{ id: string; name: string }[]>(`/papers/${paper.id}/tags`),
+      suggestTags(paper.title, paper.abstract),
+    ]).then(([current, res]) => {
+      setAppliedTags(new Set(current.map((t) => t.name)));
+      setTagSuggestions(res);
+    }).catch(() => {}).finally(() => setTagsLoading(false));
+  };
+
+  const addTagToApplied = async (name: string) => {
+    if (appliedTags.has(name) || !uploadedPaper) return;
+    setAddingTag(true);
+    try {
+      await createTag(uploadedPaper.id, name);
+      setAppliedTags((prev) => new Set([...prev, name]));
+    } catch { /* ignore */ }
+    finally { setAddingTag(false); }
+  };
+
+  const submitCustomTag = async () => {
+    const name = customTag.trim();
+    if (!name) return;
+    await addTagToApplied(name);
+    setCustomTag("");
+  };
+
+  const linkNewPerson = async () => {
+    const n = newPersonName.trim();
+    if (!n || !uploadedPaper) return;
+    setLinkingPerson(true);
+    try {
+      const person = await getOrCreatePerson(n);
+      await linkPersonInvolves(uploadedPaper.id, person.id, newPersonRole);
+      setLinkedPeople((prev) => [...prev, { name: n, role: newPersonRole }]);
+      setNewPersonName("");
+    } catch { /* ignore */ }
+    finally { setLinkingPerson(false); }
+  };
+
+  const finishOnboarding = () => {
+    if (uploadedPaper) onConfirmed(uploadedPaper);
   };
 
   // ── Step 1: upload ─────────────────────────────────────────────────────────
@@ -218,14 +265,14 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
       let paper: T_IngestOut;
       if (urlMode) {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
-        paper = await ingestFromUrlFull(url!, selectedProjectId || undefined, debug, isDefault ? undefined : summaryInstructions);
+        paper = await ingestFromUrlFull(url!, undefined, debug, isDefault ? undefined : summaryInstructions);
         // If user provided a PDF manually before import, attach it now
         if (preImportPdf && paper.pdf_fetched === false) {
           try { await uploadPdfForPaper(paper.id, preImportPdf); } catch { /* non-fatal */ }
         }
       } else {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
-        paper = await uploadPdf(file!, title.trim(), selectedProjectId || undefined, undefined, isDefault ? undefined : summaryInstructions, debug, documentType !== "paper" ? documentType : undefined);
+        paper = await uploadPdf(file!, title.trim(), undefined, undefined, isDefault ? undefined : summaryInstructions, debug, documentType !== "paper" ? documentType : undefined);
       }
       await applySource(paper.id);
       if (urlMode && paper.pdf_fetched === false) setPdfMissing(true);
@@ -304,7 +351,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   if (step === 0) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
+        <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4">
           <ModalHeader step={0} title="How did you get this paper?" subtitle="Optionally track where you found it — helps build your knowledge graph." />
 
           <div className="px-6 py-5 space-y-4">
@@ -312,13 +359,13 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             <div className="flex gap-2">
               <button
                 onClick={() => { setSourceType("person"); setSourceTag(null); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors ${sourceType === "person" ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"}`}
+                className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors ${sourceType === "person" ? "bg-accent text-white border-accent" : "border-line text-ink-2 hover:border-violet-400 hover:text-accent"}`}
               >
                 From a person
               </button>
               <button
                 onClick={() => { setSourceType("source"); setSourcePerson(null); setPersonQuery(""); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors ${sourceType === "source" ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"}`}
+                className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors ${sourceType === "source" ? "bg-accent text-white border-accent" : "border-line text-ink-2 hover:border-violet-400 hover:text-accent"}`}
               >
                 From a source
               </button>
@@ -339,30 +386,30 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                     }}
                     onFocus={() => setShowPersonDrop(true)}
                     placeholder="Search or create a person…"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                    className="w-full border border-line rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                   {sourcePerson && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-violet-600 text-xs font-medium">✓ {sourcePerson.name}</span>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-accent text-xs font-medium">✓ {sourcePerson.name}</span>
                   )}
                   {showPersonDrop && (filteredPeople.length > 0 || showCreateOption) && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    <div className="absolute z-10 mt-1 w-full bg-raised border border-line rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
                       {filteredPeople.map((p) => (
                         <button
                           key={p.id}
                           onMouseDown={() => handleSelectPerson(p)}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-accent-lo flex items-center gap-2"
                         >
-                          <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs flex items-center justify-center font-medium shrink-0">
+                          <span className="w-6 h-6 rounded-full bg-accent-lo text-accent text-xs flex items-center justify-center font-medium shrink-0">
                             {p.name[0]?.toUpperCase()}
                           </span>
                           <span>{p.name}</span>
-                          {p.affiliation && <span className="text-xs text-gray-400 ml-auto">{p.affiliation}</span>}
+                          {p.affiliation && <span className="text-xs text-ink-3 ml-auto">{p.affiliation}</span>}
                         </button>
                       ))}
                       {showCreateOption && (
                         <button
                           onMouseDown={(e) => { e.preventDefault(); setShowPersonDrop(false); setShowPersonForm(true); }}
-                          className="w-full text-left px-3 py-2 text-sm text-violet-600 hover:bg-violet-50 flex items-center gap-2 border-t border-gray-100"
+                          className="w-full text-left px-3 py-2 text-sm text-accent hover:bg-accent-lo flex items-center gap-2 border-t border-line-s"
                         >
                           <span className="w-6 h-6 rounded-full border-2 border-dashed border-violet-400 text-violet-500 text-xs flex items-center justify-center shrink-0">+</span>
                           Create "{personQuery.trim()}"
@@ -374,35 +421,35 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
 
                 {/* Inline person-details form */}
                 {showPersonForm && !sourcePerson && (
-                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
-                    <p className="text-xs font-medium text-violet-700">New person: <span className="font-semibold">{personQuery.trim()}</span></p>
+                  <div className="rounded-lg border border-accent-border bg-accent-lo p-3 space-y-2">
+                    <p className="text-xs font-medium text-accent">New person: <span className="font-semibold">{personQuery.trim()}</span></p>
                     <div className="space-y-1.5">
                       <input
                         autoFocus
                         value={newPersonAffiliation}
                         onChange={(e) => setNewPersonAffiliation(e.target.value)}
                         placeholder="Affiliation (e.g. MIT, Google Brain) — optional"
-                        className="w-full border border-gray-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                        className="w-full border border-line rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent bg-raised"
                       />
                       <input
                         value={newPersonEmail}
                         onChange={(e) => setNewPersonEmail(e.target.value)}
                         placeholder="Email — optional"
                         type="email"
-                        className="w-full border border-gray-200 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                        className="w-full border border-line rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent bg-raised"
                       />
                     </div>
                     <div className="flex gap-2 pt-0.5">
                       <button
                         onClick={handleCreatePerson}
                         disabled={creatingPerson}
-                        className="px-3 py-1.5 text-xs font-medium bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50"
+                        className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded hover:bg-accent disabled:opacity-50"
                       >
                         {creatingPerson ? "Creating…" : "Create person"}
                       </button>
                       <button
                         onClick={() => { setShowPersonForm(false); setNewPersonAffiliation(""); setNewPersonEmail(""); }}
-                        className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700"
+                        className="px-3 py-1.5 text-xs text-ink-3 hover:text-ink-2"
                       >
                         Cancel
                       </button>
@@ -421,8 +468,8 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                     onClick={() => setSourceTag(sourceTag === opt.tag ? null : opt.tag)}
                     className={`py-2.5 px-3 rounded-lg border text-sm font-medium flex flex-col items-center gap-1 transition-colors ${
                       sourceTag === opt.tag
-                        ? "bg-violet-600 border-violet-600 text-white"
-                        : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"
+                        ? "bg-accent border-accent text-white"
+                        : "border-line text-ink-2 hover:border-violet-400 hover:text-accent"
                     }`}
                   >
                     <span className="text-base leading-none">{opt.icon}</span>
@@ -434,7 +481,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
 
             {/* Nothing selected yet — placeholder */}
             {!sourceType && (
-              <p className="text-xs text-gray-400 text-center py-2">Select an option above, or skip to continue.</p>
+              <p className="text-xs text-ink-3 text-center py-2">Select an option above, or skip to continue.</p>
             )}
 
             {error && (
@@ -442,16 +489,16 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             )}
           </div>
 
-          <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
+          <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
             <button
               onClick={onCancel}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+              className="px-4 py-2 text-sm text-ink-2 hover:text-ink"
             >
               Cancel
             </button>
             <button
               onClick={() => { setSourceType(null); setSourcePerson(null); setSourceTag(null); setStep(1); }}
-              className="px-4 py-2 text-sm text-gray-500 hover:text-gray-800"
+              className="px-4 py-2 text-sm text-ink-3 hover:text-ink"
             >
               Skip
             </button>
@@ -461,7 +508,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                 (sourceType === "person" && !sourcePerson) ||
                 (sourceType === "source" && !sourceTag)
               }
-              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50"
+              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50"
             >
               Next →
             </button>
@@ -477,7 +524,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     const isModified = summaryInstructions.trim() !== settings.defaultSummaryInstructions.trim();
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+        <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
           <ModalHeader step={2} title="AI Summary Prompt" subtitle={urlMode ? "PDF will be downloaded automatically (arXiv/bioRxiv). Summary uses full text if available, otherwise abstract." : "Customize the summary instructions for this paper. Change your default in Settings."} />
 
           <div className="px-6 py-4">
@@ -485,25 +532,25 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
               value={summaryInstructions}
               onChange={(e) => setSummaryInstructions(e.target.value)}
               rows={10}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"
+              className="w-full border border-line rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent resize-none"
             />
             {isModified && (
               <button
                 onClick={() => setSummaryInstructions(settings.defaultSummaryInstructions)}
-                className="mt-1.5 text-xs text-gray-400 hover:text-violet-600 transition-colors"
+                className="mt-1.5 text-xs text-ink-3 hover:text-accent transition-colors"
               >
                 ↺ Reset to saved default
               </button>
             )}
-            <p className="mt-2 text-xs text-gray-400">
+            <p className="mt-2 text-xs text-ink-3">
               The paper title and full text are appended automatically — no need to include them in the prompt.
             </p>
           </div>
 
-          <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-            <button onClick={() => setStep(1)} disabled={saving} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50">← Back</button>
+          <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+            <button onClick={() => setStep(1)} disabled={saving} className="px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50">← Back</button>
             <button onClick={confirm} disabled={saving || !title.trim()}
-              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2">
+              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50 flex items-center gap-2">
               {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
               {saving ? (urlMode ? "Importing…" : "Uploading…") : (urlMode ? "Import →" : "Upload →")}
             </button>
@@ -518,20 +565,20 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const pdfMissingBanner = pdfMissing ? (
     <div className="mx-6 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
       <p className="text-xs font-medium text-amber-800 mb-1.5">PDF not downloaded automatically</p>
-      <p className="text-xs text-amber-700 mb-2">
+      <p className="text-xs text-amber mb-2">
         The PDF couldn't be fetched (Cloudflare-protected or paywalled).{" "}
         {url && <a href={url} target="_blank" rel="noreferrer" className="underline font-medium hover:text-amber-900">Open paper page ↗</a>}
         {" "}— download the PDF manually and upload it below to enable full-text chat and search.
       </p>
       {pdfUploaded ? (
-        <p className="text-xs text-green-700 font-medium">PDF uploaded successfully.</p>
+        <p className="text-xs text-accent font-medium">PDF uploaded successfully.</p>
       ) : (
         <div className="flex items-center gap-2 flex-wrap">
           <input
             type="file"
             accept="application/pdf"
             onChange={(e) => setManualPdf(e.target.files?.[0] ?? null)}
-            className="text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:text-xs file:border file:border-gray-200 file:rounded file:bg-white file:text-gray-700 hover:file:bg-gray-50"
+            className="text-xs text-ink-2 file:mr-2 file:py-1 file:px-2 file:text-xs file:border file:border-line file:rounded file:bg-raised file:text-ink-2 hover:file:bg-base"
           />
           {manualPdf && (
             <button
@@ -552,27 +599,226 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
     const refs = uploadedPaper.references_found;
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+        <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
           <ModalHeader step={3} title="Save references?" subtitle={`Found ${refs.length} reference${refs.length !== 1 ? "s" : ""} — uncheck any to skip.`} />
           {pdfMissingBanner}
           <div className="px-6 py-3 max-h-[55vh] overflow-y-auto space-y-1">
             {refs.map((ref, i) => (
-              <label key={i} className="flex items-start gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 py-1">
+              <label key={i} className="flex items-start gap-2 cursor-pointer hover:bg-base rounded px-1 py-1">
                 <input type="checkbox" className="mt-0.5 shrink-0" checked={checkedRefs[i] ?? true}
                   onChange={(e) => { const n = [...checkedRefs]; n[i] = e.target.checked; setCheckedRefs(n); }} />
-                <span className="text-xs text-gray-700 leading-snug">
+                <span className="text-xs text-ink-2 leading-snug">
                   <span className="font-medium">{ref.title}</span>
-                  {ref.year ? <span className="text-gray-400"> · {ref.year}</span> : null}
-                  {ref.doi  ? <span className="text-gray-400"> · {ref.doi}</span>  : null}
+                  {ref.year ? <span className="text-ink-3"> · {ref.year}</span> : null}
+                  {ref.doi  ? <span className="text-ink-3"> · {ref.doi}</span>  : null}
                 </span>
               </label>
             ))}
           </div>
-          <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-            <button onClick={() => goToTagStep(uploadedPaper)} disabled={savingRefs} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50">Skip</button>
+          <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+            <button onClick={() => goToTagStep(uploadedPaper)} disabled={savingRefs} className="px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50">Skip</button>
             <button onClick={confirmRefs} disabled={savingRefs || checkedRefs.every((c) => !c)}
-              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
+              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50">
               {savingRefs ? "Saving…" : `Save ${checkedRefs.filter(Boolean).length} · Next →`}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Step 4 (tags) ─────────────────────────────────────────────────
+
+  if (step === 4 && uploadedPaper) {
+    const allSuggested = [...new Set([...tagSuggestions.existing, ...tagSuggestions.new])];
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+          <ModalHeader step={4} title="Add tags" subtitle="Click to apply. Tags help you filter and organise your library." />
+          <div className="px-6 py-4 space-y-3">
+            {tagsLoading ? (
+              <p className="text-xs text-ink-3 animate-pulse">Suggesting tags…</p>
+            ) : allSuggested.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {allSuggested.map((tag) => {
+                  const isOn = appliedTags.has(tag);
+                  const isNew = tagSuggestions.new.includes(tag) && !tagSuggestions.existing.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => addTagToApplied(tag)}
+                      disabled={addingTag || isOn}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        isOn
+                          ? "bg-accent text-white border-accent"
+                          : "bg-raised text-ink-2 border-line hover:border-violet-400 hover:text-accent"
+                      }`}
+                    >
+                      {isNew && !isOn && <span className="mr-1 text-violet-400">✦</span>}
+                      {tag}
+                      {isOn && <span className="ml-1">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-ink-3">No suggestions — add a custom tag below.</p>
+            )}
+            {appliedTags.size > 0 && (
+              <p className="text-xs text-ink-3">{appliedTags.size} tag{appliedTags.size !== 1 ? "s" : ""} applied: {[...appliedTags].join(", ")}</p>
+            )}
+            <div className="flex gap-2">
+              <input
+                value={customTag}
+                onChange={(e) => setCustomTag(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitCustomTag()}
+                placeholder="Add a custom tag…"
+                className="flex-1 border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <button
+                onClick={submitCustomTag}
+                disabled={addingTag || !customTag.trim()}
+                className="px-3 py-1.5 text-sm bg-accent text-white rounded hover:bg-accent disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+          <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+            <button onClick={() => setStep(5)} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">Skip</button>
+            <button onClick={() => setStep(5)} className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent">
+              Next →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Step 5 (project) ─────────────────────────────────────────────
+
+  if (step === 5 && uploadedPaper) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+          <ModalHeader step={5} title="Add to project" subtitle="Group this paper with related work. You can add it to more projects later." />
+          <div className="px-6 py-4 space-y-3">
+            {projects.length === 0 ? (
+              <p className="text-xs text-ink-3 italic">No projects yet — create one from the Projects page.</p>
+            ) : (
+              <div className="max-h-52 overflow-y-auto space-y-1.5">
+                {projects.map((p) => {
+                  const isSelected = p.id === projectOnboardSelectedId;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => { if (!projectOnboardAdded) setProjectOnboardSelectedId(isSelected ? "" : p.id); }}
+                      disabled={projectOnboardAdded}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
+                        isSelected
+                          ? "border-violet-500 bg-accent-lo text-violet-800"
+                          : "border-line bg-raised text-ink-2 hover:border-accent-border hover:bg-accent-lo disabled:opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        {isSelected && <span className="text-violet-500">✓</span>}
+                        <span className="font-medium">{p.name}</span>
+                      </div>
+                      {p.description && <p className="text-ink-3 mt-0.5 truncate">{p.description}</p>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+            <button onClick={() => setStep(6)} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">
+              {projectOnboardAdded ? "Next →" : "Skip"}
+            </button>
+            {!projectOnboardAdded && projectOnboardSelectedId && (
+              <button
+                onClick={async () => {
+                  setProjectOnboardAdding(true);
+                  try {
+                    await addPaperToProject(projectOnboardSelectedId, uploadedPaper.id);
+                    setProjectOnboardAdded(true);
+                  } catch { /* ignore */ }
+                  finally { setProjectOnboardAdding(false); }
+                }}
+                disabled={projectOnboardAdding}
+                className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50"
+              >
+                {projectOnboardAdding ? "Adding…" : "Add to project"}
+              </button>
+            )}
+            {projectOnboardAdded && (
+              <button onClick={() => setStep(6)} className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent">
+                Next →
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Step 6 (people) ───────────────────────────────────────────────
+
+  if (step === 6 && uploadedPaper) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+          <ModalHeader step={5} title="Link people" subtitle="Authors were auto-extracted. Link additional people — supervisor, colleague, who shared this with you…" />
+          <div className="px-6 py-4 space-y-3">
+            {uploadedPaper.authors.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-ink-3 uppercase tracking-wide mb-1.5">Authors (auto-extracted)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {uploadedPaper.authors.map((a) => (
+                    <span key={a} className="px-2.5 py-1 text-xs bg-accent-lo text-accent border border-blue-100 rounded-full">{a}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {linkedPeople.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {linkedPeople.map((p, i) => (
+                  <span key={i} className="px-2.5 py-1 text-xs bg-accent-lo text-accent border border-accent-border rounded-full">
+                    {p.name} · <span className="text-violet-400">{p.role.replace("_", " ")}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                value={newPersonName}
+                onChange={(e) => setNewPersonName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && linkNewPerson()}
+                placeholder="Person's name…"
+                className="flex-1 border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <select
+                value={newPersonRole}
+                onChange={(e) => setNewPersonRole(e.target.value)}
+                className="border border-line rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink-2"
+              >
+                {INVOLVE_ROLES.map((r) => (
+                  <option key={r} value={r}>{r.replace("_", " ")}</option>
+                ))}
+              </select>
+              <button
+                onClick={linkNewPerson}
+                disabled={linkingPerson || !newPersonName.trim()}
+                className="px-3 py-1.5 text-sm bg-accent text-white rounded hover:bg-accent disabled:opacity-50"
+              >
+                {linkingPerson ? "…" : "Link"}
+              </button>
+            </div>
+          </div>
+          <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+            <button onClick={finishOnboarding} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">Skip</button>
+            <button onClick={finishOnboarding} className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent">
+              Done ✓
             </button>
           </div>
         </div>
@@ -584,10 +830,10 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+        <div className="px-6 py-4 border-b border-line-s flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <h2 className="font-semibold text-gray-900">Confirm paper details</h2>
+            <h2 className="font-semibold text-ink">Confirm paper details</h2>
             <StepDots current={1} />
           </div>
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${source.color}`}>{source.label}</span>
@@ -596,56 +842,24 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
         <div className="px-6 py-4 space-y-3 max-h-[70vh] overflow-y-auto">
           <Field label="Title *">
             <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+              className="w-full border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
           </Field>
           <Field label="Authors (comma separated)">
             <input type="text" value={authors} onChange={(e) => setAuthors(e.target.value)} placeholder="Author One, Author Two"
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+              className="w-full border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
           </Field>
           <div className="flex gap-3">
             <Field label="Year" className="w-24 shrink-0">
               <input type="number" value={year} onChange={(e) => setYear(e.target.value)} placeholder="2024"
-                className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                className="w-full border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
             </Field>
             <Field label="DOI / arXiv ID" className="flex-1">
               <input type="text" value={doi} onChange={(e) => setDoi(e.target.value)} placeholder="10.xxxx/… or arXiv:…"
-                className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                className="w-full border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent" />
             </Field>
           </div>
           <Field label="Abstract">
-            <textarea value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={4} className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
-          </Field>
-          <Field label="Add to project">
-            {projects.length === 0 ? (
-              <p className="text-xs text-gray-400 italic">No projects yet — create one in the Projects page.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {suggestedProjectId && !selectedProjectId && (
-                  <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
-                    <span className="text-xs text-violet-700 flex-1">
-                      ✦ Suggested: <strong>{projects.find((p) => p.id === suggestedProjectId)?.name}</strong>
-                    </span>
-                    <button
-                      onClick={() => setSelectedProjectId(suggestedProjectId)}
-                      className="text-xs bg-violet-600 text-white px-2.5 py-0.5 rounded-full hover:bg-violet-700 font-medium"
-                    >
-                      Add
-                    </button>
-                    <button onClick={() => setSuggestedProjectId("")} className="text-violet-400 hover:text-violet-700 text-xs">✕</button>
-                  </div>
-                )}
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => { setSelectedProjectId(e.target.value); setSuggestedProjectId(""); }}
-                  className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white text-gray-700"
-                >
-                  <option value="">— None —</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            <textarea value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={4} className="w-full border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent resize-none" />
           </Field>
           {!urlMode && (
             <Field label="Document type">
@@ -655,14 +869,14 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                     key={val}
                     type="button"
                     onClick={() => setDocumentType(val)}
-                    className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg border transition-colors ${documentType === val ? "bg-violet-600 text-white border-violet-600" : "border-gray-200 text-gray-600 hover:border-violet-400 hover:text-violet-600"}`}
+                    className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-lg border transition-colors ${documentType === val ? "bg-accent text-white border-accent" : "border-line text-ink-2 hover:border-violet-400 hover:text-accent"}`}
                   >
                     {label}
                   </button>
                 ))}
               </div>
               {documentType !== "paper" && (
-                <p className="mt-1.5 text-xs text-violet-600">
+                <p className="mt-1.5 text-xs text-accent">
                   📌 References & figure extraction will be skipped. After upload, use the <strong>Chapters</strong> tab to auto-detect chapter structure and summaries.
                 </p>
               )}
@@ -673,7 +887,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             <div className={`rounded-lg border px-3 py-2.5 space-y-1.5 ${
               !authors.trim() || !abstract.trim()
                 ? "border-amber-200 bg-amber-50"
-                : "border-gray-200 bg-gray-50"
+                : "border-line bg-base"
             }`}>
               {(!authors.trim() || !abstract.trim()) && (
                 <p className="text-xs font-medium text-amber-800">
@@ -684,10 +898,10 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                 </p>
               )}
               {pdfFallbackDone ? (
-                <p className="text-xs text-green-700 font-medium">✓ Fields filled from PDF extraction.</p>
+                <p className="text-xs text-accent font-medium">✓ Fields filled from PDF extraction.</p>
               ) : pdfFallbackError ? (
                 <div className="space-y-2">
-                  <p className="text-xs text-red-700">
+                  <p className="text-xs text-coral">
                     Auto-download blocked (Cloudflare/paywalled).{" "}
                     <a href={url} target="_blank" rel="noreferrer" className="underline font-medium hover:text-red-900">
                       Open paper page ↗
@@ -712,7 +926,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                         {preImportPdfLoading ? "Extracting…" : preImportPdf ? `✓ ${preImportPdf.name}` : "Upload PDF"}
                       </span>
                     </label>
-                    {preImportPdf && <p className="text-xs text-green-700">PDF ready — will be attached on import.</p>}
+                    {preImportPdf && <p className="text-xs text-accent">PDF ready — will be attached on import.</p>}
                   </div>
                 </div>
               ) : (
@@ -720,7 +934,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                   <button
                     onClick={handlePdfFallback}
                     disabled={pdfFallbackLoading}
-                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50 transition-colors"
                   >
                     {pdfFallbackLoading && (
                       <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
@@ -730,7 +944,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                     )}
                     {pdfFallbackLoading ? "Downloading…" : "↓ Fetch PDF automatically"}
                   </button>
-                  <span className="text-xs text-gray-400">or</span>
+                  <span className="text-xs text-ink-3">or</span>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="file"
@@ -738,7 +952,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                       className="hidden"
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePreImportPdf(f); }}
                     />
-                    <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:border-violet-400 hover:text-violet-700 transition-colors cursor-pointer">
+                    <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 border border-gray-300 text-ink-2 rounded-lg hover:border-violet-400 hover:text-accent transition-colors cursor-pointer">
                       {preImportPdfLoading && (
                         <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -748,7 +962,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                       {preImportPdfLoading ? "Reading…" : preImportPdf ? `✓ ${preImportPdf.name}` : "Upload PDF manually"}
                     </span>
                   </label>
-                  {preImportPdf && <p className="text-xs text-green-700">PDF will be attached on import.</p>}
+                  {preImportPdf && <p className="text-xs text-accent">PDF will be attached on import.</p>}
                 </div>
               )}
             </div>
@@ -756,34 +970,34 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
 
           {duplicate && (
             <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs">
-              <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>
+              <span className="text-amber mt-0.5 shrink-0">⚠</span>
               <div className="flex-1 min-w-0">
                 <span className="font-medium text-amber-800">Possible duplicate — </span>
-                <span className="text-amber-700">"{duplicate.title}" is already in your library.</span>
+                <span className="text-amber">"{duplicate.title}" is already in your library.</span>
               </div>
               <a
                 href={`/paper/${duplicate.id}`}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 text-amber-700 underline hover:text-amber-900 font-medium"
+                className="shrink-0 text-amber underline hover:text-amber-900 font-medium"
               >
                 View →
               </a>
             </div>
           )}
-          {error && <p className="text-xs text-red-500">{error}</p>}
+          {error && <p className="text-xs text-coral">{error}</p>}
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-          <button onClick={onCancel} disabled={saving} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50">Cancel</button>
+        <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+          <button onClick={onCancel} disabled={saving} className="px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50">Cancel</button>
           {settings.showSummaryPromptStep ? (
             <button onClick={() => setStep(2)} disabled={!title.trim()}
-              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
+              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50">
               Next →
             </button>
           ) : (
             <button onClick={confirm} disabled={saving || !title.trim()}
-              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2">
+              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50 flex items-center gap-2">
               {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
               {saving ? "Importing…" : urlMode ? "Import →" : "Upload →"}
             </button>
@@ -798,12 +1012,12 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
 
 function ModalHeader({ step, title, subtitle }: { step: number; title: string; subtitle: string }) {
   return (
-    <div className="px-6 py-4 border-b border-gray-100">
+    <div className="px-6 py-4 border-b border-line-s">
       <div className="flex items-center justify-between mb-0.5">
-        <h2 className="font-semibold text-gray-900">{title}</h2>
+        <h2 className="font-semibold text-ink">{title}</h2>
         <StepDots current={step} />
       </div>
-      <p className="text-xs text-gray-500">{subtitle}</p>
+      <p className="text-xs text-ink-3">{subtitle}</p>
     </div>
   );
 }
@@ -811,8 +1025,8 @@ function ModalHeader({ step, title, subtitle }: { step: number; title: string; s
 function StepDots({ current }: { current: number }) {
   return (
     <div className="flex gap-1 items-center">
-      {[0, 1, 2, 3].map((n) => (
-        <span key={n} className={`w-1.5 h-1.5 rounded-full transition-colors ${n === current ? "bg-violet-600" : n < current ? "bg-violet-300" : "bg-gray-200"}`} />
+      {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+        <span key={n} className={`w-1.5 h-1.5 rounded-full transition-colors ${n === current ? "bg-accent" : n < current ? "bg-violet-300" : "bg-raised"}`} />
       ))}
     </div>
   );
@@ -821,7 +1035,7 @@ function StepDots({ current }: { current: number }) {
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={className}>
-      <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+      <label className="block text-xs font-medium text-ink-3 mb-1">{label}</label>
       {children}
     </div>
   );
