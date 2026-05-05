@@ -18,6 +18,7 @@ _CONSTRAINTS = [
     "CREATE CONSTRAINT annotation_id IF NOT EXISTS FOR (a:Annotation) REQUIRE a.id IS UNIQUE",
     "CREATE CONSTRAINT user_id IF NOT EXISTS FOR (n:User) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT user_name IF NOT EXISTS FOR (n:User) REQUIRE n.name IS UNIQUE",
+    "CREATE CONSTRAINT claim_id_unique IF NOT EXISTS FOR (c:Claim) REQUIRE c.id IS UNIQUE",
 ]
 
 _INDEXES = [
@@ -27,6 +28,8 @@ _INDEXES = [
        FOR (n:Note) ON EACH [n.content]""",
     """CREATE FULLTEXT INDEX message_search IF NOT EXISTS
        FOR (n:Message) ON EACH [n.content]""",
+    """CREATE FULLTEXT INDEX claim_search IF NOT EXISTS
+       FOR (c:Claim) ON EACH [c.text]""",
 ]
 
 
