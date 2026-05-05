@@ -835,8 +835,9 @@ export async function getPaperClaims(paperId: string): Promise<{ claims: Claim[]
   return apiFetch(`/papers/${paperId}/claims`);
 }
 
-export async function extractPaperClaims(paperId: string): Promise<{ claims: Claim[], count: number }> {
-  return apiFetch(`/papers/${paperId}/claims/extract`, { method: "POST" });
+export async function extractPaperClaims(paperId: string, model?: string): Promise<{ claims: Claim[], count: number }> {
+  const params = model ? `?model=${encodeURIComponent(model)}` : "";
+  return apiFetch(`/papers/${paperId}/claims/extract${params}`, { method: "POST" });
 }
 
 export async function searchClaims(q: string): Promise<{ results: Array<{ claim: Claim, paper: { id: string, title: string } }> }> {
