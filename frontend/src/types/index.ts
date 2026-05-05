@@ -23,6 +23,8 @@ export interface Person {
   name: string;
   affiliation?: string;
   email?: string;
+  tracked?: boolean;
+  s2_author_id?: string;
 }
 
 export interface Topic {

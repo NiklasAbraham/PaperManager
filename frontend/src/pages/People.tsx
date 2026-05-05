@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { apiFetch } from "../api/client";
+import { apiFetch, setPersonTracked } from "../api/client";
 import type { Person, Paper } from "../types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -212,6 +212,7 @@ function PersonDetailPanel({ person, onChanged }: {
   const [editAffil, setEditAffil] = useState(person.affiliation ?? "");
   const [saving, setSaving]       = useState(false);
   const [editing, setEditing]     = useState(false);
+  const [trackUpdating, setTrackUpdating] = useState(false);
 
   // Keep local state in sync when person prop changes (e.g. after refresh)
   useEffect(() => {
@@ -240,6 +241,18 @@ function PersonDetailPanel({ person, onChanged }: {
     setEditName(person.name);
     setEditAffil(person.affiliation ?? "");
     setEditing(false);
+  };
+
+  const toggleTrack = async () => {
+    setTrackUpdating(true);
+    try {
+      await setPersonTracked(person.id, !person.tracked);
+      onChanged();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update tracking");
+    } finally {
+      setTrackUpdating(false);
+    }
   };
 
   // Group papers by role
@@ -313,14 +326,41 @@ function PersonDetailPanel({ person, onChanged }: {
             </div>
           )}
         </div>
-        {!editing && (
+        <div className="flex items-center gap-2 shrink-0 mt-1">
+          {/* Track toggle */}
           <button
-            onClick={() => setEditing(true)}
-            className="shrink-0 text-xs text-gray-400 hover:text-violet-600 transition-colors mt-1"
+            onClick={toggleTrack}
+            disabled={trackUpdating}
+            title={person.tracked ? "Untrack this author" : "Track this author for auto-import"}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
+              person.tracked
+                ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
           >
-            Edit
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="w-3.5 h-3.5"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            {person.tracked ? "Tracked" : "Track"}
           </button>
-        )}
+          {!editing && (
+            <button
+              onClick={() => setEditing(true)}
+              className="text-xs text-gray-400 hover:text-violet-600 transition-colors"
+            >
+              Edit
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Add connection */}
