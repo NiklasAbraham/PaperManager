@@ -6,7 +6,7 @@ Return a JSON object with key "claims", a list of objects each with:
 Rules:
 - Maximum 10 items total
 - Each text must be self-contained (reader doesn't need to have read the paper)
-- Prefer precise, specific statements over vague generalisations
+- Prefer precise, specific statements over vague generalizations
 - Include at least one "finding" if the paper is empirical
 
 Paper title: {title}
