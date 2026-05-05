@@ -33,7 +33,7 @@ def _title_similarity(a: str, b: str) -> float:
 
 def _parse_s2_authors(raw: list) -> tuple[list[str], list[dict]]:
     """Return (name_list, detail_list) from a S2 authors array.
-    detail_list entries: {name, affiliation} — affiliation may be None.
+    detail_list entries: {name, affiliation, s2_author_id} — affiliation and s2_author_id may be None.
     """
     names = []
     detail = []
@@ -43,8 +43,9 @@ def _parse_s2_authors(raw: list) -> tuple[list[str], list[dict]]:
             continue
         affiliations = a.get("affiliations") or []
         aff = affiliations[0].get("name") if affiliations else None
+        s2_author_id = a.get("authorId")  # Semantic Scholar author ID
         names.append(name)
-        detail.append({"name": name, "affiliation": aff})
+        detail.append({"name": name, "affiliation": aff, "s2_author_id": s2_author_id})
     return names, detail
 
 

@@ -857,3 +857,25 @@ export async function getRelatedPapers(
 ): Promise<{ related: import("../types").RelatedPaper[]; reason?: string }> {
   return apiFetch(`/papers/${paperId}/related?limit=${limit}`);
 }
+
+// ── Author tracking ───────────────────────────────────────────────────────────
+
+export async function setPersonTracked(personId: string, tracked: boolean): Promise<import("../types").Person> {
+  return apiFetch(`/people/${personId}/track`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tracked }),
+  });
+}
+
+export async function getPersonNewPapers(personId: string): Promise<{ new_papers: import("../types").RelatedPaper[] }> {
+  return apiFetch(`/people/${personId}/new-papers`);
+}
+
+export async function runAuthorTrackerCheck(): Promise<{
+  checked: number;
+  new_papers_imported: number;
+  authors: Array<{ id: string; name: string; papers_imported: number; reason?: string }>;
+}> {
+  return apiFetch("/author-tracker/check-all", { method: "POST" });
+}

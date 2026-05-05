@@ -197,9 +197,10 @@ async def upload(
     if debug:
         tag_paper(driver, paper["id"], "debug")
 
-    # Step 7: Link authors (with affiliations)
+    # Step 7: Link authors (with affiliations and S2 author IDs)
     authors_detail = meta.get("authors_detail") or []
     aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+    s2_id_map = {d["name"]: d.get("s2_author_id") for d in authors_detail}
 
     # Ollama fallback for any author still missing an affiliation
     missing = [n for n in meta.get("authors", []) if n and not aff_map.get(n)]
@@ -215,7 +216,9 @@ async def upload(
     for name in meta.get("authors", []):
         if not name:
             continue
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
 
@@ -387,12 +390,15 @@ def ingest_from_url(body: IngestFromUrlBody, x_user_name: Optional[str] = Header
 
     authors_detail = meta.get("authors_detail") or []
     aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+    s2_id_map = {d["name"]: d.get("s2_author_id") for d in authors_detail}
 
     authors_saved = []
     for name in meta.get("authors", []):
         if not name:
             continue
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
 
@@ -528,6 +534,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
 
         authors_detail = merged.get("authors_detail") or []
         aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+        s2_id_map = {d["name"]: d.get("s2_author_id") for d in authors_detail}
         missing = [n for n in merged.get("authors", []) if n and not aff_map.get(n)]
         if missing and raw_text:
             try:
@@ -539,7 +546,9 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
         for name in merged.get("authors", []):
             if not name:
                 continue
-            person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+            person = get_or_create_person_with_affiliation(
+                driver, name, aff_map.get(name), s2_id_map.get(name)
+            )
             link_author(driver, paper["id"], person["id"])
             authors_saved.append(name)
 
@@ -634,7 +643,8 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
         for name in meta.get("authors", []):
             if not name:
                 continue
-            person = get_or_create_person_with_affiliation(driver, name, None)
+            # No s2_author_id available in these basic imports
+            person = get_or_create_person_with_affiliation(driver, name, None, None)
             link_author(driver, paper["id"], person["id"])
             authors_saved.append(name)
 
@@ -987,7 +997,10 @@ async def refetch_pdf(paper_id: str):
         if not name:
             continue
         aff_map = {d["name"]: d.get("affiliation") for d in (pdf_meta.get("authors_detail") or [])}
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        s2_id_map = {d["name"]: d.get("s2_author_id") for d in (pdf_meta.get("authors_detail") or [])}
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         if person["id"] not in existing_author_ids:
             link_author(driver, paper_id, person["id"])
         authors_saved.append(name)
@@ -1063,7 +1076,10 @@ async def upload_pdf_for_paper(paper_id: str, file: UploadFile = File(...)):
         if not name:
             continue
         aff_map = {d["name"]: d.get("affiliation") for d in (pdf_meta.get("authors_detail") or [])}
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        s2_id_map = {d["name"]: d.get("s2_author_id") for d in (pdf_meta.get("authors_detail") or [])}
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         if person["id"] not in existing_author_ids:
             link_author(driver, paper_id, person["id"])
             authors_added.append(name)
