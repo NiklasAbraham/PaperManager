@@ -52,8 +52,14 @@ def get_claims(paper_id: str):
 
 
 @router.post("/papers/{paper_id}/claims/extract", response_model=ExtractClaimsOut)
-def extract_paper_claims(paper_id: str):
-    """Re-run claim extraction for a paper."""
+def extract_paper_claims(paper_id: str, model: str | None = None):
+    """Re-run claim extraction for a paper.
+    
+    Args:
+        paper_id: The paper ID
+        model: Optional model to use ('claude-haiku-4-5-20251001' or an Ollama model name).
+               Defaults to Claude Haiku if not specified.
+    """
     driver = get_driver()
     paper = get_paper(driver, paper_id)
     if not paper:
@@ -68,8 +74,8 @@ def extract_paper_claims(paper_id: str):
     # Delete existing claims
     delete_paper_claims(driver, paper_id)
     
-    # Extract new claims
-    claims_data = extract_claims(raw_text, paper.get("title", ""))
+    # Extract new claims with specified model
+    claims_data = extract_claims(raw_text, paper.get("title", ""), model=model)
     
     if not claims_data:
         return ExtractClaimsOut(claims=[], count=0)

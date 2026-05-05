@@ -515,34 +515,49 @@ def chat_with_blog_post(
 
 
 
-def extract_claims(text: str, title: str) -> list[dict]:
+def extract_claims(text: str, title: str, model: str | None = None) -> list[dict]:
     """
-    Uses Claude Haiku to extract claims from paper text.
+    Extract claims from paper text using Claude Haiku or Ollama.
+    Routes to Anthropic when model starts with 'claude-', otherwise Ollama.
     Returns list of {"text": str, "type": str}.
     Returns [] on any error (non-fatal — called best-effort on upload).
     """
     import json, re
     if not text or not text.strip():
         return []
+    
+    effective_model = model or "claude-haiku-4-5-20251001"
     prompt = _load_prompt("claims.txt").format(
         title=title or "(unknown)",
-        text=text[:40000],
+        text=text[:40000] if effective_model.startswith("claude-") else text[:12000],
     )
+    
     try:
-        client = _personal_client()
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = message.content[0].text.strip()
+        if effective_model.startswith("claude-"):
+            client = _personal_client()
+            message = client.messages.create(
+                model=effective_model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = message.content[0].text.strip()
+        else:
+            # Use Ollama
+            import ollama
+            response = ollama.chat(
+                model=effective_model,
+                messages=[{"role": "user", "content": prompt}],
+                format="json",
+            )
+            raw = response["message"]["content"].strip()
+        
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
             return []
         data = json.loads(match.group())
         return [c for c in (data.get("claims") or []) if c.get("text")]
     except Exception as exc:
-        log.warning("extract_claims failed (non-fatal) | %s", exc)
+        log.warning("extract_claims failed (non-fatal) | model=%s | %s", effective_model, exc)
         return []
 
 

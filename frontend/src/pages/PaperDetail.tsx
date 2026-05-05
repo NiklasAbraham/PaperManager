@@ -100,6 +100,7 @@ export default function PaperDetail() {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [claimsLoaded, setClaimsLoaded] = useState(false);
   const [extractingClaims, setExtractingClaims] = useState(false);
+  const [claimsModel, setClaimsModel] = useState<"claude" | "ollama">("claude");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -465,7 +466,8 @@ export default function PaperDetail() {
     if (!id) return;
     setExtractingClaims(true);
     try {
-      const res = await extractPaperClaims(id);
+      const model = claimsModel === "claude" ? "claude-haiku-4-5-20251001" : undefined;
+      const res = await extractPaperClaims(id, model);
       setClaims(res.claims);
       setClaimsLoaded(true);
     } catch (error) {
@@ -1672,19 +1674,32 @@ export default function PaperDetail() {
               <div className="max-w-3xl mx-auto px-6 py-5">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-gray-700">Claims & Findings</h3>
-                  <button
-                    onClick={handleExtractClaims}
-                    disabled={extractingClaims}
-                    className="text-xs px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {extractingClaims && (
-                      <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                      </svg>
-                    )}
-                    {extractingClaims ? "Extracting…" : "↺ Re-extract claims"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
+                      {(["claude", "ollama"] as const).map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => setClaimsModel(m)}
+                          className={`px-2.5 py-1 ${claimsModel === m ? "bg-violet-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}
+                        >
+                          {m === "claude" ? "Claude" : "Ollama"}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExtractClaims}
+                      disabled={extractingClaims}
+                      className="text-xs px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {extractingClaims && (
+                        <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                      )}
+                      {extractingClaims ? "Extracting…" : "↺ Re-extract claims"}
+                    </button>
+                  </div>
                 </div>
 
                 {claimsLoaded && claims.length === 0 && (

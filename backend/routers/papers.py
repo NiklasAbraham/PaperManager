@@ -70,6 +70,7 @@ async def upload(
     caption_method: Optional[str] = Form("ollama"),
     summary_instructions: Optional[str] = Form(None),
     document_type: Optional[str] = Form(None),
+    claims_model: Optional[str] = Form(None),
     debug: bool = Form(False),
     x_user_name: Optional[str] = Header(None),
 ):
@@ -246,7 +247,7 @@ async def upload(
     # Step 8c: Extract claims (best-effort — skipped for books/lecture decks)
     if not is_book:
         try:
-            claims_data = extract_claims(raw_text, meta.get("title", ""))
+            claims_data = extract_claims(raw_text, meta.get("title", ""), model=claims_model)
             if claims_data:
                 create_claims(driver, paper["id"], claims_data)
                 log.info("Claims extracted | count=%d | paper_id=%s", len(claims_data), paper["id"])
