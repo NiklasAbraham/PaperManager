@@ -1260,6 +1260,12 @@ export default function PaperDetail() {
                         <p className="text-xs text-gray-600">{paper.metadata_source}</p>
                       </div>
                     )}
+                    {paper.added_by && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Added by</p>
+                        <p className="text-xs text-gray-600">{paper.added_by}</p>
+                      </div>
+                    )}
                   </div>
                 </MetaSection>
 

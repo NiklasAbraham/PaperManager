@@ -2,8 +2,20 @@ import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, Knowl
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+function userHeader(): Record<string, string> {
+  const name = localStorage.getItem("pm_current_user");
+  return name ? { "X-User-Name": name } : {};
+}
+
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, options);
+  const merged: RequestInit = {
+    ...options,
+    headers: {
+      ...userHeader(),
+      ...(options?.headers ?? {}),
+    },
+  };
+  const res = await fetch(`${BASE}${path}`, merged);
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`API ${res.status}: ${detail}`);
@@ -39,7 +51,7 @@ export async function uploadPdf(
   if (summaryInstructions) form.append("summary_instructions", summaryInstructions);
   if (debug) form.append("debug", "true");
   if (documentType) form.append("document_type", documentType);
-  const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form, headers: userHeader() });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Upload failed ${res.status}: ${detail}`);

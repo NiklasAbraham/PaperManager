@@ -8,10 +8,11 @@ import type { T_IngestOut } from "../types";
 type Step = "tags" | "project" | "people";
 
 const STEPS: Step[] = ["tags", "project", "people"];
-const STEP_LABELS: Record<Step, string> = {
-  tags: "Tags",
-  project: "Project",
-  people: "People",
+
+const STEP_META: Record<Step, { title: string; subtitle: string }> = {
+  tags:    { title: "Add tags",       subtitle: "Click to apply. Tags help you filter and organise your library." },
+  project: { title: "Add to project", subtitle: "Group this paper with related work. You can add it to more projects later." },
+  people:  { title: "Link people",    subtitle: "Authors were auto-extracted. Link additional people — colleague, supervisor, who shared this…" },
 };
 
 const INVOLVE_ROLES = [
@@ -32,32 +33,20 @@ function scoreProject(proj: { name: string; description?: string }, paper: T_Ing
   return words.filter((w) => haystack.includes(w)).length;
 }
 
-// ── Step indicators ──────────────────────────────────────────────────────────
+// ── Step dots (matches UploadConfirmModal) ────────────────────────────────────
 
-function StepBar({ current }: { current: Step }) {
+function StepDots({ current }: { current: Step }) {
+  const idx = STEPS.indexOf(current);
   return (
-    <div className="flex items-center gap-0 mb-6">
-      {STEPS.map((s, i) => {
-        const done = STEPS.indexOf(current) > i;
-        const active = s === current;
-        return (
-          <div key={s} className="flex items-center flex-1">
-            <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold border-2 transition-colors shrink-0 ${
-              done ? "bg-violet-600 border-violet-600 text-white"
-              : active ? "border-violet-600 text-violet-700 bg-white"
-              : "border-gray-200 text-gray-400 bg-white"
-            }`}>
-              {done ? "✓" : i + 1}
-            </div>
-            <span className={`ml-1.5 text-xs font-medium transition-colors ${active ? "text-violet-700" : done ? "text-gray-500" : "text-gray-300"}`}>
-              {STEP_LABELS[s]}
-            </span>
-            {i < STEPS.length - 1 && (
-              <div className={`flex-1 h-px mx-3 ${done ? "bg-violet-300" : "bg-gray-200"}`} />
-            )}
-          </div>
-        );
-      })}
+    <div className="flex gap-1 items-center">
+      {STEPS.map((_, i) => (
+        <span
+          key={i}
+          className={`w-1.5 h-1.5 rounded-full transition-colors ${
+            i === idx ? "bg-accent" : i < idx ? "bg-violet-300" : "bg-line"
+          }`}
+        />
+      ))}
     </div>
   );
 }
@@ -74,12 +63,8 @@ function TagsStep({ paper, onNext }: { paper: T_IngestOut; onNext: () => void })
   useEffect(() => {
     const loadTags = async () => {
       try {
-        // Load currently applied tags
         const current = await apiFetch<{ id: string; name: string }[]>(`/papers/${paper.id}/tags`);
-        const currentNames = new Set(current.map((t) => t.name));
-        setApplied(currentNames);
-
-        // Load suggestions
+        setApplied(new Set(current.map((t) => t.name)));
         const res = await suggestTags(paper.title, paper.abstract);
         setSuggested({ existing: res.existing, new: res.new });
       } catch { /* ignore */ }
@@ -89,7 +74,7 @@ function TagsStep({ paper, onNext }: { paper: T_IngestOut; onNext: () => void })
   }, [paper.id, paper.title, paper.abstract]);
 
   const toggle = async (name: string) => {
-    if (applied.has(name)) return; // don't remove via this UI
+    if (applied.has(name)) return;
     setAdding(true);
     try {
       await createTag(paper.id, name);
@@ -113,74 +98,71 @@ function TagsStep({ paper, onNext }: { paper: T_IngestOut; onNext: () => void })
   const allSuggested = [...new Set([...suggested.existing, ...suggested.new])];
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-sm font-semibold text-gray-800 mb-1">Tags</p>
-        <p className="text-xs text-gray-500">Click to apply. Tags help you filter and organise your library.</p>
-      </div>
+    <>
+      <div className="px-6 py-4 space-y-3">
+        {loading ? (
+          <p className="text-xs text-ink-3 animate-pulse">Suggesting tags…</p>
+        ) : allSuggested.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {allSuggested.map((tag) => {
+              const isOn = applied.has(tag);
+              const isNew = suggested.new.includes(tag) && !suggested.existing.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  onClick={() => toggle(tag)}
+                  disabled={adding || isOn}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    isOn
+                      ? "bg-accent text-white border-accent"
+                      : "bg-raised text-ink-2 border-line hover:border-accent-border hover:text-accent"
+                  }`}
+                >
+                  {isNew && !isOn && <span className="mr-1 text-violet-400">✦</span>}
+                  {tag}
+                  {isOn && <span className="ml-1">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-ink-3">No suggestions — add a custom tag below.</p>
+        )}
 
-      {loading ? (
-        <p className="text-xs text-gray-400 animate-pulse">Suggesting tags…</p>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {allSuggested.map((tag) => {
-            const isOn = applied.has(tag);
-            const isNew = suggested.new.includes(tag) && !suggested.existing.includes(tag);
-            return (
-              <button
-                key={tag}
-                onClick={() => toggle(tag)}
-                disabled={adding}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  isOn
-                    ? "bg-violet-600 text-white border-violet-600"
-                    : "bg-white text-gray-700 border-gray-200 hover:border-violet-400 hover:text-violet-700"
-                }`}
-              >
-                {isNew && !isOn && <span className="mr-1 text-violet-400">✦</span>}
-                {tag}
-                {isOn && <span className="ml-1">✓</span>}
-              </button>
-            );
-          })}
+        {applied.size > 0 && (
+          <p className="text-xs text-ink-3">
+            {applied.size} tag{applied.size !== 1 ? "s" : ""} applied: {[...applied].join(", ")}
+          </p>
+        )}
+
+        <div className="flex gap-2">
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addCustom()}
+            placeholder="Add a custom tag…"
+            className="flex-1 border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+          <button
+            onClick={addCustom}
+            disabled={adding || !custom.trim()}
+            className="px-3 py-1.5 text-sm bg-accent text-white rounded hover:bg-violet-700 disabled:opacity-50"
+          >
+            Add
+          </button>
         </div>
-      )}
-
-      {/* Applied tags summary */}
-      {applied.size > 0 && (
-        <p className="text-[11px] text-gray-400">{applied.size} tag{applied.size !== 1 ? "s" : ""} applied: {[...applied].join(", ")}</p>
-      )}
-
-      {/* Custom tag input */}
-      <div className="flex gap-2">
-        <input
-          value={custom}
-          onChange={(e) => setCustom(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addCustom()}
-          placeholder="Add a custom tag…"
-          className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300"
-        />
-        <button
-          onClick={addCustom}
-          disabled={adding || !custom.trim()}
-          className="px-3 py-1.5 text-xs bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50"
-        >
-          Add
-        </button>
       </div>
 
-      <div className="flex justify-between pt-2">
-        <button onClick={onNext} className="text-xs text-gray-400 hover:text-gray-600">
-          Skip
-        </button>
+      <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+        <button onClick={onNext} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">Skip</button>
         <button
           onClick={onNext}
-          className="px-4 py-2 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700"
+          className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-violet-700"
         >
           Next →
         </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -198,7 +180,6 @@ function ProjectStep({ paper, onNext }: { paper: T_IngestOut; onNext: () => void
     listProjects()
       .then((ps) => {
         setProjects(ps);
-        // Find best match
         let best: { id: string; score: number } | null = null;
         for (const p of ps) {
           const score = scoreProject(p, paper);
@@ -221,79 +202,71 @@ function ProjectStep({ paper, onNext }: { paper: T_IngestOut; onNext: () => void
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-sm font-semibold text-gray-800 mb-1">Add to a project</p>
-        <p className="text-xs text-gray-500">Group this paper with related work. You can add it to more projects later.</p>
+    <>
+      <div className="px-6 py-4 space-y-3">
+        {loading ? (
+          <p className="text-xs text-ink-3 animate-pulse">Loading projects…</p>
+        ) : projects.length === 0 ? (
+          <p className="text-xs text-ink-3 italic">No projects yet — create one from the Projects page.</p>
+        ) : (
+          <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
+            {projects.map((p) => {
+              const isSuggested = p.id === suggestedId;
+              const isSelected = p.id === selectedId;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => { if (!added) setSelectedId(isSelected ? null : p.id); }}
+                  disabled={added}
+                  className={`w-full text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
+                    isSelected
+                      ? "border-accent bg-accent-lo text-violet-800"
+                      : "border-line bg-raised text-ink-2 hover:border-accent-border hover:bg-accent-lo disabled:opacity-60"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {isSelected && <span className="text-accent">✓</span>}
+                    <span className="font-medium">{p.name}</span>
+                    {isSuggested && !added && (
+                      <span className="ml-auto text-[10px] text-accent font-semibold bg-accent-lo px-1.5 py-0.5 rounded-full">
+                        ✦ Suggested
+                      </span>
+                    )}
+                  </div>
+                  {p.description && <p className="text-ink-3 mt-0.5 truncate">{p.description}</p>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {added && (
+          <p className="text-xs text-green-600 font-medium">
+            ✓ Added to "{projects.find((p) => p.id === selectedId)?.name}"
+          </p>
+        )}
       </div>
 
-      {loading ? (
-        <p className="text-xs text-gray-400 animate-pulse">Loading projects…</p>
-      ) : projects.length === 0 ? (
-        <p className="text-xs text-gray-400 italic">No projects yet — create one from the Projects page.</p>
-      ) : (
-        <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
-          {projects.map((p) => {
-            const isSuggested = p.id === suggestedId;
-            const isSelected = p.id === selectedId;
-            return (
-              <button
-                key={p.id}
-                onClick={() => setSelectedId(isSelected ? null : p.id)}
-                disabled={added}
-                className={`w-full text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
-                  isSelected
-                    ? "border-violet-500 bg-violet-50 text-violet-800"
-                    : "border-gray-200 bg-white text-gray-700 hover:border-violet-300 hover:bg-violet-50"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  {isSelected && <span className="text-violet-500">✓</span>}
-                  <span className="font-medium">{p.name}</span>
-                  {isSuggested && !added && (
-                    <span className="ml-auto text-[10px] text-violet-500 font-semibold bg-violet-100 px-1.5 py-0.5 rounded-full">
-                      ✦ Suggested
-                    </span>
-                  )}
-                </div>
-                {p.description && (
-                  <p className="text-gray-400 mt-0.5 truncate">{p.description}</p>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {added && (
-        <p className="text-xs text-green-600 font-medium">
-          ✓ Added to "{projects.find((p) => p.id === selectedId)?.name}"
-        </p>
-      )}
-
-      <div className="flex justify-between pt-2">
-        <button onClick={onNext} className="text-xs text-gray-400 hover:text-gray-600">
-          Skip
+      <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+        <button onClick={onNext} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">
+          {added ? "Next →" : "Skip"}
         </button>
-        <div className="flex gap-2">
-          {!added && selectedId && (
-            <button
-              onClick={handleAdd}
-              disabled={adding}
-              className="px-4 py-2 text-xs font-medium bg-white border border-violet-300 text-violet-700 rounded-lg hover:bg-violet-50 disabled:opacity-50"
-            >
-              {adding ? "Adding…" : "Add to project"}
-            </button>
-          )}
+        {!added && selectedId && (
           <button
-            onClick={onNext}
-            className="px-4 py-2 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700"
+            onClick={handleAdd}
+            disabled={adding}
+            className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-violet-700 disabled:opacity-50"
           >
+            {adding ? "Adding…" : "Add to project"}
+          </button>
+        )}
+        {added && (
+          <button onClick={onNext} className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-violet-700">
             Next →
           </button>
-        </div>
+        )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -319,76 +292,65 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-sm font-semibold text-gray-800 mb-1">People</p>
-        <p className="text-xs text-gray-500">Authors were auto-extracted. Link additional people (colleagues, supervisor, who shared this with you…).</p>
-      </div>
+    <>
+      <div className="px-6 py-4 space-y-3">
+        {paper.authors.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-ink-3 uppercase tracking-wide mb-1.5">Authors (auto-extracted)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {paper.authors.map((a) => (
+                <span key={a} className="px-2.5 py-1 text-xs bg-accent-lo text-accent border border-accent-border rounded-full">
+                  {a}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
-      {/* Authors already linked */}
-      {paper.authors.length > 0 && (
-        <div>
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Authors (auto-extracted)</p>
+        {linked.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {paper.authors.map((a) => (
-              <span key={a} className="px-2.5 py-1 text-xs bg-blue-50 text-blue-700 border border-blue-100 rounded-full">
-                {a}
+            {linked.map((p, i) => (
+              <span key={i} className="px-2.5 py-1 text-xs bg-accent-lo text-accent border border-accent-border rounded-full">
+                {p.name} · <span className="text-violet-400">{p.role.replace("_", " ")}</span>
               </span>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Newly linked people */}
-      {linked.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {linked.map((p, i) => (
-            <span key={i} className="px-2.5 py-1 text-xs bg-violet-50 text-violet-700 border border-violet-100 rounded-full">
-              {p.name} · <span className="text-violet-400">{p.role.replace("_", " ")}</span>
-            </span>
-          ))}
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+            placeholder="Person's name…"
+            className="flex-1 border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="border border-line rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-raised text-ink-2"
+          >
+            {INVOLVE_ROLES.map((r) => (
+              <option key={r} value={r}>{r.replace("_", " ")}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleAdd}
+            disabled={adding || !name.trim()}
+            className="px-3 py-1.5 text-sm bg-accent text-white rounded hover:bg-violet-700 disabled:opacity-50"
+          >
+            {adding ? "…" : "Link"}
+          </button>
         </div>
-      )}
-
-      {/* Add person form */}
-      <div className="flex gap-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="Person's name…"
-          className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300"
-        />
-        <select
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          className="border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
-        >
-          {INVOLVE_ROLES.map((r) => (
-            <option key={r} value={r}>{r.replace("_", " ")}</option>
-          ))}
-        </select>
-        <button
-          onClick={handleAdd}
-          disabled={adding || !name.trim()}
-          className="px-3 py-1.5 text-xs bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50"
-        >
-          {adding ? "…" : "Link"}
-        </button>
       </div>
 
-      <div className="flex justify-between pt-2">
-        <button onClick={onDone} className="text-xs text-gray-400 hover:text-gray-600">
-          Skip
-        </button>
-        <button
-          onClick={onDone}
-          className="px-4 py-2 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700"
-        >
-          Done
+      <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
+        <button onClick={onDone} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">Skip</button>
+        <button onClick={onDone} className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-violet-700">
+          Done ✓
         </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -403,37 +365,41 @@ export default function OnboardingModal({ paper, onClose }: Props) {
     else onClose();
   };
 
+  const { title, subtitle } = STEP_META[step];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-6 pt-6 pb-4 border-b border-gray-100">
-          <div className="flex items-start justify-between gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
+        {/* Shared header */}
+        <div className="px-6 py-4 border-b border-line-s">
+          <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide mb-0.5">Paper added</p>
-              <h2 className="text-sm font-semibold text-gray-900 leading-snug truncate" title={paper.title}>
+              <p className="text-[10px] font-semibold text-accent uppercase tracking-wide mb-0.5">Paper added</p>
+              <h2 className="text-sm font-semibold text-ink leading-snug truncate" title={paper.title}>
                 {paper.title}
               </h2>
             </div>
             <button
               onClick={onClose}
-              className="shrink-0 text-gray-400 hover:text-gray-600 text-lg leading-none mt-0.5"
+              className="shrink-0 text-ink-3 hover:text-ink-2 text-lg leading-none mt-0.5"
               title="Close"
             >
               ×
             </button>
           </div>
-          <div className="mt-4">
-            <StepBar current={step} />
+
+          {/* Step indicator */}
+          <div className="mt-3 flex items-center gap-2">
+            <StepDots current={step} />
+            <span className="text-xs font-semibold text-ink">{title}</span>
           </div>
+          <p className="text-xs text-ink-3 mt-0.5">{subtitle}</p>
         </div>
 
         {/* Step content */}
-        <div className="px-6 py-5">
-          {step === "tags"    && <TagsStep    paper={paper} onNext={next} />}
-          {step === "project" && <ProjectStep paper={paper} onNext={next} />}
-          {step === "people"  && <PeopleStep  paper={paper} onDone={onClose} />}
-        </div>
+        {step === "tags"    && <TagsStep    paper={paper} onNext={next} />}
+        {step === "project" && <ProjectStep paper={paper} onNext={next} />}
+        {step === "people"  && <PeopleStep  paper={paper} onDone={onClose} />}
       </div>
     </div>
   );

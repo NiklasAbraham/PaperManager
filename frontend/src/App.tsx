@@ -9,7 +9,10 @@ import BulkImport from "./pages/BulkImport";
 import LiteratureSearch from "./pages/LiteratureSearch";
 import Blogs from "./pages/Blogs";
 import BlogPostDetail from "./pages/BlogPostDetail";
+import Teammates from "./pages/Teammates";
 import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
+import { UserProvider } from "./contexts/UserContext";
+import UserPicker from "./components/UserPicker";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
 const Graph         = lazy(() => import("./pages/Graph"));
@@ -26,7 +29,7 @@ function NavBar() {
     }`;
   return (
     <nav className="border-b border-gray-200 bg-white px-6 py-3 flex items-center gap-2">
-      <span className="font-semibold text-gray-900 mr-4">PaperManager</span>
+      <img src="/SecondBrainLogo.png" alt="PaperManager" className="h-14 mr-4 object-contain" />
       <NavLink to="/" end className={cls}>Library</NavLink>
       <NavLink to="/people" className={cls}>People</NavLink>
       <NavLink to="/projects" className={cls}>Projects</NavLink>
@@ -36,8 +39,9 @@ function NavBar() {
       <NavLink to="/literature" className={cls}>Literature</NavLink>
       <NavLink to="/bulk-import" className={cls}>Bulk Import</NavLink>
       <NavLink to="/blogs" className={cls}>Blogs</NavLink>
+      <NavLink to="/teammates" className={cls}>Teammates</NavLink>
       <NavLink to="/settings" className={cls}>Settings</NavLink>
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-2">
         <button
           onClick={() => update({ debugMode: !settings.debugMode })}
           title={settings.debugMode ? "Debug mode ON — click to disable" : "Debug mode OFF — click to enable"}
@@ -52,6 +56,7 @@ function NavBar() {
           </svg>
           {settings.debugMode && <span>DEBUG</span>}
         </button>
+        <UserPicker />
       </div>
     </nav>
   );
@@ -61,6 +66,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <SettingsProvider>
+        <UserProvider>
         <div className="flex flex-col h-screen bg-gray-50">
           <NavBar />
           <div className="flex-1 min-h-0 overflow-auto">
@@ -75,11 +81,13 @@ export default function App() {
               <Route path="/literature" element={<LiteratureSearch />} />
               <Route path="/bulk-import" element={<BulkImport />} />
               <Route path="/blogs" element={<Blogs />} />
+              <Route path="/teammates" element={<Teammates />} />
               <Route path="/blogs/posts/:postId" element={<BlogPostDetail />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </div>
         </div>
+        </UserProvider>
       </SettingsProvider>
     </BrowserRouter>
   );

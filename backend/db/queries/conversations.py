@@ -205,7 +205,8 @@ def list_paper_conversations(driver: Driver, paper_id: str) -> list[dict]:
             """
             MATCH (c:Conversation)-[:ABOUT_PAPER]->(p:Paper {id: $paper_id})
             OPTIONAL MATCH (c)-[:HAS_MESSAGE]->(m:Message)
-            RETURN c, count(m) AS message_count
+            OPTIONAL MATCH (u:User)-[:STARTED]->(c)
+            RETURN c, count(m) AS message_count, u.name AS started_by
             ORDER BY c.updated_at DESC
             """,
             paper_id=paper_id,
@@ -214,6 +215,7 @@ def list_paper_conversations(driver: Driver, paper_id: str) -> list[dict]:
         for r in result:
             d = dict(r["c"])
             d["message_count"] = r["message_count"]
+            d["started_by"] = r["started_by"]
             rows.append(d)
         return rows
 

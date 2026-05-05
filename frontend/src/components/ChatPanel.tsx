@@ -206,6 +206,7 @@ export default function ChatPanel({ paperId }: Props) {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-gray-800 truncate">{c.title}</p>
                   <p className="text-[10px] text-gray-400 mt-0.5">
+                    {c.started_by && <span className="font-medium text-violet-500">{c.started_by} · </span>}
                     {c.message_count} message{c.message_count !== 1 ? "s" : ""}
                     {c.compacted && " · compacted"}
                     {" · "}{new Date(c.updated_at).toLocaleDateString()}

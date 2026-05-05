@@ -1,12 +1,17 @@
 """Claude and Ollama AI services — summarization and chat."""
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
 import httpx
 import anthropic
 from config import settings
+from services.web_search import WEB_SEARCH_TOOL, WEB_SEARCH_TOOL_OLLAMA, search_web
+
+log = logging.getLogger(__name__)
 
 # Prompts live in <project_root>/prompts/ — loaded fresh on every call so
 # you can edit them without restarting the backend.
@@ -103,29 +108,66 @@ def suggest_topics(title: str, abstract: str = "", summary: str = "") -> list[st
     return [t.strip() for t in (raw.get("topics") or []) if t.strip()]
 
 
+def _run_claude_with_tools(
+    client: anthropic.Anthropic,
+    model: str,
+    system: str,
+    messages: list[dict[str, Any]],
+    max_tokens: int = 1024,
+) -> str:
+    """Agentic loop: run Claude with the web_search tool until it stops calling tools."""
+    tools = [WEB_SEARCH_TOOL]
+    while True:
+        response = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            tools=tools,
+        )
+        if response.stop_reason == "tool_use":
+            # Collect tool calls and execute them
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use" and block.name == "web_search":
+                    query = block.input.get("query", "")
+                    max_r = int(block.input.get("max_results", 5))
+                    results = search_web(query, max_results=max_r)
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": json.dumps(results),
+                        }
+                    )
+            # Feed results back
+            messages = list(messages)
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            # Final text response
+            for block in response.content:
+                if hasattr(block, "text"):
+                    return block.text
+            return ""
+
+
 def chat_with_paper(
     paper_text: str,
     paper_title: str,
     question: str,
     history: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Answer *question* about a paper using its full text as context."""
+    """Answer *question* about a paper using its full text as context.
+    Claude can also search the web for related information."""
     system = _load_prompt("chat_system.txt").format(
         title=paper_title or "(unknown)",
         text=paper_text[:60000],
     )
     client = _personal_client()
-
     messages: list[dict[str, Any]] = list(history or [])
     messages.append({"role": "user", "content": question})
-
-    response = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        system=system,
-        messages=messages,
-    )
-    return response.content[0].text
+    return _run_claude_with_tools(client, "claude-opus-4-6", system, messages)
 
 
 def chat_with_paper_work(
@@ -134,7 +176,8 @@ def chat_with_paper_work(
     question: str,
     history: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Answer *question* using the work/Foundry Anthropic gateway."""
+    """Answer *question* using the work/Foundry Anthropic gateway.
+    Claude can also search the web for related information."""
     if not settings.anthropic_work_api_key:
         raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
 
@@ -146,21 +189,13 @@ def chat_with_paper_work(
         kwargs["base_url"] = settings.anthropic_work_base_url
 
     client = anthropic.Anthropic(**kwargs)
-
-    messages: list[dict[str, Any]] = list(history or [])
-    messages.append({"role": "user", "content": question})
-
     system = _load_prompt("chat_system.txt").format(
         title=paper_title or "(unknown)",
         text=paper_text[:60000],
     )
-    response = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        system=system,
-        messages=messages,
-    )
-    return response.content[0].text
+    messages: list[dict[str, Any]] = list(history or [])
+    messages.append({"role": "user", "content": question})
+    return _run_claude_with_tools(client, "claude-opus-4-6", system, messages)
 
 
 def chat_with_paper_ollama(
@@ -169,20 +204,57 @@ def chat_with_paper_ollama(
     question: str,
     history: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Answer *question* about a paper using Ollama (local LLM)."""
+    """Answer *question* about a paper using Ollama (local LLM).
+    Uses tool calling to allow web searches when the model supports it."""
     import ollama
 
     system = _load_prompt("chat_system.txt").format(
         title=paper_title or "(unknown)",
         text=paper_text[:12000],  # smaller context window for local models
     )
-    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for msg in (history or []):
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": question})
 
-    response = ollama.chat(model=settings.ollama_model, messages=messages)
-    return response["message"]["content"].strip()
+    # Agentic tool-use loop (supported by llama3.1+ models)
+    max_iterations = 5  # safety cap
+    for _ in range(max_iterations):
+        try:
+            response = ollama.chat(
+                model=settings.ollama_model,
+                messages=messages,
+                tools=[WEB_SEARCH_TOOL_OLLAMA],
+            )
+        except Exception as exc:
+            # If the model doesn't support tools, fall back to plain chat
+            log.warning("Ollama tool-calling failed, falling back to plain chat | %s", exc)
+            response = ollama.chat(model=settings.ollama_model, messages=messages)
+            return response["message"]["content"].strip()
+
+        msg = response["message"]
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
+            return (msg.get("content") or "").strip()
+
+        # Execute tool calls
+        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            if fn.get("name") == "web_search":
+                args = fn.get("arguments") or {}
+                query = args.get("query", "")
+                max_r = int(args.get("max_results", 5))
+                results = search_web(query, max_results=max_r)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": json.dumps(results),
+                    }
+                )
+
+    # If we exhausted iterations just return the last content
+    return (response["message"].get("content") or "").strip()
 
 
 # ── Knowledge Chat (cross-library, streaming) ─────────────────────────────────
@@ -231,13 +303,16 @@ def knowledge_chat_stream(
         client = anthropic.Anthropic(
             api_key=settings.anthropic_work_api_key,
             base_url=settings.anthropic_work_base_url or None,
+            default_headers={"Authorization": f"Bearer {settings.anthropic_work_api_key}"},
             http_client=httpx.Client(verify=_ssl_verify()),
         )
+        claude_model = "claude-sonnet-4-6"
     else:
         client = _personal_client()
+        claude_model = "claude-sonnet-4-6"
 
     return client.messages.stream(
-        model="claude-opus-4-6",
+        model=claude_model,
         max_tokens=2048,
         system=system,
         messages=messages,
