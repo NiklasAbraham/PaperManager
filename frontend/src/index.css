@@ -1,6 +1,81 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/**
+ * ── PaperManager Design Tokens ───────────────────────────────────────────────
+ *
+ * STYLE GUIDE
+ * ===========
+ *
+ * SURFACES
+ *   bg-base          Page background              gray-50  #f9fafb
+ *   bg-raised        Card / modal surface         white    #ffffff
+ *
+ * TEXT
+ *   text-ink         Primary headings/labels      gray-900 #111827
+ *   text-ink-2       Secondary body text          gray-600 #4b5563
+ *   text-ink-3       Muted / placeholder          gray-400 #9ca3af
+ *
+ * BORDERS
+ *   border-line      Standard border              gray-200 #e5e7eb
+ *   border-line-s    Subtle separator             gray-100 #f3f4f6
+ *
+ * ACCENT (violet brand)
+ *   bg-accent        Primary action bg            violet-600 #7c3aed
+ *   bg-accent-lo     Tinted accent bg             violet-50  #f5f3ff
+ *   border-accent    Accent border (active)       violet-600 #7c3aed
+ *   border-accent-border  Subtle accent border    violet-200 #ddd6fe
+ *   text-accent      Accent text                  violet-600 #7c3aed
+ *
+ * SEMANTIC
+ *   text-coral       Error / destructive          red-600    #dc2626
+ *   text-amber       Warning text                 amber-600  #d97706
+ *
+ * BUTTONS
+ *   Primary:   bg-accent text-white rounded-lg hover:bg-violet-700
+ *   Secondary: border border-line text-ink-2 rounded-lg hover:border-accent-border hover:text-accent
+ *   Ghost:     text-ink-3 hover:text-ink-2
+ *
+ * INPUTS
+ *   border border-line rounded px-3 py-1.5 text-sm
+ *   focus:outline-none focus:ring-2 focus:ring-violet-300
+ *
+ * TAGS / PILL BADGES
+ *   Active:   bg-accent text-white border-accent
+ *   Inactive: bg-raised text-ink-2 border-line hover:border-accent-border hover:text-accent
+ *   Topic:    bg-blue-50 text-blue-700 border-blue-100
+ *
+ * MODALS
+ *   Wrapper: bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden
+ *   Header:  px-6 py-4 border-b border-line-s
+ *   Content: px-6 py-4
+ *   Footer:  px-6 py-4 border-t border-line-s flex justify-end gap-2
+ */
+
+@theme {
+  /* Surfaces */
+  --color-raised: #ffffff;
+  --color-base:   #f9fafb;
+
+  /* Text scale */
+  --color-ink:   #111827;
+  --color-ink-2: #4b5563;
+  --color-ink-3: #9ca3af;
+
+  /* Borders */
+  --color-line:   #e5e7eb;
+  --color-line-s: #f3f4f6;
+
+  /* Accent — violet brand */
+  --color-accent:        #7c3aed;
+  --color-accent-lo:     #f5f3ff;
+  --color-accent-border: #ddd6fe;
+
+  /* Semantic feedback */
+  --color-coral: #dc2626;
+  --color-amber: #d97706;
+}
+
 @keyframes slide-in {
   from { transform: translateX(100%); }
   to   { transform: translateX(0); }

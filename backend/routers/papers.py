@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Header, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
@@ -12,6 +12,7 @@ from db.queries.people import get_or_create_person, get_or_create_person_with_af
 from db.queries.topics import get_or_create_topic, link_paper_topic
 from db.queries.tags import tag_paper
 from db.queries.projects import add_paper_to_project
+from db.queries.users import link_paper_added_by, link_conversation_started_by, link_note_written_by
 from db.queries.conversations import (
     create_paper_conversation, list_paper_conversations, get_messages,
     add_message, compact_conversation, delete_conversation, rename_conversation,
@@ -69,6 +70,7 @@ async def upload(
     summary_instructions: Optional[str] = Form(None),
     document_type: Optional[str] = Form(None),
     debug: bool = Form(False),
+    x_user_name: Optional[str] = Header(None),
 ):
     """Full ingestion pipeline: PDF → metadata → Drive → summary → Neo4j.
     
@@ -179,6 +181,13 @@ async def upload(
         })
 
     log.info("Paper saved | id=%s | title=%.60s", paper["id"], paper.get("title"))
+
+    # Step 6a: Attribute to user
+    if x_user_name:
+        try:
+            link_paper_added_by(driver, paper["id"], x_user_name)
+        except Exception as exc:
+            log.warning("User attribution failed (non-fatal) | %s", exc)
 
     # Step 6b: Apply source tag
     tag_paper(driver, paper["id"], "pdf-upload")
@@ -327,7 +336,7 @@ async def preview_url_pdf(body: IngestFromUrlBody):
 
 
 @router.post("/from-url", response_model=IngestOut, status_code=status.HTTP_201_CREATED)
-def ingest_from_url(body: IngestFromUrlBody):
+def ingest_from_url(body: IngestFromUrlBody, x_user_name: Optional[str] = Header(None)):
     """Ingest a paper from a URL (arXiv, DOI, PubMed, bioRxiv) — no PDF needed."""
     meta = resolve_url(body.url)
     if not meta or not meta.get("title"):
@@ -360,6 +369,12 @@ def ingest_from_url(body: IngestFromUrlBody):
     })
 
     log.info("Paper saved from URL | id=%s | title=%.60s", paper["id"], paper.get("title"))
+
+    if x_user_name:
+        try:
+            link_paper_added_by(driver, paper["id"], x_user_name)
+        except Exception as exc:
+            log.warning("User attribution failed (non-fatal) | %s", exc)
 
     # Apply source tag
     tag_paper(driver, paper["id"], "from-url")
@@ -418,7 +433,7 @@ def ingest_from_url(body: IngestFromUrlBody):
 
 
 @router.post("/from-url-full", response_model=IngestOut, status_code=status.HTTP_201_CREATED)
-async def ingest_from_url_full(body: IngestFromUrlBody):
+async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[str] = Header(None)):
     """
     Full ingestion pipeline triggered from a URL.
     - arXiv / bioRxiv / medRxiv: downloads the open-access PDF and runs the complete
@@ -498,6 +513,11 @@ async def ingest_from_url_full(body: IngestFromUrlBody):
             "venue": merged.get("venue"),
         }
         paper = merge_paper_by_doi(driver, save_data) if merged.get("doi") else create_paper(driver, save_data)
+        if x_user_name:
+            try:
+                link_paper_added_by(driver, paper["id"], x_user_name)
+            except Exception as exc:
+                log.warning("User attribution failed (non-fatal) | %s", exc)
         tag_paper(driver, paper["id"], "from-url")
         if body.debug:
             tag_paper(driver, paper["id"], "debug")
@@ -597,6 +617,11 @@ async def ingest_from_url_full(body: IngestFromUrlBody):
             "raw_text": "",
             "venue": meta.get("venue"),
         })
+        if x_user_name:
+            try:
+                link_paper_added_by(driver, paper["id"], x_user_name)
+            except Exception as exc:
+                log.warning("User attribution failed (non-fatal) | %s", exc)
         tag_paper(driver, paper["id"], "from-url")
         if body.debug:
             tag_paper(driver, paper["id"], "debug")
@@ -1061,7 +1086,7 @@ def get_note(paper_id: str):
 
 
 @router.post("/{paper_id}/chat", response_model=ChatResponse)
-def chat(paper_id: str, body: ChatRequest):
+def chat(paper_id: str, body: ChatRequest, x_user_name: Optional[str] = Header(None)):
     driver = get_driver()
     paper = get_paper(driver, paper_id)
     if not paper:
@@ -1083,6 +1108,8 @@ def chat(paper_id: str, body: ChatRequest):
             title = body.question[:60] + ("…" if len(body.question) > 60 else "")
             conv = create_paper_conversation(driver, paper_id, title)
             conv_id = conv["id"]
+            if x_user_name:
+                link_conversation_started_by(driver, conv_id, x_user_name)
         add_message(driver, conv_id, "user", body.question, [paper_id],
                     estimate_tokens_approx(body.question))
         add_message(driver, conv_id, "assistant", answer, [paper_id],
@@ -1134,12 +1161,17 @@ def delete_conv(paper_id: str, conv_id: str):
 
 
 @router.put("/{paper_id}/note", response_model=NoteOut)
-def put_note(paper_id: str, body: NoteBody):
+def put_note(paper_id: str, body: NoteBody, x_user_name: Optional[str] = Header(None)):
     if not get_paper(get_driver(), paper_id):
         raise HTTPException(status_code=404, detail="Paper not found")
     note = upsert_note(get_driver(), paper_id, body.content)
     mentions = parse_mentions(body.content)
     set_mentions(get_driver(), note["id"], mentions["people"], mentions["topics"])
+    if x_user_name:
+        try:
+            link_note_written_by(get_driver(), note["id"], x_user_name)
+        except Exception as exc:
+            log.warning("Note user attribution failed (non-fatal) | %s", exc)
     return note
 
 

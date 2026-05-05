@@ -51,6 +51,34 @@ Work through them in order — later tasks depend on earlier ones.
 |---|---|---|
 | T22 | [t22_mcp_server.md](t22_mcp_server.md) | MCP server: expose all tools to Claude Code |
 
+### Phase 7 — Discovery & Intelligence
+| Task | File | Description | Depends on |
+|---|---|---|---|
+| T23 | [t23_literature_search.md](t23_literature_search.md) | Discover page: search arXiv/S2/PubMed, add papers in one click | T05, T13, T15 |
+| T24 | [t24_related_papers.md](t24_related_papers.md) | "Related" tab on paper detail via S2 recommendations API | T05, T13 |
+| T25 | [t25_author_tracking.md](t25_author_tracking.md) | Track authors, nightly S2 check, auto-import new papers | T06, T13 |
+| T26 | [t26_knowledge_chat_web_search.md](t26_knowledge_chat_web_search.md) | Knowledge chat gains web search (pre-pass before streaming) | web_search service |
+| T27 | [t27_cross_paper_synthesis.md](t27_cross_paper_synthesis.md) | Multi-select papers, ask Claude to compare/synthesise them | T05, T14 |
+| T28 | [t28_claim_extractor.md](t28_claim_extractor.md) | Extract claims/findings/hypotheses as Neo4j nodes on upload | T04, T05, T13 |
+| T29 | [t29_research_gap_finder.md](t29_research_gap_finder.md) | AI analysis of what's missing from your library on a topic | T05, T15, web_search |
+| T30 | [t30_venue_aggregation.md](t30_venue_aggregation.md) | Venues page: group library by conference/journal, filter papers | T05 |
+
+#### Recommended build order for Phase 7
+T30 → T24 → T23 → T26 → T27 → T28 → T29 → T25
+
+- **T30** first — pure query, zero new concepts, instant value
+- **T24** second — small backend addition, immediate UX win
+- **T23** third — biggest UX win, new page, uses existing API services
+- **T26** next — one function change, no new endpoints
+- **T27 / T28** — richer features, build on solid foundation
+- **T29** — highest complexity (web search + library analysis), build last
+- **T25** — author tracking can be done any time but stores s2_author_id which T23/T24 benefit from if done first
+
+#### Shared infrastructure (already done before Phase 7)
+- `backend/services/web_search.py` — DuckDuckGo search, `WEB_SEARCH_TOOL` schema
+- `backend/services/ai.py::_run_claude_with_tools` — agentic Claude tool-use loop
+- Both were added alongside the per-paper chat web search feature.
+
 ## Status legend
 - [ ] not started
 - [~] in progress

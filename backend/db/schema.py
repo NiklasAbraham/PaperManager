@@ -16,6 +16,8 @@ _CONSTRAINTS = [
     "CREATE CONSTRAINT blog_id IF NOT EXISTS FOR (n:Blog) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT blogpost_id IF NOT EXISTS FOR (n:BlogPost) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT annotation_id IF NOT EXISTS FOR (a:Annotation) REQUIRE a.id IS UNIQUE",
+    "CREATE CONSTRAINT user_id IF NOT EXISTS FOR (n:User) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT user_name IF NOT EXISTS FOR (n:User) REQUIRE n.name IS UNIQUE",
 ]
 
 _INDEXES = [
@@ -23,6 +25,8 @@ _INDEXES = [
        FOR (n:Paper) ON EACH [n.title, n.abstract, n.summary]""",
     """CREATE FULLTEXT INDEX note_search IF NOT EXISTS
        FOR (n:Note) ON EACH [n.content]""",
+    """CREATE FULLTEXT INDEX message_search IF NOT EXISTS
+       FOR (n:Message) ON EACH [n.content]""",
 ]
 
 

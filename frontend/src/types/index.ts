@@ -15,6 +15,7 @@ export interface Paper {
   bookmarked?: boolean;
   color?: string;
   document_type?: "paper" | "book" | "lecture_deck";
+  added_by?: string;
 }
 
 export interface Person {
@@ -157,6 +158,7 @@ export interface Conversation {
   updated_at: string;
   compacted: boolean;
   message_count: number;
+  started_by?: string;
 }
 
 export interface KnowledgeMessage {

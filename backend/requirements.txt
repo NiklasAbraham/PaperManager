@@ -15,5 +15,6 @@ ollama
 httpx
 beautifulsoup4
 lxml
+ddgs
 pytest
 pytest-asyncio

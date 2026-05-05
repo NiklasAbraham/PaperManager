@@ -143,11 +143,19 @@ def create_paper(driver: Driver, data: dict) -> dict:
 def get_paper(driver: Driver, paper_id: str) -> dict | None:
     with driver.session() as session:
         result = session.run(
-            "MATCH (p:Paper {id: $id}) RETURN p",
+            """
+            MATCH (p:Paper {id: $id})
+            OPTIONAL MATCH (u:User)-[:ADDED]->(p)
+            RETURN p, u.name AS added_by
+            """,
             id=paper_id,
         )
         record = result.single()
-        return dict(record["p"]) if record else None
+        if not record:
+            return None
+        d = dict(record["p"])
+        d["added_by"] = record["added_by"]
+        return d
 
 
 def list_papers(driver: Driver, skip: int = 0, limit: int = 20) -> list[dict]:
