@@ -830,3 +830,31 @@ export async function deleteAnnotation(paperId: string, annotationId: string): P
   });
   if (!res.ok) throw new Error(`Delete annotation failed ${res.status}`);
 }
+
+// ── Research Gaps (T29) ────────────────────────────────────────────────────────
+
+export async function findResearchGaps(
+  topic: string,
+  projectId?: string,
+  paperIds?: string[]
+): Promise<{ analysis: string; papers_considered: number; topic: string }> {
+  return apiFetch("/research-gaps", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, project_id: projectId || null, paper_ids: paperIds || null }),
+  });
+}
+
+// ── Venues (T30) ───────────────────────────────────────────────────────────────
+
+export async function listVenues(minCount?: number, q?: string): Promise<VenueOut[]> {
+  const params = new URLSearchParams();
+  if (minCount !== undefined) params.set("min_count", minCount.toString());
+  if (q) params.set("q", q);
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/venues${qs}`);
+}
+
+export async function getVenuePapers(venueName: string): Promise<Paper[]> {
+  return apiFetch(`/venues/${encodeURIComponent(venueName)}/papers`);
+}
