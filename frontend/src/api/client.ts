@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, Claim } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -830,6 +830,42 @@ export async function deleteAnnotation(paperId: string, annotationId: string): P
   });
   if (!res.ok) throw new Error(`Delete annotation failed ${res.status}`);
 }
+
+// ── Research Gaps (T29) ────────────────────────────────────────────────────────
+
+export async function findResearchGaps(
+  topic: string,
+  projectId?: string,
+  paperIds?: string[],
+  model?: string
+): Promise<{ analysis: string; papers_considered: number; topic: string }> {
+  return apiFetch("/research-gaps", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ 
+      topic, 
+      project_id: projectId || null, 
+      paper_ids: paperIds || null,
+      model: model || "claude"
+    }),
+  });
+}
+
+// ── Venues (T30) ───────────────────────────────────────────────────────────────
+
+export async function listVenues(minCount?: number, q?: string): Promise<VenueOut[]> {
+  const params = new URLSearchParams();
+  if (minCount !== undefined) params.set("min_count", minCount.toString());
+  if (q) params.set("q", q);
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/venues${qs}`);
+}
+
+export async function getVenuePapers(venueName: string): Promise<Paper[]> {
+  return apiFetch(`/venues/${encodeURIComponent(venueName)}/papers`);
+}
+
+// ── Claims & Synthesis ─────────────────────────────────────────────────────────
 
 export async function getPaperClaims(paperId: string): Promise<{ claims: Claim[] }> {
   return apiFetch(`/papers/${paperId}/claims`);

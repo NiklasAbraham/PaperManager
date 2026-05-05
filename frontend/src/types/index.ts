@@ -296,6 +296,29 @@ export interface Annotation {
   updated_at: string;
 }
 
+// ── Research Gaps (T29) ───────────────────────────────────────────────────────
+
+export interface ResearchGapsRequest {
+  topic: string;
+  project_id?: string;
+  paper_ids?: string[];
+}
+
+export interface ResearchGapsResponse {
+  analysis: string;
+  papers_considered: number;
+  topic: string;
+}
+
+// ── Venues (T30) ──────────────────────────────────────────────────────────────
+
+export interface VenueOut {
+  name: string;
+  count: number;
+  years: number[];
+}
+
+// ── Claims ────────────────────────────────────────────────────────────────────
 
 export interface Claim {
   id: string;

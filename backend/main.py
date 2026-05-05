@@ -33,6 +33,8 @@ from routers.chapters import router as chapters_router
 from routers.blogs import router as blogs_router
 from routers.annotations import router as annotations_router
 from routers.users import router as users_router
+from routers.research_gaps import router as research_gaps_router
+from routers.venues import router as venues_router
 from routers.claims import router as claims_router
 from routers.synthesis import router as synthesis_router
 from routers.discover import router as discover_router
@@ -86,6 +88,8 @@ app.include_router(chapters_router)
 app.include_router(blogs_router)
 app.include_router(annotations_router)
 app.include_router(users_router)
+app.include_router(research_gaps_router)
+app.include_router(venues_router)
 app.include_router(claims_router)
 app.include_router(synthesis_router)
 app.include_router(discover_router)
