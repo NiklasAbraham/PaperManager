@@ -272,6 +272,7 @@ def knowledge_chat_stream(
     history: list[dict[str, Any]],
     papers: list[dict[str, Any]],
     model: str = "claude",
+    use_web: bool = True,
 ) -> Any:
     """Stream a knowledge-chat response as an anthropic MessageStream.
 
@@ -291,8 +292,20 @@ def knowledge_chat_stream(
             parts.append(f"Previous chat history about this paper:\n{p['_conversations']}")
         return "\n".join(parts)
 
+    # Pre-search for web context if enabled
+    web_context = ""
+    if use_web:
+        try:
+            web_context = _fetch_web_context(question, history)
+        except Exception as exc:
+            log.warning("Knowledge chat web pre-search failed (non-fatal) | %s", exc)
+
     papers_block = "\n\n".join(_paper_block(p) for p in papers)
     system = _load_prompt("knowledge_chat_system.txt").format(papers_block=papers_block)
+
+    # Inject web context if available
+    if web_context:
+        system += f"\n\n## Recent Web Context\n{web_context}"
 
     messages: list[dict[str, Any]] = list(history)
     messages.append({"role": "user", "content": question})
@@ -568,3 +581,152 @@ def find_research_gaps(
             [{"role": "user", "content": system_prompt}],
             max_tokens=2048,
         )
+
+
+def extract_claims(text: str, title: str, model: str | None = None) -> list[dict]:
+    """
+    Extract claims from paper text using Claude Haiku or Ollama.
+    Routes to Anthropic when model starts with 'claude-', otherwise Ollama.
+    Returns list of {"text": str, "type": str}.
+    Returns [] on any error (non-fatal — called best-effort on upload).
+    """
+    import json, re
+    if not text or not text.strip():
+        return []
+    
+    effective_model = model or "claude-haiku-4-5-20251001"
+    prompt = _load_prompt("claims.txt").format(
+        title=title or "(unknown)",
+        text=text[:40000] if effective_model.startswith("claude-") else text[:12000],
+    )
+    
+    try:
+        if effective_model.startswith("claude-"):
+            client = _personal_client()
+            message = client.messages.create(
+                model=effective_model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = message.content[0].text.strip()
+        else:
+            # Use Ollama
+            import ollama
+            response = ollama.chat(
+                model=effective_model,
+                messages=[{"role": "user", "content": prompt}],
+                format="json",
+            )
+            raw = response["message"]["content"].strip()
+        
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            return []
+        data = json.loads(match.group())
+        return [c for c in (data.get("claims") or []) if c.get("text")]
+    except Exception as exc:
+        log.warning("extract_claims failed (non-fatal) | model=%s | %s", effective_model, exc)
+        return []
+
+
+
+def _generate_search_queries(question: str, history: list[dict]) -> list[str]:
+    """
+    Use Claude Haiku to extract up to 3 search queries from the user's question.
+    Returns [] if the question is clearly answerable from library context alone
+    (e.g. 'summarise paper X', 'what do my papers say about Y').
+    """
+    import json, re
+    
+    prompt = f"""Given this research question, suggest up to 3 web search queries
+that would find relevant recent papers, blog posts, or news. If no web
+search is needed (the question is about the user's own library), return an empty list.
+Return JSON: {{"queries": ["...", "..."]}}
+
+Question: {question}"""
+    
+    try:
+        client = _personal_client()
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not match:
+            return []
+        data = json.loads(match.group())
+        queries = data.get("queries") or []
+        return [q.strip() for q in queries if q.strip()][:3]
+    except Exception as exc:
+        log.warning("_generate_search_queries failed | %s", exc)
+        return []
+
+
+def _fetch_web_context(question: str, history: list[dict]) -> str:
+    """
+    Runs _generate_search_queries(), executes each via search_web(),
+    formats results with format_results_for_prompt().
+    Returns empty string if no queries generated or all searches fail.
+    """
+    from services.web_search import search_web, format_results_for_prompt
+    
+    queries = _generate_search_queries(question, history)
+    if not queries:
+        return ""
+    
+    all_results = []
+    for query in queries:
+        results = search_web(query, max_results=5)
+        all_results.extend(results)
+    
+    if not all_results:
+        return ""
+    
+    return format_results_for_prompt(all_results)
+
+
+def synthesize_papers(
+    papers: list[dict],        # list of {title, abstract, summary, raw_text (optional)}
+    question: str,
+    use_web: bool = True,
+) -> str:
+    """
+    Builds a synthesis prompt from the selected papers.
+    Each paper contributes its abstract + summary (not full raw_text — too large).
+    Optionally uses web search via _run_claude_with_tools().
+    Returns markdown synthesis string.
+    """
+    def _paper_block(p: dict) -> str:
+        parts = [f"### {p.get('title', 'Untitled')}"]
+        if p.get("year"):
+            parts[0] += f" ({p['year']})"
+        if p.get("abstract"):
+            parts.append(f"**Abstract:** {p['abstract'][:1500]}")
+        if p.get("summary"):
+            parts.append(f"**Summary:** {p['summary'][:2000]}")
+        return "\n".join(parts)
+
+    papers_block = "\n\n".join(_paper_block(p) for p in papers)
+    prompt = _load_prompt("synthesis.txt").format(
+        n=len(papers),
+        question=question,
+        papers_block=papers_block,
+    )
+
+    client = _personal_client()
+    if use_web:
+        return _run_claude_with_tools(
+            client, "claude-opus-4-6",
+            "You are a research synthesis expert.", 
+            [{"role": "user", "content": prompt}],
+            max_tokens=2048,
+        )
+    else:
+        response = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text

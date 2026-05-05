@@ -317,3 +317,12 @@ export interface VenueOut {
   count: number;
   years: number[];
 }
+
+// ── Claims ────────────────────────────────────────────────────────────────────
+
+export interface Claim {
+  id: string;
+  text: string;
+  type: "claim" | "hypothesis" | "finding" | "method" | "limitation";
+}
+
