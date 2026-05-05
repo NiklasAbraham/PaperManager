@@ -101,9 +101,12 @@ def _process_entry(driver, entry: BulkEntry, project_id: str | None, fetch_pdf: 
     # Link authors
     authors_detail = meta.get("authors_detail") or []
     aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+    s2_id_map = {d["name"]: d.get("s2_author_id") for d in authors_detail}
     for name in meta.get("authors", []):
         if name:
-            person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+            person = get_or_create_person_with_affiliation(
+                driver, name, aff_map.get(name), s2_id_map.get(name)
+            )
             link_author(driver, paper["id"], person["id"])
 
     # Link topics from metadata source

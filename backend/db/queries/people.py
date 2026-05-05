@@ -179,8 +179,13 @@ def get_specialties(driver: Driver, person_id: str) -> list[dict]:
         return [dict(r["t"]) for r in result]
 
 
-def get_or_create_person_with_affiliation(driver: Driver, name: str, affiliation: str | None) -> dict:
-    """Lookup by name; create if not found. If found and affiliation is missing, fill it in."""
+def get_or_create_person_with_affiliation(driver: Driver, name: str, affiliation: str | None, s2_author_id: str | None = None) -> dict:
+    """Lookup by name; create if not found. If found and affiliation is missing, fill it in.
+    Also updates s2_author_id if provided and not already set.
+    
+    Note: affiliation is always included in the props dict (even if None) for consistency with
+    the original behavior, while s2_author_id is only included if it has a non-None value.
+    """
     with driver.session() as session:
         result = session.run(
             "MATCH (p:Person) WHERE toLower(p.name) = toLower($name) RETURN p LIMIT 1",
@@ -189,11 +194,54 @@ def get_or_create_person_with_affiliation(driver: Driver, name: str, affiliation
         record = result.single()
         if record:
             person = dict(record["p"])
+            updates = {}
             if affiliation and not person.get("affiliation"):
+                updates["affiliation"] = affiliation
+            if s2_author_id and not person.get("s2_author_id"):
+                updates["s2_author_id"] = s2_author_id
+            if updates:
                 session.run(
-                    "MATCH (p:Person {id: $id}) SET p.affiliation = $aff",
-                    id=person["id"], aff=affiliation,
+                    "MATCH (p:Person {id: $id}) SET p += $props",
+                    id=person["id"], props=updates,
                 )
-                person["affiliation"] = affiliation
+                person.update(updates)
             return person
-    return create_person(driver, {"name": name, "affiliation": affiliation})
+    props = {"name": name, "affiliation": affiliation}
+    if s2_author_id:
+        props["s2_author_id"] = s2_author_id
+    return create_person(driver, props)
+
+
+def set_person_tracked(driver: Driver, person_id: str, tracked: bool) -> dict:
+    """Set tracked status for a person."""
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Person {id: $id}) SET p.tracked = $tracked RETURN p",
+            id=person_id, tracked=tracked,
+        )
+        record = result.single()
+        if not record:
+            raise ValueError(f"Person {person_id} not found")
+        return dict(record["p"])
+
+
+def list_tracked_people(driver: Driver) -> list[dict]:
+    """Return all people with tracked=true."""
+    with driver.session() as session:
+        result = session.run("MATCH (p:Person {tracked: true}) RETURN p ORDER BY p.name")
+        return [dict(r["p"]) for r in result]
+
+
+def get_person_library_dois(driver: Driver, person_id: str) -> set[str]:
+    """Return set of DOIs for papers authored by this person that are in the library."""
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (paper:Paper)-[:AUTHORED_BY]->(p:Person {id: $id})
+            WHERE paper.doi IS NOT NULL
+            RETURN collect(paper.doi) AS dois
+            """,
+            id=person_id,
+        )
+        record = result.single()
+        return set(record["dois"]) if record else set()
