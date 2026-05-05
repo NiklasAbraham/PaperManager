@@ -233,6 +233,21 @@ export interface DiscoverSearchResult {
   library_paper_id: string | null;
 }
 
+// ── Related papers ────────────────────────────────────────────────────────────
+
+export interface RelatedPaper {
+  title: string;
+  authors: string[];
+  year: number | null;
+  abstract: string | null;
+  doi: string | null;
+  url: string;
+  venue: string | null;
+  citation_count: number | null;
+  in_library: boolean;
+  library_paper_id: string | null;
+}
+
 // ── Blogs ─────────────────────────────────────────────────────────────────────
 
 export interface Blog {
