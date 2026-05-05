@@ -830,3 +830,21 @@ export async function deleteAnnotation(paperId: string, annotationId: string): P
   });
   if (!res.ok) throw new Error(`Delete annotation failed ${res.status}`);
 }
+
+// ── Discover (external search) ────────────────────────────────────────────────
+
+export async function discoverSearch(
+  q: string,
+  source: string = "all",
+  limit: number = 20,
+): Promise<import("../types").DiscoverSearchResult[]> {
+  return apiFetch(`/discover/search?q=${encodeURIComponent(q)}&source=${source}&limit=${limit}`);
+}
+
+export async function discoverAdd(url: string, projectId?: string): Promise<T_IngestOut> {
+  return apiFetch("/discover/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, project_id: projectId ?? null }),
+  });
+}
