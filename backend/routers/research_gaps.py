@@ -71,7 +71,7 @@ def analyze_research_gaps(body: ResearchGapsRequest):
         })
     
     try:
-        analysis = find_research_gaps(body.topic, papers_for_ai)
+        analysis = find_research_gaps(body.topic, papers_for_ai, body.model)
         return ResearchGapsResponse(
             analysis=analysis,
             papers_considered=len(papers),
