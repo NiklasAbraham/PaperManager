@@ -23,6 +23,7 @@ from db.queries.figures import list_figures, delete_figures_for_paper
 from services.note_parser import parse_mentions
 from services.pdf_parser import extract_metadata
 from services.metadata_from_url import resolve_url
+from services.metadata_lookup import get_related_papers
 from services.drive import upload_pdf, get_file_url, delete_file, download_pdf
 from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama, extract_affiliations_with_ollama
 from services.references import extract_references
@@ -196,9 +197,10 @@ async def upload(
     if debug:
         tag_paper(driver, paper["id"], "debug")
 
-    # Step 7: Link authors (with affiliations)
+    # Step 7: Link authors (with affiliations and S2 author IDs)
     authors_detail = meta.get("authors_detail") or []
     aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+    s2_id_map = {d["name"]: d.get("s2_author_id") for d in authors_detail}
 
     # Ollama fallback for any author still missing an affiliation
     missing = [n for n in meta.get("authors", []) if n and not aff_map.get(n)]
@@ -214,7 +216,9 @@ async def upload(
     for name in meta.get("authors", []):
         if not name:
             continue
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
 
@@ -386,12 +390,15 @@ def ingest_from_url(body: IngestFromUrlBody, x_user_name: Optional[str] = Header
 
     authors_detail = meta.get("authors_detail") or []
     aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+    s2_id_map = {d["name"]: d.get("s2_author_id") for d in authors_detail}
 
     authors_saved = []
     for name in meta.get("authors", []):
         if not name:
             continue
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
 
@@ -527,6 +534,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
 
         authors_detail = merged.get("authors_detail") or []
         aff_map = {d["name"]: d.get("affiliation") for d in authors_detail}
+        s2_id_map = {d["name"]: d.get("s2_author_id") for d in authors_detail}
         missing = [n for n in merged.get("authors", []) if n and not aff_map.get(n)]
         if missing and raw_text:
             try:
@@ -538,7 +546,9 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
         for name in merged.get("authors", []):
             if not name:
                 continue
-            person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+            person = get_or_create_person_with_affiliation(
+                driver, name, aff_map.get(name), s2_id_map.get(name)
+            )
             link_author(driver, paper["id"], person["id"])
             authors_saved.append(name)
 
@@ -633,7 +643,8 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
         for name in meta.get("authors", []):
             if not name:
                 continue
-            person = get_or_create_person_with_affiliation(driver, name, None)
+            # No s2_author_id available in these basic imports
+            person = get_or_create_person_with_affiliation(driver, name, None, None)
             link_author(driver, paper["id"], person["id"])
             authors_saved.append(name)
 
@@ -986,7 +997,10 @@ async def refetch_pdf(paper_id: str):
         if not name:
             continue
         aff_map = {d["name"]: d.get("affiliation") for d in (pdf_meta.get("authors_detail") or [])}
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        s2_id_map = {d["name"]: d.get("s2_author_id") for d in (pdf_meta.get("authors_detail") or [])}
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         if person["id"] not in existing_author_ids:
             link_author(driver, paper_id, person["id"])
         authors_saved.append(name)
@@ -1062,7 +1076,10 @@ async def upload_pdf_for_paper(paper_id: str, file: UploadFile = File(...)):
         if not name:
             continue
         aff_map = {d["name"]: d.get("affiliation") for d in (pdf_meta.get("authors_detail") or [])}
-        person = get_or_create_person_with_affiliation(driver, name, aff_map.get(name))
+        s2_id_map = {d["name"]: d.get("s2_author_id") for d in (pdf_meta.get("authors_detail") or [])}
+        person = get_or_create_person_with_affiliation(
+            driver, name, aff_map.get(name), s2_id_map.get(name)
+        )
         if person["id"] not in existing_author_ids:
             link_author(driver, paper_id, person["id"])
             authors_added.append(name)
@@ -1287,3 +1304,42 @@ def _bib_escape(s: str) -> str:
 def _safe_filename(title: str, max_len: int = 40) -> str:
     """Return a filesystem-safe version of *title*, stripped to *max_len* chars."""
     return "".join(c for c in title[:max_len] if c.isalnum() or c in " _-").strip()
+
+
+@router.get("/{paper_id}/related")
+def get_related(paper_id: str, limit: int = 10):
+    """Get related papers from Semantic Scholar recommendations."""
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    doi = paper.get("doi")
+    if not doi:
+        return {"related": [], "reason": "no_doi", "source_paper_id": paper_id}
+
+    # Get recommendations from S2
+    related = get_related_papers(doi, limit)
+
+    # Mark which are already in library
+    if related:
+        dois = [r["doi"] for r in related if r.get("doi")]
+        if dois:
+            with driver.session() as session:
+                records = session.run(
+                    """
+                    UNWIND $dois AS d
+                    MATCH (p:Paper {doi: d})
+                    RETURN d AS doi, p.id AS id
+                    """,
+                    dois=dois,
+                ).data()
+
+            doi_map = {rec["doi"]: rec["id"] for rec in records}
+
+            for r in related:
+                if r.get("doi") and r["doi"] in doi_map:
+                    r["in_library"] = True
+                    r["library_paper_id"] = doi_map[r["doi"]]
+
+    return {"related": related, "source_paper_id": paper_id}

@@ -35,6 +35,8 @@ from routers.annotations import router as annotations_router
 from routers.users import router as users_router
 from routers.research_gaps import router as research_gaps_router
 from routers.venues import router as venues_router
+from routers.discover import router as discover_router
+from routers.author_tracker import router as author_tracker_router
 
 
 @asynccontextmanager
@@ -86,6 +88,8 @@ app.include_router(annotations_router)
 app.include_router(users_router)
 app.include_router(research_gaps_router)
 app.include_router(venues_router)
+app.include_router(discover_router)
+app.include_router(author_tracker_router)
 
 
 @app.get("/ollama/models", response_model=list[str])
