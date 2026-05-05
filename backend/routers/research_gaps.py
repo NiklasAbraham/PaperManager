@@ -57,7 +57,7 @@ def analyze_research_gaps(body: ResearchGapsRequest):
     if not papers:
         raise HTTPException(
             status_code=404,
-            detail=f"No papers found for analysis. Try adjusting your topic or scope."
+            detail="No papers found for analysis. Try adjusting your topic or scope."
         )
     
     # Extract relevant fields for AI analysis

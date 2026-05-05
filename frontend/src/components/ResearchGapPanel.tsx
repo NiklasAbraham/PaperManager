@@ -139,7 +139,7 @@ export default function ResearchGapPanel({ onClose, projectId, paperIds }: Props
             <div className="text-center py-8">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mb-4"></div>
               <p className="text-gray-600">
-                Analyzing {papersConsidered || "your"} papers + searching the web...
+                Analyzing papers + searching the web...
               </p>
             </div>
           )}

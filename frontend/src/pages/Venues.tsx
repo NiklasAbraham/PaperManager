@@ -45,13 +45,14 @@ export default function Venues() {
     loadVenues();
   }, []);
 
-  // Auto-select venue from URL
+  // Auto-select venue from URL (only run once when venues are loaded)
   useEffect(() => {
     const selected = searchParams.get("selected");
-    if (selected && venues.length > 0) {
+    if (selected && venues.length > 0 && !selectedVenue) {
       openVenue(selected);
     }
-  }, [searchParams, venues]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get("selected"), venues.length]);
 
   useEffect(() => {
     // Apply filter and sort
