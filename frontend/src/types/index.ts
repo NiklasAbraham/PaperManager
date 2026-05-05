@@ -295,3 +295,11 @@ export interface Annotation {
   created_at: string;
   updated_at: string;
 }
+
+
+export interface Claim {
+  id: string;
+  text: string;
+  type: "claim" | "hypothesis" | "finding" | "method" | "limitation";
+}
+

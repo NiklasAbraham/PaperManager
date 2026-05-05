@@ -146,6 +146,7 @@ export default function KnowledgeChat() {
   const [model, setModel] = useState<Model>("claude");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");  // web search status
   const [contextPapers, setContextPapers] = useState<ContextPaper[]>([]);
   const [tokenTotals, setTokenTotals] = useState<TokenTotals | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -268,7 +269,10 @@ export default function KnowledgeChat() {
       });
 
       for await (const event of stream) {
-        if (event.type === "step") {
+        if (event.type === "status") {
+          setStatus(event.text || "");
+
+        } else if (event.type === "step") {
           // Append step — never touch existing messages
           setMessages((prev) => [...prev, {
             kind: "step",
@@ -314,6 +318,7 @@ export default function KnowledgeChat() {
       setError(e instanceof Error ? e.message : "Chat failed");
     } finally {
       setLoading(false);
+      setStatus("");  // clear status
     }
   };
 
@@ -511,6 +516,11 @@ export default function KnowledgeChat() {
 
           {/* Input */}
           <div className="px-4 py-3 border-t border-gray-800 bg-gray-900">
+            {status && (
+              <div className="mb-2 text-xs text-violet-400 flex items-center gap-1.5">
+                <span>{status}</span>
+              </div>
+            )}
             <div className="relative flex gap-2">
               <div className="relative flex-1">
                 <textarea
