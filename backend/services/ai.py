@@ -602,3 +602,48 @@ def _fetch_web_context(question: str, history: list[dict]) -> str:
         return ""
     
     return format_results_for_prompt(all_results)
+
+
+def synthesize_papers(
+    papers: list[dict],        # list of {title, abstract, summary, raw_text (optional)}
+    question: str,
+    use_web: bool = True,
+) -> str:
+    """
+    Builds a synthesis prompt from the selected papers.
+    Each paper contributes its abstract + summary (not full raw_text — too large).
+    Optionally uses web search via _run_claude_with_tools().
+    Returns markdown synthesis string.
+    """
+    def _paper_block(p: dict) -> str:
+        parts = [f"### {p.get('title', 'Untitled')}"]
+        if p.get("year"):
+            parts[0] += f" ({p['year']})"
+        if p.get("abstract"):
+            parts.append(f"**Abstract:** {p['abstract'][:1500]}")
+        if p.get("summary"):
+            parts.append(f"**Summary:** {p['summary'][:2000]}")
+        return "\n".join(parts)
+
+    papers_block = "\n\n".join(_paper_block(p) for p in papers)
+    prompt = _load_prompt("synthesis.txt").format(
+        n=len(papers),
+        question=question,
+        papers_block=papers_block,
+    )
+
+    client = _personal_client()
+    if use_web:
+        return _run_claude_with_tools(
+            client, "claude-opus-4-6",
+            "You are a research synthesis expert.", 
+            [{"role": "user", "content": prompt}],
+            max_tokens=2048,
+        )
+    else:
+        response = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text

@@ -843,3 +843,16 @@ export async function searchClaims(q: string): Promise<{ results: Array<{ claim:
   return apiFetch(`/claims/search?q=${encodeURIComponent(q)}`);
 }
 
+
+export async function synthesizePapers(
+  paperIds: string[],
+  question: string,
+  useWeb: boolean
+): Promise<{ synthesis: string; papers_used: Array<{id: string; title: string}> }> {
+  return apiFetch("/synthesis", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paper_ids: paperIds, question, use_web: useWeb }),
+  });
+}
+

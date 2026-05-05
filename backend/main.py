@@ -34,6 +34,7 @@ from routers.blogs import router as blogs_router
 from routers.annotations import router as annotations_router
 from routers.users import router as users_router
 from routers.claims import router as claims_router
+from routers.synthesis import router as synthesis_router
 
 
 @asynccontextmanager
@@ -84,6 +85,7 @@ app.include_router(blogs_router)
 app.include_router(annotations_router)
 app.include_router(users_router)
 app.include_router(claims_router)
+app.include_router(synthesis_router)
 
 
 @app.get("/ollama/models", response_model=list[str])
