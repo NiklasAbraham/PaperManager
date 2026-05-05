@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims } from "../api/client";
+import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
@@ -10,7 +10,7 @@ import PdfAnnotator from "../components/PdfAnnotator";
 import UploadConfirmModal from "../components/UploadConfirmModal";
 import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
-import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut, Claim } from "../types";
+import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut, Claim, RelatedPaper } from "../types";
 
 const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
   paper: "#7c3aed", person: "#2563eb", topic: "#16a34a",
@@ -34,7 +34,7 @@ export default function PaperDetail() {
   const [newTag, setNewTag]   = useState("");
   const [newTopic, setNewTopic] = useState("");
   const [tab, setTab]           = useState<RightTab>("notes");
-  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "chapters" | "summary" | "references" | "graph" | "people" | "meta" | "claims">("abstract");
+  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "chapters" | "summary" | "references" | "graph" | "related" | "people" | "meta" | "claims">("abstract");
   // Figures
   const [figures, setFigures]         = useState<Figure[]>([]);
   const [figuresLoaded, setFiguresLoaded] = useState(false);
@@ -54,6 +54,12 @@ export default function PaperDetail() {
   // People tab
   const [involves, setInvolves] = useState<{id: string; name: string; affiliation?: string; role: string}[]>([]);
   const [involvesLoaded, setInvolvesLoaded] = useState(false);
+
+  // Related papers tab
+  const [relatedPapers, setRelatedPapers] = useState<RelatedPaper[]>([]);
+  const [relatedLoaded, setRelatedLoaded] = useState(false);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [addingRelatedIds, setAddingRelatedIds] = useState<Set<string>>(new Set());
 
   const { settings } = useAppSettings();
   const [rightWidth, setRightWidth] = useState(320);
@@ -150,6 +156,20 @@ export default function PaperDetail() {
       getPaperClaims(id).then((res) => { setClaims(res.claims); setClaimsLoaded(true); }).catch(() => setClaimsLoaded(true));
     }
   }, [leftTab, id, claimsLoaded]);
+
+  // Load related papers lazily when related tab is first opened
+  useEffect(() => {
+    if (leftTab === "related" && id && !relatedLoaded) {
+      setRelatedLoading(true);
+      getRelatedPapers(id)
+        .then((data) => {
+          setRelatedPapers(data.related || []);
+          setRelatedLoaded(true);
+        })
+        .catch(() => setRelatedLoaded(true))
+        .finally(() => setRelatedLoading(false));
+    }
+  }, [leftTab, id, relatedLoaded]);
 
   // Build force-graph when graph data is ready
   useEffect(() => {
@@ -604,6 +624,30 @@ export default function PaperDetail() {
     URL.revokeObjectURL(url);
   };
 
+  const handleAddRelated = async (related: RelatedPaper) => {
+    const key = related.url;
+    setAddingRelatedIds((prev) => new Set(prev).add(key));
+    try {
+      const addedPaper = await discoverAdd(related.url);
+      // Update the related paper to mark it as in library
+      setRelatedPapers((prev) =>
+        prev.map((r) =>
+          r.url === related.url
+            ? { ...r, in_library: true, library_paper_id: addedPaper.id }
+            : r
+        )
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add paper");
+    } finally {
+      setAddingRelatedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   const STATUS_STYLES: Record<string, string> = {
     unread:  "bg-gray-100 text-gray-500",
     reading: "bg-blue-100 text-blue-600",
@@ -753,6 +797,16 @@ export default function PaperDetail() {
               }`}
             >
               Graph
+            </button>
+            <button
+              onClick={() => setLeftTab("related")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "related"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Related
             </button>
             <button
               onClick={() => setLeftTab("people")}
@@ -1537,6 +1591,115 @@ export default function PaperDetail() {
                 </div>
               )}
               <div ref={graphContainerRef} className="w-full h-full" />
+            </div>
+          )}
+
+          {/* Related papers tab */}
+          {leftTab === "related" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-5 space-y-4">
+                <div className="text-sm text-gray-600 mb-4">
+                  Papers Semantic Scholar recommends based on this work
+                </div>
+
+                {relatedLoading && (
+                  <div className="text-center py-12 text-gray-400 text-sm">
+                    Loading related papers…
+                  </div>
+                )}
+
+                {!relatedLoading && relatedLoaded && relatedPapers.length === 0 && (
+                  <div className="text-center py-12 text-gray-400 text-sm">
+                    {paper.doi ? "No related papers found" : "No DOI — recommendations unavailable"}
+                  </div>
+                )}
+
+                {relatedPapers.map((related, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-base font-semibold text-gray-900">
+                            {related.title}
+                          </h3>
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                            S2
+                          </span>
+                          {related.year && (
+                            <span className="text-sm text-gray-500">{related.year}</span>
+                          )}
+                        </div>
+
+                        {related.authors.length > 0 && (
+                          <p className="text-sm text-gray-600 mb-2">
+                            {related.authors.slice(0, 5).join(", ")}
+                            {related.authors.length > 5 && ` +${related.authors.length - 5} more`}
+                          </p>
+                        )}
+
+                        {related.venue && (
+                          <p className="text-xs text-gray-500 mb-1">{related.venue}</p>
+                        )}
+
+                        {related.citation_count !== null && (
+                          <p className="text-xs text-gray-500 mb-2">
+                            {related.citation_count} citation{related.citation_count !== 1 ? "s" : ""}
+                          </p>
+                        )}
+
+                        {related.abstract && (
+                          <p className="text-sm text-gray-700 line-clamp-2 mb-2">
+                            {related.abstract}
+                          </p>
+                        )}
+
+                        <a
+                          href={related.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-violet-600 hover:underline"
+                        >
+                          View source →
+                        </a>
+                      </div>
+
+                      <div className="flex-shrink-0">
+                        {related.in_library ? (
+                          <Link
+                            to={`/paper/${related.library_paper_id}`}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-medium hover:bg-green-100"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 20 20"
+                              fill="currentColor"
+                              className="w-3.5 h-3.5"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                            View
+                          </Link>
+                        ) : (
+                          <button
+                            onClick={() => handleAddRelated(related)}
+                            disabled={addingRelatedIds.has(related.url)}
+                            className="px-3 py-1.5 bg-violet-600 text-white rounded text-xs font-medium hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {addingRelatedIds.has(related.url) ? "Adding..." : "Add"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
