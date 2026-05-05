@@ -6,6 +6,7 @@ import PaperDrop from "../components/PaperDrop";
 import EditPaperModal from "../components/EditPaperModal";
 import OnboardingModal from "../components/OnboardingModal";
 import EntityPanel from "../components/EntityPanel";
+import ResearchGapPanel from "../components/ResearchGapPanel";
 import type { EntityType } from "../components/EntityPanel";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { Paper, Project, SearchResponse, T_IngestOut, Stats } from "../types";
@@ -26,6 +27,7 @@ export default function Library() {
   const [activePanel, setActivePanel]   = useState<EntityType | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [surprisingMe, setSurprisingMe] = useState(false);
+  const [showResearchGaps, setShowResearchGaps] = useState(false);
 
   const q             = searchParams.get("q") ?? "";
   const activeTag     = searchParams.get("tag") ?? "";
@@ -192,6 +194,18 @@ export default function Library() {
               }
             </button>
 
+            {/* Research Gaps */}
+            <button
+              onClick={() => setShowResearchGaps(true)}
+              title="Find research gaps"
+              className="h-9 px-3 flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 text-gray-600 hover:text-violet-600 hover:border-violet-300 transition-colors text-sm font-medium whitespace-nowrap"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+              </svg>
+              <span>Find Gaps</span>
+            </button>
+
             {/* View toggle */}
             <div className="flex h-9 border border-gray-200 rounded-lg overflow-hidden">
               <button
@@ -326,6 +340,13 @@ export default function Library() {
           type={activePanel}
           onClose={() => setActivePanel(null)}
           onStatsChanged={refreshStats}
+        />
+      )}
+
+      {showResearchGaps && (
+        <ResearchGapPanel
+          onClose={() => setShowResearchGaps(false)}
+          projectId={activeProject || undefined}
         />
       )}
     </div>

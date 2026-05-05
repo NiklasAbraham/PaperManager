@@ -10,6 +10,7 @@ import LiteratureSearch from "./pages/LiteratureSearch";
 import Blogs from "./pages/Blogs";
 import BlogPostDetail from "./pages/BlogPostDetail";
 import Teammates from "./pages/Teammates";
+import Venues from "./pages/Venues";
 import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 import { UserProvider } from "./contexts/UserContext";
 import UserPicker from "./components/UserPicker";
@@ -33,6 +34,7 @@ function NavBar() {
       <NavLink to="/" end className={cls}>Library</NavLink>
       <NavLink to="/people" className={cls}>People</NavLink>
       <NavLink to="/projects" className={cls}>Projects</NavLink>
+      <NavLink to="/venues" className={cls}>Venues</NavLink>
       <NavLink to="/graph" className={cls}>Graph</NavLink>
       <NavLink to="/cypher" className={cls}>Cypher</NavLink>
       <NavLink to="/knowledge" className={cls}>Knowledge</NavLink>
@@ -75,6 +77,7 @@ export default function App() {
               <Route path="/paper/:id" element={<PaperDetail />} />
               <Route path="/people" element={<People />} />
               <Route path="/projects" element={<Projects />} />
+              <Route path="/venues" element={<Venues />} />
               <Route path="/graph"   element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading graph…</div>}><Graph /></Suspense>} />
               <Route path="/cypher" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Cypher /></Suspense>} />
               <Route path="/knowledge" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><KnowledgeChat /></Suspense>} />
