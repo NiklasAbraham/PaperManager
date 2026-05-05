@@ -219,6 +219,20 @@ export type LiteratureSseEvent =
   | { done?: false; source: string; error: string }
   | { done: true; counts: Record<string, number> };
 
+// ── Discover (external search) ────────────────────────────────────────────────
+
+export interface DiscoverSearchResult {
+  title: string;
+  authors: string[];
+  year: number | null;
+  abstract: string | null;
+  doi: string | null;
+  url: string;
+  source: "arxiv" | "semantic_scholar" | "pubmed";
+  in_library: boolean;
+  library_paper_id: string | null;
+}
+
 // ── Blogs ─────────────────────────────────────────────────────────────────────
 
 export interface Blog {

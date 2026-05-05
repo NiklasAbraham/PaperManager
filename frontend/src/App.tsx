@@ -7,6 +7,7 @@ import Projects from "./pages/Projects";
 import Settings from "./pages/Settings";
 import BulkImport from "./pages/BulkImport";
 import LiteratureSearch from "./pages/LiteratureSearch";
+import Discover from "./pages/Discover";
 import Blogs from "./pages/Blogs";
 import BlogPostDetail from "./pages/BlogPostDetail";
 import Teammates from "./pages/Teammates";
@@ -36,6 +37,7 @@ function NavBar() {
       <NavLink to="/graph" className={cls}>Graph</NavLink>
       <NavLink to="/cypher" className={cls}>Cypher</NavLink>
       <NavLink to="/knowledge" className={cls}>Knowledge</NavLink>
+      <NavLink to="/discover" className={cls}>Discover</NavLink>
       <NavLink to="/literature" className={cls}>Literature</NavLink>
       <NavLink to="/bulk-import" className={cls}>Bulk Import</NavLink>
       <NavLink to="/blogs" className={cls}>Blogs</NavLink>
@@ -78,6 +80,7 @@ export default function App() {
               <Route path="/graph"   element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading graph…</div>}><Graph /></Suspense>} />
               <Route path="/cypher" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Cypher /></Suspense>} />
               <Route path="/knowledge" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><KnowledgeChat /></Suspense>} />
+              <Route path="/discover" element={<Discover />} />
               <Route path="/literature" element={<LiteratureSearch />} />
               <Route path="/bulk-import" element={<BulkImport />} />
               <Route path="/blogs" element={<Blogs />} />
