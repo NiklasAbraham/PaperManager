@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject } from "../api/client";
+import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
@@ -10,7 +10,7 @@ import PdfAnnotator from "../components/PdfAnnotator";
 import UploadConfirmModal from "../components/UploadConfirmModal";
 import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
-import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut } from "../types";
+import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut, Claim } from "../types";
 
 const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
   paper: "#7c3aed", person: "#2563eb", topic: "#16a34a",
@@ -34,7 +34,7 @@ export default function PaperDetail() {
   const [newTag, setNewTag]   = useState("");
   const [newTopic, setNewTopic] = useState("");
   const [tab, setTab]           = useState<RightTab>("notes");
-  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "chapters" | "summary" | "references" | "graph" | "people" | "meta">("abstract");
+  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "chapters" | "summary" | "references" | "graph" | "people" | "meta" | "claims">("abstract");
   // Figures
   const [figures, setFigures]         = useState<Figure[]>([]);
   const [figuresLoaded, setFiguresLoaded] = useState(false);
@@ -96,6 +96,10 @@ export default function PaperDetail() {
   const [allProjects, setAllProjects]     = useState<{id: string; name: string; description?: string}[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [addingProject, setAddingProject] = useState(false);
+  // Claims
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [claimsLoaded, setClaimsLoaded] = useState(false);
+  const [extractingClaims, setExtractingClaims] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -138,6 +142,13 @@ export default function PaperDetail() {
       fetchGraph(`paper&id=${id}`).then((data) => { setGraphData(data); setGraphLoaded(true); }).catch(() => setGraphLoaded(true));
     }
   }, [leftTab, id, graphLoaded]);
+
+  // Load claims lazily when claims tab is first opened
+  useEffect(() => {
+    if (leftTab === "claims" && id && !claimsLoaded) {
+      getPaperClaims(id).then((res) => { setClaims(res.claims); setClaimsLoaded(true); }).catch(() => setClaimsLoaded(true));
+    }
+  }, [leftTab, id, claimsLoaded]);
 
   // Build force-graph when graph data is ready
   useEffect(() => {
@@ -450,6 +461,21 @@ export default function PaperDetail() {
     }
   };
 
+  const handleExtractClaims = async () => {
+    if (!id) return;
+    setExtractingClaims(true);
+    try {
+      const res = await extractPaperClaims(id);
+      setClaims(res.claims);
+      setClaimsLoaded(true);
+    } catch (error) {
+      console.error("Failed to extract claims:", error);
+      alert("Failed to extract claims. Make sure the paper has text content.");
+    } finally {
+      setExtractingClaims(false);
+    }
+  };
+
   const saveModalMetadata = async (next: { tags: string[]; topics: string[] }) => {
     if (!id) return { tags, topics };
 
@@ -746,6 +772,18 @@ export default function PaperDetail() {
             >
               Metadata
             </button>
+            {!(paper.document_type === "book" || paper.document_type === "lecture_deck") && (
+              <button
+                onClick={() => setLeftTab("claims")}
+                className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                  leftTab === "claims"
+                    ? "border-violet-600 text-violet-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {claimsLoaded && claims.length > 0 ? `Claims (${claims.length})` : "Claims"}
+              </button>
+            )}
             {driveUrl && (
               <a
                 href={driveUrl}
@@ -1624,6 +1662,63 @@ export default function PaperDetail() {
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Claims tab */}
+          {leftTab === "claims" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-3xl mx-auto px-6 py-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-700">Claims & Findings</h3>
+                  <button
+                    onClick={handleExtractClaims}
+                    disabled={extractingClaims}
+                    className="text-xs px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {extractingClaims && (
+                      <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                    )}
+                    {extractingClaims ? "Extracting…" : "↺ Re-extract claims"}
+                  </button>
+                </div>
+
+                {claimsLoaded && claims.length === 0 && (
+                  <div className="text-center py-12">
+                    <p className="text-sm text-gray-400 mb-2">No claims extracted yet.</p>
+                    <p className="text-xs text-gray-400">Click "Re-extract claims" to start.</p>
+                  </div>
+                )}
+
+                {claimsLoaded && claims.length > 0 && (
+                  <div className="space-y-6">
+                    {(["finding", "claim", "hypothesis", "method", "limitation"] as const).map((type) => {
+                      const typeClaims = claims.filter((c) => c.type === type);
+                      if (typeClaims.length === 0) return null;
+                      return (
+                        <div key={type} className="space-y-2">
+                          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                            {type === "finding" ? "Findings" : type === "claim" ? "Claims" : type === "hypothesis" ? "Hypotheses" : type === "method" ? "Methods" : "Limitations"}
+                          </h4>
+                          <div className="space-y-2">
+                            {typeClaims.map((claim) => (
+                              <div key={claim.id} className="flex items-start gap-2 text-sm text-gray-700 leading-relaxed">
+                                <span className="text-violet-600 mt-0.5">•</span>
+                                <p>{claim.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {!claimsLoaded && <p className="text-xs text-gray-400 text-center py-12">Loading…</p>}
               </div>
             </div>
           )}

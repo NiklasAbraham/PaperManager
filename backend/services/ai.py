@@ -499,3 +499,36 @@ def chat_with_blog_post(
         messages=messages,
     )
     return response.content[0].text
+
+
+
+def extract_claims(text: str, title: str) -> list[dict]:
+    """
+    Uses Claude Haiku to extract claims from paper text.
+    Returns list of {"text": str, "type": str}.
+    Returns [] on any error (non-fatal — called best-effort on upload).
+    """
+    import json, re
+    if not text or not text.strip():
+        return []
+    prompt = _load_prompt("claims.txt").format(
+        title=title or "(unknown)",
+        text=text[:40000],
+    )
+    try:
+        client = _personal_client()
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            return []
+        data = json.loads(match.group())
+        return [c for c in (data.get("claims") or []) if c.get("text")]
+    except Exception as exc:
+        log.warning("extract_claims failed (non-fatal) | %s", exc)
+        return []
+
