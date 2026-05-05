@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { listVenues, getVenuePapers } from "../api/client";
 import { VenueOut, Paper } from "../types";
 import PaperCard from "../components/PaperCard";
@@ -30,6 +31,7 @@ const TYPE_COLORS = {
 };
 
 export default function Venues() {
+  const [searchParams] = useSearchParams();
   const [venues, setVenues] = useState<VenueOut[]>([]);
   const [filteredVenues, setFilteredVenues] = useState<VenueOut[]>([]);
   const [filter, setFilter] = useState("");
@@ -42,6 +44,14 @@ export default function Venues() {
   useEffect(() => {
     loadVenues();
   }, []);
+
+  // Auto-select venue from URL
+  useEffect(() => {
+    const selected = searchParams.get("selected");
+    if (selected && venues.length > 0) {
+      openVenue(selected);
+    }
+  }, [searchParams, venues]);
 
   useEffect(() => {
     // Apply filter and sort
