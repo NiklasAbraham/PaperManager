@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -863,6 +863,34 @@ export async function listVenues(minCount?: number, q?: string): Promise<VenueOu
 
 export async function getVenuePapers(venueName: string): Promise<Paper[]> {
   return apiFetch(`/venues/${encodeURIComponent(venueName)}/papers`);
+}
+
+// ── Claims & Synthesis ─────────────────────────────────────────────────────────
+
+export async function getPaperClaims(paperId: string): Promise<{ claims: Claim[] }> {
+  return apiFetch(`/papers/${paperId}/claims`);
+}
+
+export async function extractPaperClaims(paperId: string, model?: string): Promise<{ claims: Claim[], count: number }> {
+  const params = model ? `?model=${encodeURIComponent(model)}` : "";
+  return apiFetch(`/papers/${paperId}/claims/extract${params}`, { method: "POST" });
+}
+
+export async function searchClaims(q: string): Promise<{ results: Array<{ claim: Claim, paper: { id: string, title: string } }> }> {
+  return apiFetch(`/claims/search?q=${encodeURIComponent(q)}`);
+}
+
+
+export async function synthesizePapers(
+  paperIds: string[],
+  question: string,
+  useWeb: boolean
+): Promise<{ synthesis: string; papers_used: Array<{id: string; title: string}> }> {
+  return apiFetch("/synthesis", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paper_ids: paperIds, question, use_web: useWeb }),
+  });
 }
 
 // ── Discover (external search) ────────────────────────────────────────────────

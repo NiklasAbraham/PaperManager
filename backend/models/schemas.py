@@ -187,6 +187,7 @@ class KnowledgeChatRequest(BaseModel):
     history: list[ChatMessage] = []
     model: str = "claude"
     conversation_id: str | None = None
+    use_web: bool = True
 
 
 class ConversationOut(BaseModel):
