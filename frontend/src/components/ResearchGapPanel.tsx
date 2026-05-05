@@ -2,6 +2,14 @@ import { useState } from "react";
 import { findResearchGaps } from "../api/client";
 import ReactMarkdown from "react-markdown";
 
+type Model = "claude" | "claude-work" | "ollama";
+
+const MODEL_LABELS: Record<Model, string> = {
+  claude: "Claude",
+  "claude-work": "Claude (Work)",
+  ollama: "Ollama",
+};
+
 interface Props {
   onClose: () => void;
   projectId?: string;
@@ -11,6 +19,7 @@ interface Props {
 export default function ResearchGapPanel({ onClose, projectId, paperIds }: Props) {
   const [topic, setTopic] = useState("");
   const [scope, setScope] = useState<"library" | "project">(projectId ? "project" : "library");
+  const [model, setModel] = useState<Model>("claude");
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [papersConsidered, setPapersConsidered] = useState<number>(0);
@@ -30,7 +39,8 @@ export default function ResearchGapPanel({ onClose, projectId, paperIds }: Props
       const result = await findResearchGaps(
         topic,
         scope === "project" ? projectId : undefined,
-        paperIds
+        paperIds,
+        model
       );
       setAnalysis(result.analysis);
       setPapersConsidered(result.papers_considered);
@@ -114,6 +124,27 @@ export default function ResearchGapPanel({ onClose, projectId, paperIds }: Props
                   </div>
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+                <div className="flex rounded border border-gray-300 overflow-hidden">
+                  {(["claude", "claude-work", "ollama"] as Model[]).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setModel(m)}
+                      disabled={loading}
+                      className={`flex-1 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                        model === m
+                          ? "bg-violet-600 text-white"
+                          : "bg-white text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {MODEL_LABELS[m]}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">

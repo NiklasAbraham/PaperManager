@@ -337,6 +337,7 @@ class ResearchGapsRequest(BaseModel):
     topic: str
     project_id: str | None = None
     paper_ids: list[str] | None = None
+    model: str = "claude"  # "claude" | "claude-work" | "ollama"
 
 
 class ResearchGapsResponse(BaseModel):

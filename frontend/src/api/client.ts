@@ -836,12 +836,18 @@ export async function deleteAnnotation(paperId: string, annotationId: string): P
 export async function findResearchGaps(
   topic: string,
   projectId?: string,
-  paperIds?: string[]
+  paperIds?: string[],
+  model?: string
 ): Promise<{ analysis: string; papers_considered: number; topic: string }> {
   return apiFetch("/research-gaps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, project_id: projectId || null, paper_ids: paperIds || null }),
+    body: JSON.stringify({ 
+      topic, 
+      project_id: projectId || null, 
+      paper_ids: paperIds || null,
+      model: model || "claude"
+    }),
   });
 }
 
