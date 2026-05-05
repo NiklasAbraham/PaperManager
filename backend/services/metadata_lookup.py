@@ -33,7 +33,9 @@ def _title_similarity(a: str, b: str) -> float:
 
 def _parse_s2_authors(raw: list) -> tuple[list[str], list[dict]]:
     """Return (name_list, detail_list) from a S2 authors array.
-    detail_list entries: {name, affiliation, s2_author_id} — affiliation and s2_author_id may be None.
+    detail_list entries: {name, affiliation, s2_author_id}.
+    - affiliation may be None if not provided by S2 or if the author has no listed affiliation
+    - s2_author_id may be None if the 'authorId' field is missing from the S2 API response
     """
     names = []
     detail = []

@@ -181,7 +181,11 @@ def get_specialties(driver: Driver, person_id: str) -> list[dict]:
 
 def get_or_create_person_with_affiliation(driver: Driver, name: str, affiliation: str | None, s2_author_id: str | None = None) -> dict:
     """Lookup by name; create if not found. If found and affiliation is missing, fill it in.
-    Also updates s2_author_id if provided and not already set."""
+    Also updates s2_author_id if provided and not already set.
+    
+    Note: affiliation is always included in the props dict (even if None) for consistency with
+    the original behavior, while s2_author_id is only included if it has a non-None value.
+    """
     with driver.session() as session:
         result = session.run(
             "MATCH (p:Person) WHERE toLower(p.name) = toLower($name) RETURN p LIMIT 1",

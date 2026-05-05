@@ -53,19 +53,21 @@ export default function Discover() {
   };
 
   const getSourceBadge = (src: string) => {
-    const colors = {
+    const colors: Record<string, string> = {
       arxiv: "bg-orange-100 text-orange-700",
       semantic_scholar: "bg-blue-100 text-blue-700",
       pubmed: "bg-green-100 text-green-700",
     };
-    const labels = {
+    const labels: Record<string, string> = {
       arxiv: "arXiv",
       semantic_scholar: "S2",
       pubmed: "PubMed",
     };
+    const color = colors[src] || "bg-gray-100 text-gray-700";
+    const label = labels[src] || src;
     return (
-      <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[src as keyof typeof colors] || "bg-gray-100 text-gray-700"}`}>
-        {labels[src as keyof typeof labels] || src}
+      <span className={`px-2 py-0.5 rounded text-xs font-medium ${color}`}>
+        {label}
       </span>
     );
   };

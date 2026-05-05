@@ -1309,8 +1309,6 @@ def _safe_filename(title: str, max_len: int = 40) -> str:
 @router.get("/{paper_id}/related")
 def get_related(paper_id: str, limit: int = 10):
     """Get related papers from Semantic Scholar recommendations."""
-    import asyncio as _asyncio
-    
     driver = get_driver()
     paper = get_paper(driver, paper_id)
     if not paper:
