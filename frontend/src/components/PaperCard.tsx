@@ -142,7 +142,16 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
         </div>
 
         {paper.venue && (
-          <p className="text-xs text-gray-400 italic mt-0.5 truncate">{paper.venue}</p>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/venues?selected=${encodeURIComponent(paper.venue!)}`);
+            }}
+            className="text-xs text-violet-600 bg-violet-50 hover:bg-violet-100 px-2 py-0.5 rounded-full mt-0.5 font-medium transition-colors inline-block"
+            title={`View all papers from ${paper.venue}`}
+          >
+            {paper.venue}
+          </button>
         )}
 
         {showAbstract && summaryPreview && (

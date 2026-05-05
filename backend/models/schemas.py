@@ -330,3 +330,26 @@ class AnnotationOut(BaseModel):
     position_json: str
     created_at: str
     updated_at: str
+
+
+# ── Research Gaps (T29) ───────────────────────────────────────────────────────
+
+class ResearchGapsRequest(BaseModel):
+    topic: str
+    project_id: str | None = None
+    paper_ids: list[str] | None = None
+    model: str = "claude"  # "claude" | "claude-work" | "ollama"
+
+
+class ResearchGapsResponse(BaseModel):
+    analysis: str
+    papers_considered: int
+    topic: str
+
+
+# ── Venues (T30) ──────────────────────────────────────────────────────────────
+
+class VenueOut(BaseModel):
+    name: str
+    count: int
+    years: list[int]

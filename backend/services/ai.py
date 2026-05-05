@@ -514,6 +514,74 @@ def chat_with_blog_post(
     return response.content[0].text
 
 
+# ── Research Gap Finder (T29) ─────────────────────────────────────────────────
+
+def find_research_gaps(
+    topic: str,
+    papers: list[dict],   # list of {title, abstract, summary, year}
+    model: str = "claude",
+) -> str:
+    """
+    Analyze research gaps using the specified model with web_search tool enabled.
+    Returns markdown analysis string.
+    
+    Args:
+        topic: Research topic or question
+        papers: List of papers with title, abstract, summary, year
+        model: "claude" (personal), "claude-work", or "ollama"
+    """
+    def _paper_block(p: dict) -> str:
+        parts = [f"- **{p.get('title', 'Untitled')}** ({p.get('year', '?')})"]
+        if p.get("abstract"):
+            parts.append(f"  {p['abstract'][:300]}")
+        return "\n".join(parts)
+
+    papers_block = "\n".join(_paper_block(p) for p in papers) or "(no papers in library for this topic)"
+    system_prompt = _load_prompt("research_gaps.txt").format(
+        topic=topic,
+        n=len(papers),
+        papers_block=papers_block,
+    )
+    
+    # Route to appropriate model
+    if model == "claude-work":
+        if not settings.anthropic_work_api_key:
+            raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
+        kwargs: dict[str, Any] = {
+            "api_key": settings.anthropic_work_api_key,
+            "http_client": httpx.Client(verify=_ssl_verify()),
+        }
+        if settings.anthropic_work_base_url:
+            kwargs["base_url"] = settings.anthropic_work_base_url
+        client = anthropic.Anthropic(**kwargs)
+        return _run_claude_with_tools(
+            client,
+            "claude-opus-4-6",
+            "You are a research strategist with web search capabilities.",
+            [{"role": "user", "content": system_prompt}],
+            max_tokens=2048,
+        )
+    elif model == "ollama":
+        # Ollama doesn't support tool calling as robustly, so we'll use a simpler approach
+        import ollama
+        response = ollama.chat(
+            model=settings.ollama_model,
+            messages=[
+                {"role": "system", "content": "You are a research strategist analyzing research gaps. Provide structured analysis with sections: Coverage Summary, Identified Gaps, Recommended Next Reads, and Open Questions."},
+                {"role": "user", "content": system_prompt}
+            ],
+        )
+        return response["message"]["content"].strip()
+    else:  # "claude" (personal)
+        client = _personal_client()
+        return _run_claude_with_tools(
+            client,
+            "claude-opus-4-6",
+            "You are a research strategist with web search capabilities.",
+            [{"role": "user", "content": system_prompt}],
+            max_tokens=2048,
+        )
+
 
 def extract_claims(text: str, title: str, model: str | None = None) -> list[dict]:
     """
