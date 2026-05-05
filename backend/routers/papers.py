@@ -24,11 +24,12 @@ from services.note_parser import parse_mentions
 from services.pdf_parser import extract_metadata
 from services.metadata_from_url import resolve_url
 from services.drive import upload_pdf, get_file_url, delete_file, download_pdf
-from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama, extract_affiliations_with_ollama
+from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama, extract_affiliations_with_ollama, extract_claims
 from services.references import extract_references
 from services.figure_extractor import extract_figures
 from services.drive import upload_image
 from db.queries.figures import create_figure
+from db.queries.claims import create_claims
 from models.schemas import PaperCreate, PaperUpdate, PaperOut, NoteBody, NoteOut, IngestOut, IngestFromUrlBody, ChatRequest, ChatResponse, ReferencesBody
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -241,6 +242,16 @@ async def upload(
         log.info("AI topics added | count=%d | paper_id=%s", len(ai_topics), paper["id"])
     except Exception as exc:
         log.warning("AI topic suggestion failed (non-fatal) | %s", exc)
+
+    # Step 8c: Extract claims (best-effort — skipped for books/lecture decks)
+    if not is_book:
+        try:
+            claims_data = extract_claims(raw_text, meta.get("title", ""))
+            if claims_data:
+                create_claims(driver, paper["id"], claims_data)
+                log.info("Claims extracted | count=%d | paper_id=%s", len(claims_data), paper["id"])
+        except Exception as exc:
+            log.warning("Claim extraction failed (non-fatal) | %s", exc)
 
     # Step 9: Link to project if provided
     if project_id:
