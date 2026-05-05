@@ -82,6 +82,105 @@ def search_semantic_scholar_by_title(title: str) -> dict | None:
         return None
 
 
+# ── Related papers (Semantic Scholar recommendations) ─────────────────────────
+
+_S2_REC_BASE = "https://api.semanticscholar.org/recommendations/v1/papers/forpaper"
+_S2_PAPER_BASE = "https://api.semanticscholar.org/graph/v1/paper"
+_REC_FIELDS = "title,authors,year,abstract,externalIds,venue,citationCount"
+
+
+def _get_s2_paper_id(doi: str) -> str | None:
+    """
+    Resolve a DOI or arXiv ID to a Semantic Scholar internal paperId.
+    Returns paperId string or None on failure.
+    """
+    if not doi:
+        return None
+
+    # S2 requires a typed identifier prefix
+    if doi.startswith("10."):
+        s2_id = f"DOI:{doi}"
+    elif doi.lower().startswith("arxiv:"):
+        s2_id = doi
+    else:
+        s2_id = doi
+
+    try:
+        r = httpx.get(
+            f"{_S2_PAPER_BASE}/{s2_id}",
+            params={"fields": "paperId"},
+            verify=_ssl(),
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return None
+        return r.json().get("paperId")
+    except Exception:
+        return None
+
+
+def get_related_papers(doi: str, limit: int = 10) -> list[dict]:
+    """
+    Get related papers from Semantic Scholar recommendations API.
+    Returns list of dicts with standard metadata format.
+    """
+    # Step 1: Resolve doi to S2 paperId
+    paper_id = _get_s2_paper_id(doi)
+    if not paper_id:
+        return []
+
+    # Step 2: Get recommendations
+    try:
+        r = httpx.get(
+            f"{_S2_REC_BASE}/{paper_id}",
+            params={"fields": _REC_FIELDS, "limit": limit},
+            verify=_ssl(),
+            timeout=15,
+        )
+        if r.status_code != 200:
+            log.warning("S2 recommendations failed | paper_id=%s | status=%d", paper_id, r.status_code)
+            return []
+
+        recommendations = r.json().get("recommendedPapers", [])
+        results = []
+
+        for rec in recommendations:
+            title = (rec.get("title") or "").strip()
+            if not title:
+                continue
+
+            # Authors
+            names, detail = _parse_s2_authors(rec.get("authors") or [])
+
+            # DOI or arXiv ID
+            ext_ids = rec.get("externalIds") or {}
+            rec_doi = ext_ids.get("DOI")
+            if not rec_doi and ext_ids.get("ArXiv"):
+                rec_doi = f"arXiv:{ext_ids['ArXiv']}"
+
+            # URL
+            rec_paper_id = rec.get("paperId") or ""
+            url = f"https://www.semanticscholar.org/paper/{rec_paper_id}" if rec_paper_id else ""
+
+            results.append({
+                "title": title,
+                "authors": names,
+                "year": rec.get("year"),
+                "abstract": rec.get("abstract"),
+                "doi": rec_doi,
+                "url": url,
+                "venue": rec.get("venue"),
+                "citation_count": rec.get("citationCount"),
+                "in_library": False,
+                "library_paper_id": None,
+            })
+
+        return results
+    except Exception as e:
+        log.warning("S2 recommendations error | paper_id=%s | %s", paper_id, e)
+        return []
+
+
 def lookup_semantic_scholar(doi: str) -> dict | None:
     # S2 requires a typed identifier prefix; bare DOIs need "DOI:"
     if doi.startswith("10."):

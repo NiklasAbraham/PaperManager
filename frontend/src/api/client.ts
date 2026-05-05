@@ -848,3 +848,12 @@ export async function discoverAdd(url: string, projectId?: string): Promise<T_In
     body: JSON.stringify({ url, project_id: projectId ?? null }),
   });
 }
+
+// ── Related papers ────────────────────────────────────────────────────────────
+
+export async function getRelatedPapers(
+  paperId: string,
+  limit: number = 10,
+): Promise<{ related: import("../types").RelatedPaper[]; reason?: string }> {
+  return apiFetch(`/papers/${paperId}/related?limit=${limit}`);
+}

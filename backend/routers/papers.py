@@ -23,6 +23,7 @@ from db.queries.figures import list_figures, delete_figures_for_paper
 from services.note_parser import parse_mentions
 from services.pdf_parser import extract_metadata
 from services.metadata_from_url import resolve_url
+from services.metadata_lookup import get_related_papers
 from services.drive import upload_pdf, get_file_url, delete_file, download_pdf
 from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama, extract_affiliations_with_ollama
 from services.references import extract_references
@@ -1287,3 +1288,44 @@ def _bib_escape(s: str) -> str:
 def _safe_filename(title: str, max_len: int = 40) -> str:
     """Return a filesystem-safe version of *title*, stripped to *max_len* chars."""
     return "".join(c for c in title[:max_len] if c.isalnum() or c in " _-").strip()
+
+
+@router.get("/{paper_id}/related")
+def get_related(paper_id: str, limit: int = 10):
+    """Get related papers from Semantic Scholar recommendations."""
+    import asyncio as _asyncio
+    
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    doi = paper.get("doi")
+    if not doi:
+        return {"related": [], "reason": "no_doi", "source_paper_id": paper_id}
+
+    # Get recommendations from S2
+    related = get_related_papers(doi, limit)
+
+    # Mark which are already in library
+    if related:
+        dois = [r["doi"] for r in related if r.get("doi")]
+        if dois:
+            with driver.session() as session:
+                records = session.run(
+                    """
+                    UNWIND $dois AS d
+                    MATCH (p:Paper {doi: d})
+                    RETURN d AS doi, p.id AS id
+                    """,
+                    dois=dois,
+                ).data()
+
+            doi_map = {rec["doi"]: rec["id"] for rec in records}
+
+            for r in related:
+                if r.get("doi") and r["doi"] in doi_map:
+                    r["in_library"] = True
+                    r["library_paper_id"] = doi_map[r["doi"]]
+
+    return {"related": related, "source_paper_id": paper_id}
