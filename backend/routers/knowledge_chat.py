@@ -247,28 +247,22 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
     paper_ids = [p["id"] for p in all_papers]
     add_message(driver, conv_id, "user", body.question, paper_ids, question_tokens)
 
-    # Step 4b: web search status (if enabled)
-    if body.use_web:
-        yield _sse({"type": "status", "text": "🔍 Searching the web..."})
-    
-    # Step 5: stream Claude response
+    # Step 5: stream Claude response (agentic — may yield step + token events)
     yield _sse({"type": "step", "description": "Sending to Claude…", "cypher": None, "count": None})
-    if body.use_web:
-        yield _sse({"type": "status", "text": ""})  # clear status
 
     full_answer = ""
     try:
-        stream_cm = knowledge_chat_stream(
+        for event in knowledge_chat_stream(
             question=body.question,
             history=[{"role": m["role"], "content": m["content"]} for m in body.history],
             papers=all_papers,
             model=body.model,
             use_web=body.use_web,
-        )
-        with stream_cm as stream:
-            for text in stream.text_stream:
-                full_answer += text
-                yield _sse({"type": "token", "text": text})
+            driver=driver,
+        ):
+            if event.get("type") == "token":
+                full_answer += event.get("text", "")
+            yield _sse(event)
     except Exception as exc:
         log.error("knowledge_chat_stream error | %s", exc)
         yield _sse({"type": "error", "message": str(exc)})

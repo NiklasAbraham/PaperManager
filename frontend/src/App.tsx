@@ -10,7 +10,7 @@ import LiteratureSearch from "./pages/LiteratureSearch";
 import Discover from "./pages/Discover";
 import Blogs from "./pages/Blogs";
 import BlogPostDetail from "./pages/BlogPostDetail";
-import Teammates from "./pages/Teammates";
+import Teammates from "./pages/Teammates"; // page kept for direct navigation; no navbar link
 import Venues from "./pages/Venues";
 import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 import { UserProvider } from "./contexts/UserContext";
@@ -35,15 +35,12 @@ function NavBar() {
       <NavLink to="/" end className={cls}>Library</NavLink>
       <NavLink to="/people" className={cls}>People</NavLink>
       <NavLink to="/projects" className={cls}>Projects</NavLink>
-      <NavLink to="/venues" className={cls}>Venues</NavLink>
       <NavLink to="/graph" className={cls}>Graph</NavLink>
       <NavLink to="/cypher" className={cls}>Cypher</NavLink>
       <NavLink to="/knowledge" className={cls}>Knowledge</NavLink>
       <NavLink to="/discover" className={cls}>Discover</NavLink>
       <NavLink to="/literature" className={cls}>Literature</NavLink>
-      <NavLink to="/bulk-import" className={cls}>Bulk Import</NavLink>
       <NavLink to="/blogs" className={cls}>Blogs</NavLink>
-      <NavLink to="/teammates" className={cls}>Teammates</NavLink>
       <NavLink to="/settings" className={cls}>Settings</NavLink>
       <div className="ml-auto flex items-center gap-2">
         <button

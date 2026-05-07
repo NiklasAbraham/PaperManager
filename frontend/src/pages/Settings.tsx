@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults, listOllamaModels } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults, listOllamaModels, deleteUser, renameUser } from "../api/client";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures";
@@ -25,9 +25,17 @@ export default function Settings() {
   const [debugDeleteResult, setDebugDeleteResult] = useState<{ deleted: number; figures_deleted: number } | null>(null);
   const [confirmDebugDelete, setConfirmDebugDelete] = useState(false);
 
+  // Teammates
+  interface UserInfo { name: string; paper_count: number; conversation_count: number }
+  const [users, setUsers] = useState<UserInfo[]>([]);
+  const [renamingUser, setRenamingUser] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<string | null>(null);
+
   useEffect(() => {
     countDebugPapers().then(setDebugCount).catch(() => setDebugCount(null));
     listOllamaModels().then(setOllamaModels).catch(() => setOllamaModels([]));
+    apiFetch<UserInfo[]>("/users").then(setUsers).catch(() => {});
   }, []);
   const [backfill, setBackfill] = useState<Record<BackfillOp, BackfillState>>({
     topics:  { status: "idle" },
@@ -118,17 +126,6 @@ export default function Settings() {
 
       {/* ── Library ── */}
       <Section title="Library" description="Controls how papers are displayed and sorted by default.">
-        <Row label="Default view" description="Starting layout when you open the library.">
-          <ToggleGroup
-            value={settings.defaultView}
-            options={[
-              { value: "grid", label: "Grid" },
-              { value: "list", label: "List" },
-            ]}
-            onChange={(v) => update({ defaultView: v as AppSettings["defaultView"] })}
-          />
-        </Row>
-
         <Row label="Default sort" description="Order papers are shown when no search is active.">
           <Select
             value={settings.defaultSort}
@@ -373,6 +370,85 @@ export default function Settings() {
           state={backfill.figures}
           onRun={() => runBackfill("figures")}
         />
+      </Section>
+
+      {/* ── Teammates ── */}
+      <Section title="Teammates" description="People who use this library. New members can join by entering their name in the top-right corner.">
+        {users.length === 0 ? (
+          <div className="px-5 py-4 text-sm text-gray-400">No teammates yet.</div>
+        ) : (
+          users.map((u) => (
+            <div key={u.name} className="flex items-center justify-between gap-4 px-5 py-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-7 h-7 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-bold shrink-0">
+                  {u.name[0].toUpperCase()}
+                </span>
+                {renamingUser === u.name ? (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const newName = renameValue.trim();
+                      if (!newName || newName === u.name) { setRenamingUser(null); return; }
+                      try {
+                        await renameUser(u.name, newName);
+                        setUsers((prev) => prev.map((x) => x.name === u.name ? { ...x, name: newName } : x));
+                      } catch { /* best-effort */ }
+                      setRenamingUser(null);
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      className="border border-violet-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    />
+                    <button type="submit" className="text-xs text-violet-600 font-medium hover:text-violet-800">Save</button>
+                    <button type="button" onClick={() => setRenamingUser(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                  </form>
+                ) : (
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{u.name}</p>
+                    <p className="text-xs text-gray-400">{u.conversation_count} conversations · {u.paper_count} papers added</p>
+                  </div>
+                )}
+              </div>
+              {renamingUser !== u.name && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => { setRenamingUser(u.name); setRenameValue(u.name); setConfirmDeleteUser(null); }}
+                    className="text-xs text-gray-400 hover:text-violet-600 transition-colors"
+                  >
+                    Rename
+                  </button>
+                  {confirmDeleteUser === u.name ? (
+                    <>
+                      <span className="text-xs text-red-500">Delete?</span>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await deleteUser(u.name);
+                            setUsers((prev) => prev.filter((x) => x.name !== u.name));
+                          } catch { /* best-effort */ }
+                          setConfirmDeleteUser(null);
+                        }}
+                        className="text-xs text-red-600 font-medium hover:text-red-800"
+                      >Yes</button>
+                      <button onClick={() => setConfirmDeleteUser(null)} className="text-xs text-gray-400 hover:text-gray-600">No</button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => { setConfirmDeleteUser(u.name); setRenamingUser(null); }}
+                      className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
       </Section>
 
       {/* ── Debug Mode ── */}

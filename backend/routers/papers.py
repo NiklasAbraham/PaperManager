@@ -224,6 +224,13 @@ async def upload(
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
 
+    # Step 7b: Enrich author profiles from raw_text (ORCID/Scholar link extraction)
+    try:
+        from services.person_enrichment import enrich_authors_from_paper
+        enrich_authors_from_paper(driver, paper["id"], raw_text or "")
+    except Exception as _enrich_exc:
+        log.warning("Author enrichment failed (non-fatal) | %s", _enrich_exc)
+
     # Step 8: Link auto-topics (from Semantic Scholar)
     topics_added = []
     for topic_name in meta.get("topics", []):
@@ -413,6 +420,13 @@ def ingest_from_url(body: IngestFromUrlBody, x_user_name: Optional[str] = Header
         )
         link_author(driver, paper["id"], person["id"])
         authors_saved.append(name)
+
+    # Enrich author profiles (best-effort, uses raw_text from URL ingest if available)
+    try:
+        from services.person_enrichment import enrich_authors_from_paper
+        enrich_authors_from_paper(driver, paper["id"], meta.get("raw_text") or "")
+    except Exception as _enrich_exc:
+        log.warning("Author enrichment failed (non-fatal) | %s", _enrich_exc)
 
     topics_added = []
     for topic_name in meta.get("topics", []):
@@ -882,8 +896,9 @@ def reextract_metadata_endpoint(paper_id: str):
 
 @router.post("/{paper_id}/reextract-abstract")
 def reextract_abstract(paper_id: str):
-    """Re-extract the abstract from the paper's stored raw_text (regex then AI fallback)."""
-    from services.pdf_parser import extract_abstract_from_text, extract_abstract_with_ai
+    """Re-extract abstract, year, and DOI from the paper's stored raw_text."""
+    from services.pdf_parser import extract_abstract_from_text, extract_abstract_with_ai, find_doi, YEAR_RE, _PUBLISHED_YEAR_RE
+    from services.metadata_lookup import lookup_semantic_scholar, lookup_crossref
 
     driver = get_driver()
     paper = get_paper(driver, paper_id)
@@ -898,8 +913,156 @@ def reextract_abstract(paper_id: str):
     if not abstract:
         raise HTTPException(status_code=422, detail="Could not extract an abstract from the paper text")
 
-    updated = update_paper(driver, paper_id, {"abstract": abstract})
-    return {"abstract": updated.get("abstract") if updated else abstract}
+    # Re-detect DOI from first page text (most likely location)
+    doi = find_doi(raw_text[:4000]) or paper.get("doi")
+
+    # Resolve year: API lookup is most reliable if we have a DOI
+    year: int | None = None
+    if doi:
+        api = lookup_semantic_scholar(doi) or lookup_crossref(doi)
+        if api:
+            year = api.get("year")
+            # Also prefer API's DOI (it may be cleaner than what we extracted)
+            doi = api.get("doi") or doi
+
+    # Fallback: prefer "published online: YYYY" over first year in text
+    if not year:
+        pub = _PUBLISHED_YEAR_RE.search(raw_text[:3000])
+        year_match = pub or YEAR_RE.search(raw_text[:3000])
+        year = int((pub.group(1) if pub else year_match.group())) if year_match else None
+
+    patch: dict = {"abstract": abstract}
+    if doi:
+        patch["doi"] = doi
+    if year:
+        patch["year"] = year
+
+    updated = update_paper(driver, paper_id, patch)
+    return {
+        "abstract": updated.get("abstract") if updated else abstract,
+        "doi": updated.get("doi") if updated else doi,
+        "year": updated.get("year") if updated else year,
+    }
+
+
+@router.post("/{paper_id}/ai-extract-metadata")
+def ai_extract_metadata(paper_id: str):
+    """Use LLM (Claude Work → Claude personal → Ollama) to extract abstract, year, and DOI."""
+    import json as _json
+    import anthropic as _anthropic
+    import httpx as _httpx
+    from config import settings as _settings
+    from services.pdf_parser import find_doi, YEAR_RE, _PUBLISHED_YEAR_RE
+
+    driver = get_driver()
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    raw_text = paper.get("raw_text") or ""
+    if not raw_text.strip():
+        raise HTTPException(status_code=422, detail="No extracted text stored for this paper — upload the PDF first")
+
+    snippet = raw_text[:5000]
+    prompt = (
+        "Extract metadata from this academic paper text.\n"
+        "Return ONLY valid JSON with exactly these keys:\n"
+        "abstract (string or null), year (integer or null), doi (string or null).\n"
+        "For the DOI include the full DOI string starting with '10.' (not a URL).\n"
+        "If you cannot find a field, return null for that field.\n\n"
+        f"Paper text:\n{snippet}"
+    )
+
+    def _parse_llm_json(raw: str) -> dict:
+        raw = raw.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return _json.loads(raw.strip())
+
+    result: dict | None = None
+
+    # Try Claude Work first
+    if _settings.anthropic_work_api_key:
+        try:
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            kwargs: dict = {"api_key": _settings.anthropic_work_api_key, "http_client": _httpx.Client(verify=False)}
+            if _settings.anthropic_work_base_url:
+                kwargs["base_url"] = _settings.anthropic_work_base_url
+            client = _anthropic.Anthropic(**kwargs)
+            resp = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            result = _parse_llm_json(resp.content[0].text)
+        except Exception as exc:
+            log.debug("Claude Work ai-extract failed: %s", exc)
+
+    # Fallback: Claude personal
+    if result is None and _settings.anthropic_api_key:
+        try:
+            client = _anthropic.Anthropic(api_key=_settings.anthropic_api_key)
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            result = _parse_llm_json(resp.content[0].text)
+        except Exception as exc:
+            log.debug("Claude personal ai-extract failed: %s", exc)
+
+    # Fallback: Ollama
+    if result is None:
+        try:
+            import ollama as _ollama
+            resp = _ollama.chat(
+                model=_settings.ollama_model,
+                messages=[{"role": "user", "content": prompt}],
+                format="json",
+            )
+            result = _parse_llm_json(resp["message"]["content"])
+        except Exception as exc:
+            log.debug("Ollama ai-extract failed: %s", exc)
+
+    if result is None:
+        raise HTTPException(status_code=503, detail="All LLM backends failed — check Claude Work, personal API key, and Ollama")
+
+    abstract = str(result.get("abstract") or "").strip() or None
+    year_raw = result.get("year")
+    year: int | None = int(year_raw) if year_raw and str(year_raw).isdigit() else None
+    doi_raw = str(result.get("doi") or "").strip()
+    doi: str | None = doi_raw if doi_raw.startswith("10.") else None
+
+    # If LLM missed DOI/year, fall back to regex on raw text
+    if not doi:
+        doi = find_doi(raw_text[:4000]) or paper.get("doi") or None
+    if not year:
+        pub = _PUBLISHED_YEAR_RE.search(raw_text[:3000])
+        ym = pub or YEAR_RE.search(raw_text[:3000])
+        year = int((pub.group(1) if pub else ym.group())) if ym else paper.get("year")
+
+    patch: dict = {}
+    if abstract:
+        patch["abstract"] = abstract
+    if doi:
+        patch["doi"] = doi
+    if year:
+        patch["year"] = year
+
+    if patch:
+        updated = update_paper(driver, paper_id, patch)
+        if updated:
+            abstract = updated.get("abstract", abstract)
+            doi = updated.get("doi", doi)
+            year = updated.get("year", year)
+
+    return {"abstract": abstract, "doi": doi, "year": year}
 
 
 @router.post("/{paper_id}/regenerate-summary")
@@ -1215,6 +1378,20 @@ def extract_refs(paper_id: str):
     raw_text = paper.get("raw_text") or ""
     doi = paper.get("doi")
     refs = extract_references(raw_text, doi)
+    return {"references": refs}
+
+
+@router.get("/{paper_id}/ai-extract-references")
+def ai_extract_refs(paper_id: str):
+    """Extract references using Claude Work → Claude personal → Ollama (forces AI path)."""
+    from services.references import extract_references_ai_full
+    paper = get_paper(get_driver(), paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    raw_text = paper.get("raw_text") or ""
+    if not raw_text.strip():
+        raise HTTPException(status_code=422, detail="No extracted text stored for this paper — upload the PDF first")
+    refs = extract_references_ai_full(raw_text)
     return {"references": refs}
 
 

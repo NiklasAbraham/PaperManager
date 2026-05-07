@@ -158,6 +158,7 @@ export default function KnowledgeChat() {
   const [allTopics, setAllTopics] = useState<string[]>([]);
   const [allProjects, setAllProjects] = useState<string[]>([]);
   const [allPapers, setAllPapers] = useState<string[]>([]);
+  const [allUsers, setAllUsers] = useState<string[]>([]);
   const [mentionDropdown, setMentionDropdown] = useState<MentionOption[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -169,6 +170,7 @@ export default function KnowledgeChat() {
     apiFetch<Topic[]>("/topics").then((t) => setAllTopics(t.map((x) => x.name))).catch(() => {});
     apiFetch<{ id: string; name: string }[]>("/projects").then((p) => setAllProjects(p.map((x) => x.name))).catch(() => {});
     apiFetch<Paper[]>("/papers").then((p) => setAllPapers(p.map((x) => x.title))).catch(() => {});
+    apiFetch<{ name: string }[]>("/users").then((u) => setAllUsers(u.map((x) => x.name))).catch(() => {});
     listConversations().then(setConversations).catch(() => {});
   }, []);
 
@@ -181,13 +183,17 @@ export default function KnowledgeChat() {
     setInput(val);
     const cursor = textareaRef.current?.selectionStart ?? val.length;
     const before = val.slice(0, cursor);
-    const match = before.match(/@(project|tag|topic|paper)?:?(\w*)$/i);
+    const match = before.match(/@(project|tag|topic|paper|user)?:?(\w*)$/i);
     if (!match) { setMentionDropdown([]); return; }
 
     const [, type, partial] = match;
     const p = partial.toLowerCase();
 
     const opts: MentionOption[] = [];
+    if (!type || type === "user") {
+      allUsers.filter((n) => n.toLowerCase().includes(p)).slice(0, 4).forEach((n) =>
+        opts.push({ type: "user", value: n, label: n }));
+    }
     if (!type || type === "tag") {
       allTags.filter((n) => n.includes(p)).slice(0, 5).forEach((n) =>
         opts.push({ type: "tag", value: n, label: n }));
@@ -249,6 +255,35 @@ export default function KnowledgeChat() {
     setInput("");
     setMentionDropdown([]);
     setError(null);
+
+    // ── @user:name intercept — route to ask-teammate endpoint ────────────────
+    const userMentionMatch = question.match(/@user:(\S+)/i);
+    if (userMentionMatch) {
+      const userName = userMentionMatch[1];
+      const stripped = question.replace(/@user:\S+\s*/gi, "").trim();
+      setLoading(true);
+      setMessages((prev) => [...prev, { kind: "chat", role: "user", content: question }]);
+      try {
+        const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+        const res = await fetch(`${BASE}/users/${encodeURIComponent(userName)}/ask`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: stripped || question }),
+        });
+        const data = await res.json();
+        const answer = res.ok
+          ? `*Based on ${data.message_count} messages from **${userName}**'s conversations:*\n\n${data.answer}`
+          : `Could not ask ${userName}: ${data.detail ?? "unknown error"}`;
+        setMessages((prev) => [...prev, { kind: "chat", role: "assistant", content: answer }]);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Ask teammate failed");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    // ── end @user intercept ──────────────────────────────────────────────────
+
     setLoading(true);
     setAnswerTokens(0);
 
@@ -414,7 +449,7 @@ export default function KnowledgeChat() {
               </h1>
               {!activeConvId && (
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Use <span className="font-mono text-violet-400">@tag:name</span>, <span className="font-mono text-blue-400">@topic:name</span>, <span className="font-mono text-green-400">@project:name</span>, or <span className="font-mono text-orange-400">@paper:title</span> to scope context
+                  Use <span className="font-mono text-pink-400">@user:name</span> to ask a teammate · <span className="font-mono text-violet-400">@tag:name</span>, <span className="font-mono text-blue-400">@topic:name</span>, <span className="font-mono text-green-400">@project:name</span>, <span className="font-mono text-orange-400">@paper:title</span> to scope context
                 </p>
               )}
             </div>
@@ -450,7 +485,7 @@ export default function KnowledgeChat() {
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <p className="text-gray-600 text-sm">Ask a question about your library</p>
                 <p className="text-gray-700 text-xs mt-2 max-w-sm">
-                  Try: <span className="text-violet-400">@tag:drug-discovery what methods are used across these papers?</span>
+                  Try: <span className="text-violet-400">@tag:drug-discovery what methods are used?</span> or <span className="text-pink-400">@user:Alice what has she been thinking about?</span>
                 </p>
               </div>
             )}
@@ -530,7 +565,7 @@ export default function KnowledgeChat() {
                   onKeyDown={handleKeyDown}
                   disabled={loading}
                   rows={2}
-                  placeholder="Ask a question… use @tag:name, @topic:name, @project:name, @paper:title to scope context. Enter to send, Shift+Enter for newline."
+                  placeholder="Ask a question… @user:Alice to ask a teammate · @tag:name · @topic:name · @project:name · @paper:title. Enter to send."
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-violet-500 resize-none disabled:opacity-50"
                 />
                 <MentionDropdown options={mentionDropdown} onSelect={insertMention} />

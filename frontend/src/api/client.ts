@@ -143,8 +143,12 @@ export async function regenerateSummary(paperId: string): Promise<{ summary: str
   return apiFetch(`/papers/${paperId}/regenerate-summary`, { method: "POST" });
 }
 
-export async function reextractAbstract(paperId: string): Promise<{ abstract: string }> {
+export async function reextractAbstract(paperId: string): Promise<{ abstract: string; doi?: string; year?: number }> {
   return apiFetch(`/papers/${paperId}/reextract-abstract`, { method: "POST" });
+}
+
+export async function aiExtractMetadata(paperId: string): Promise<{ abstract: string | null; doi?: string | null; year?: number | null }> {
+  return apiFetch(`/papers/${paperId}/ai-extract-metadata`, { method: "POST" });
 }
 
 export async function reextractMetadata(paperId: string): Promise<{
@@ -178,6 +182,15 @@ export async function deletePaper(paperId: string): Promise<void> {
   }
 }
 
+export async function checkDuplicate(doi?: string, title?: string): Promise<{ id: string; title: string } | null> {
+  const params = new URLSearchParams();
+  if (doi) params.set("doi", doi);
+  else if (title) params.set("title", title);
+  else return null;
+  const res = await apiFetch<{ duplicate: { id: string; title: string } | null }>(`/papers/check-duplicate?${params}`);
+  return res.duplicate ?? null;
+}
+
 export async function updatePaper(paperId: string, data: Partial<{
   title: string; year: number | null; doi: string | null;
   abstract: string | null; summary: string | null; venue: string | null;
@@ -198,6 +211,10 @@ export async function fetchGraph(mode: string): Promise<GraphData> {
 
 export async function extractReferences(paperId: string): Promise<{ references: Reference[] }> {
   return apiFetch(`/papers/${paperId}/extract-references`);
+}
+
+export async function aiExtractReferences(paperId: string): Promise<{ references: Reference[] }> {
+  return apiFetch(`/papers/${paperId}/ai-extract-references`);
 }
 
 export async function saveReferences(paperId: string, references: Reference[]): Promise<void> {
@@ -294,7 +311,13 @@ export async function deletePerson(personId: string): Promise<void> {
   await apiFetch(`/people/${personId}`, { method: "DELETE" });
 }
 
-export async function updatePerson(personId: string, data: { name?: string; affiliation?: string }): Promise<void> {
+export async function updatePerson(personId: string, data: Partial<{
+  name: string; affiliation: string | null; email: string | null;
+  bio: string | null; phone: string | null;
+  orcid_url: string | null; scholar_url: string | null;
+  linkedin_url: string | null; website_url: string | null;
+  skills: string | null; startup_roles: string | null;
+}>): Promise<void> {
   await apiFetch(`/people/${personId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -305,6 +328,20 @@ export async function updatePerson(personId: string, data: { name?: string; affi
 export async function removeAuthor(paperId: string, personId: string): Promise<void> {
   const res = await fetch(`${BASE}/papers/${paperId}/authors/${personId}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Remove author failed ${res.status}`);
+}
+
+export async function addAuthorByName(paperId: string, name: string): Promise<{id: string; name: string; affiliation?: string}> {
+  const person = await getOrCreatePerson(name);
+  await apiFetch(`/papers/${paperId}/authors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ person_id: person.id }),
+  });
+  return person;
+}
+
+export async function aiExtractAuthors(paperId: string): Promise<{authors: {id: string; name: string; affiliation?: string}[]}> {
+  return apiFetch(`/papers/${paperId}/ai-extract-authors`, { method: "POST" });
 }
 
 export async function fetchPaperProjects(paperId: string): Promise<{id: string; name: string; description?: string; status?: string}[]> {
@@ -865,6 +902,40 @@ export async function getVenuePapers(venueName: string): Promise<Paper[]> {
   return apiFetch(`/venues/${encodeURIComponent(venueName)}/papers`);
 }
 
+// ── Natural-language search ───────────────────────────────────────────────────
+
+export interface SearchInterpretResult {
+  keyword: string | null;
+  tag: string | null;
+  topic: string | null;
+  venue: string | null;
+  year_min: number | null;
+  year_max: number | null;
+}
+
+export async function interpretSearch(query: string): Promise<SearchInterpretResult> {
+  return apiFetch("/search/interpret", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+}
+
+// ── Users / Teammates ─────────────────────────────────────────────────────────
+
+export async function deleteUser(name: string): Promise<void> {
+  const res = await fetch(`${BASE}/users/${encodeURIComponent(name)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete user failed ${res.status}`);
+}
+
+export async function renameUser(oldName: string, newName: string): Promise<{ name: string }> {
+  return apiFetch(`/users/${encodeURIComponent(oldName)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: newName }),
+  });
+}
+
 // ── Claims & Synthesis ─────────────────────────────────────────────────────────
 
 export async function getPaperClaims(paperId: string): Promise<{ claims: Claim[] }> {
@@ -940,4 +1011,53 @@ export async function runAuthorTrackerCheck(): Promise<{
   authors: Array<{ id: string; name: string; papers_imported: number; reason?: string }>;
 }> {
   return apiFetch("/author-tracker/check-all", { method: "POST" });
+}
+
+// ── People notes ──────────────────────────────────────────────────────────────
+
+export async function getPersonNote(personId: string): Promise<import("../types").Note> {
+  return apiFetch(`/people/${personId}/note`);
+}
+
+export async function savePersonNote(personId: string, content: string): Promise<import("../types").Note> {
+  return apiFetch(`/people/${personId}/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
+// ── People tags ───────────────────────────────────────────────────────────────
+
+export async function getPersonTags(personId: string): Promise<import("../types").Tag[]> {
+  return apiFetch(`/people/${personId}/tags`);
+}
+
+export async function addPersonTag(personId: string, name: string): Promise<import("../types").Tag> {
+  return apiFetch(`/people/${personId}/tags`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function removePersonTag(personId: string, tagName: string): Promise<void> {
+  await apiFetch(`/people/${personId}/tags/${encodeURIComponent(tagName)}`, { method: "DELETE" });
+}
+
+// ── People enrichment ─────────────────────────────────────────────────────────
+
+export async function enrichPerson(personId: string): Promise<{
+  person_id: string;
+  enriched: boolean;
+  orcid_url?: string;
+  citation_count?: number;
+  affiliation?: string;
+  message?: string;
+}> {
+  return apiFetch(`/people/${personId}/enrich`, { method: "POST" });
+}
+
+export async function enrichAllPeople(): Promise<{ status: string; total_people: number }> {
+  return apiFetch("/people/enrich-all", { method: "POST" });
 }

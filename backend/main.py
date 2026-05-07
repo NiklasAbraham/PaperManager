@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 from routers import papers
 from routers.people import people_router, papers_router as people_papers_router
 from routers.tags import tags_router, papers_router as tags_papers_router, seed_default_tags
+from routers.people import seed_people_tags
 from routers.topics import topics_router, papers_router as topics_papers_router
 from routers.projects import router as projects_router
 from routers.search import router as search_router
@@ -50,6 +51,8 @@ async def lifespan(app: FastAPI):
     log.info("Schema ready")
     seed_default_tags(get_driver())
     log.info("Default tags ready")
+    seed_people_tags(get_driver())
+    log.info("People tags ready")
     yield
     log.info("PaperManager backend shutting down")
 

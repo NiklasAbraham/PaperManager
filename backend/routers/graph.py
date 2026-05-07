@@ -47,14 +47,18 @@ def _link_dict(rel) -> dict:
 def get_graph(
     mode: str = Query("full", pattern="^(full|papers|paper)$"),
     id: str | None = Query(None),
+    max_nodes: int = Query(2000, ge=1, le=10000),
     driver: Driver = Depends(get_driver),
 ):
     """
     Returns {nodes, links} for the graph.
 
-    mode=full   → all nodes + relationships (limit 500)
-    mode=papers → Paper, Person, Topic nodes only
+    mode=full   → all nodes + relationships (up to max_nodes nodes)
+    mode=papers → Paper, Person, Topic, Project nodes only
     mode=paper  → single paper and its direct neighbours (requires ?id=)
+
+    The LIMIT is applied to the number of matched nodes (via WITH … LIMIT),
+    not to the number of result rows, so all papers are included up to max_nodes.
     """
     nodes: dict[str, dict] = {}
     links: list[dict] = []
@@ -71,22 +75,22 @@ def get_graph(
         elif mode == "papers":
             cypher = """
                 MATCH (n)
-                WHERE n:Paper OR n:Person OR n:Topic
+                WHERE n:Paper OR n:Person OR n:Topic OR n:Project
+                WITH n LIMIT $max_nodes
                 OPTIONAL MATCH (n)-[r]-(m)
-                WHERE m:Paper OR m:Person OR m:Topic
+                WHERE m:Paper OR m:Person OR m:Topic OR m:Project
                 RETURN n, r, m
-                LIMIT 500
             """
-            result = session.run(cypher)
+            result = session.run(cypher, max_nodes=max_nodes)
 
         else:  # full
             cypher = """
                 MATCH (n)
+                WITH n LIMIT $max_nodes
                 OPTIONAL MATCH (n)-[r]->(m)
                 RETURN n, r, m
-                LIMIT 150
             """
-            result = session.run(cypher)
+            result = session.run(cypher, max_nodes=max_nodes)
 
         for record in result:
             n = record.get("n") or record.get("center")

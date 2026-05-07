@@ -47,12 +47,16 @@ def list_tags(driver: Driver) -> list[dict]:
         result = session.run(
             """
             MATCH (t:Tag)
-            OPTIONAL MATCH (p:Paper)-[:TAGGED]->(t)
-            RETURN t, count(p) AS paper_count
+            OPTIONAL MATCH (paper:Paper)-[:TAGGED]->(t)
+            OPTIONAL MATCH (per:Person)-[:TAGGED]->(t)
+            RETURN t, count(DISTINCT paper) AS paper_count, count(DISTINCT per) AS person_count
             ORDER BY t.name
             """
         )
-        return [{**dict(r["t"]), "paper_count": r["paper_count"]} for r in result]
+        return [
+            {**dict(r["t"]), "paper_count": r["paper_count"], "person_count": r["person_count"]}
+            for r in result
+        ]
 
 
 def get_tags_for_paper(driver: Driver, paper_id: str) -> list[dict]:
@@ -60,6 +64,41 @@ def get_tags_for_paper(driver: Driver, paper_id: str) -> list[dict]:
         result = session.run(
             "MATCH (p:Paper {id: $id})-[:TAGGED]->(t:Tag) RETURN t ORDER BY t.name",
             id=paper_id,
+        )
+        return [dict(r["t"]) for r in result]
+
+
+def tag_person(driver: Driver, person_id: str, tag_name: str) -> dict:
+    tag = get_or_create_tag(driver, tag_name)
+    with driver.session() as session:
+        session.run(
+            """
+            MATCH (p:Person {id: $pid}), (t:Tag {id: $tid})
+            MERGE (p)-[:TAGGED]->(t)
+            """,
+            pid=person_id,
+            tid=tag["id"],
+        )
+    return tag
+
+
+def untag_person(driver: Driver, person_id: str, tag_name: str):
+    with driver.session() as session:
+        session.run(
+            """
+            MATCH (p:Person {id: $pid})-[r:TAGGED]->(t:Tag {name: $name})
+            DELETE r
+            """,
+            pid=person_id,
+            name=tag_name,
+        )
+
+
+def get_tags_for_person(driver: Driver, person_id: str) -> list[dict]:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Person {id: $id})-[:TAGGED]->(t:Tag) RETURN t ORDER BY t.name",
+            id=person_id,
         )
         return [dict(r["t"]) for r in result]
 

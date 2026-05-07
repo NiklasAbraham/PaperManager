@@ -37,6 +37,36 @@ def upsert_note(driver: Driver, paper_id: str, content: str) -> dict:
         return dict(result.single()["n"])
 
 
+def get_person_note(driver: Driver, person_id: str) -> dict | None:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Person {id: $pid})-[:HAS_NOTE]->(n:Note) RETURN n",
+            pid=person_id,
+        )
+        record = result.single()
+        return dict(record["n"]) if record else None
+
+
+def upsert_person_note(driver: Driver, person_id: str, content: str) -> dict:
+    """Create note if it doesn't exist, update content if it does."""
+    now = _now()
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (p:Person {id: $pid})
+            MERGE (p)-[:HAS_NOTE]->(n:Note)
+            ON CREATE SET n.id = $id, n.created_at = $now
+            SET n.content = $content, n.updated_at = $now
+            RETURN n
+            """,
+            pid=person_id,
+            id=str(uuid.uuid4()),
+            content=content,
+            now=now,
+        )
+        return dict(result.single()["n"])
+
+
 def set_mentions(driver: Driver, note_id: str, person_names: list[str], topic_names: list[str]):
     """Replace all MENTIONS relationships on this note."""
     # Use separate sessions per operation to ensure each write is committed.

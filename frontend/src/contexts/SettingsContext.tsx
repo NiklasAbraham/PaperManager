@@ -14,7 +14,6 @@ Keep the summary under 500 words. Use plain language where possible.`;
 
 export interface AppSettings {
   // Library
-  defaultView: "grid" | "list";
   defaultSort: "date_desc" | "date_asc" | "year_desc" | "year_asc" | "title_asc" | "rating_desc" | "citations_desc";
   showAbstractPreview: boolean;
   papersPerPage: 20 | 50 | 100 | 0; // 0 = all
@@ -42,7 +41,6 @@ export interface AppSettings {
 }
 
 export const SETTINGS_DEFAULTS: AppSettings = {
-  defaultView: "grid",
   defaultSort: "date_desc",
   showAbstractPreview: true,
   papersPerPage: 50,
@@ -52,7 +50,7 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   defaultSummaryInstructions: DEFAULT_SUMMARY_INSTRUCTIONS,
   chapterSummaryModel: "llama3.2:3b",
   figureCaptionMethod: "docling",
-  defaultGraphMode: "full",
+  defaultGraphMode: "papers",
   graphNodeSize: 16,
   graphShowNodeLabels: true,
   graphShowEdgeLabels: true,

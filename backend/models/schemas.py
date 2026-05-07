@@ -58,6 +58,14 @@ class PersonCreate(BaseModel):
     name: str
     affiliation: str | None = None
     email: str | None = None
+    bio: str | None = None
+    phone: str | None = None
+    orcid_url: str | None = None
+    scholar_url: str | None = None
+    linkedin_url: str | None = None
+    website_url: str | None = None
+    skills: str | None = None          # JSON-encoded list of strings
+    startup_roles: str | None = None   # JSON-encoded list of {name, role, active}
 
 
 class PersonOut(BaseModel):
@@ -65,6 +73,28 @@ class PersonOut(BaseModel):
     name: str
     affiliation: str | None = None
     email: str | None = None
+    tracked: bool | None = None
+    s2_author_id: str | None = None
+    citation_count: int | None = None
+    bio: str | None = None
+    phone: str | None = None
+    orcid_url: str | None = None
+    scholar_url: str | None = None
+    linkedin_url: str | None = None
+    website_url: str | None = None
+    skills: str | None = None
+    startup_roles: str | None = None
+    last_enriched_at: str | None = None
+
+
+class PersonEnrichOut(BaseModel):
+    person_id: str
+    enriched: bool
+    orcid_url: str | None = None
+    scholar_url: str | None = None
+    citation_count: int | None = None
+    affiliation: str | None = None
+    message: str | None = None
 
 
 class AuthorLink(BaseModel):

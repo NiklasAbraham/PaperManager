@@ -17,7 +17,7 @@ from db.queries.papers import get_paper
 from services.ai import extract_claims
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/", tags=["claims"])
+router = APIRouter(tags=["claims"])
 
 
 class ClaimOut(BaseModel):

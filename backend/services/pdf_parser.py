@@ -9,8 +9,11 @@ from services.metadata_lookup import lookup_semantic_scholar, lookup_crossref, s
 log = logging.getLogger(__name__)
 
 DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>]+)")
+DOI_URL_RE = re.compile(r"doi\.org/(10\.\d{4,9}/[^\s\"<>]+)", re.IGNORECASE)
 ARXIV_RE = re.compile(r"arXiv[:\s](\d{4}\.\d{4,5})", re.IGNORECASE)
 YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+# Year that appears near "published" / "online" — more reliable than first year in text
+_PUBLISHED_YEAR_RE = re.compile(r"(?:published[^\n]{0,40}?|online[^\n]{0,20}?)\b((19|20)\d{2})\b", re.IGNORECASE)
 # Matches "Abstract" / "ABSTRACT" heading followed by the abstract text
 ABSTRACT_RE = re.compile(
     r"(?:^|\n)(?:abstract|summary)\s*[:\n\r]+\s*(.*?)(?=\n\s*(?:\d[\.\s]|introduction|keywords|key\s+words|1\s+intro|\Z))",
@@ -31,14 +34,32 @@ def extract_text(pdf_bytes: bytes) -> str:
 
 # ── DOI / arXiv ID detection ─────────────────────────────────────────────────
 
+_SUPPLEMENTAL_RE = re.compile(r"[/-]+(DCSupplemental|supplementary|supp|SI|S\d+).*$", re.IGNORECASE)
+
+def _clean_doi(raw: str) -> str | None:
+    """Strip trailing punctuation, supplemental suffixes; reject truncated DOIs."""
+    raw = raw.rstrip(".,;)")
+    raw = _SUPPLEMENTAL_RE.sub("", raw)
+    suffix = raw.split("/", 1)[1] if "/" in raw else ""
+    return raw if len(suffix) >= 4 else None
+
+
 def find_doi(text: str) -> str | None:
     arxiv = ARXIV_RE.search(text)
     if arxiv:
         return f"arXiv:{arxiv.group(1)}"
+    # Try URL form first (doi.org/10.xxx) — common in PDF headers
+    url_match = DOI_URL_RE.search(text)
+    if url_match:
+        cleaned = _clean_doi(url_match.group(1))
+        if cleaned:
+            return cleaned
+    # Bare DOI form
     doi = DOI_RE.search(text)
     if doi:
-        # Strip trailing punctuation that sometimes gets picked up
-        return doi.group(1).rstrip(".,;)")
+        cleaned = _clean_doi(doi.group(1))
+        if cleaned:
+            return cleaned
     return None
 
 
@@ -127,8 +148,9 @@ def extract_abstract_with_ai(text: str) -> str | None:
 def extract_metadata_heuristic(text: str) -> dict:
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     title = lines[0] if lines else "Unknown"
-    year_match = YEAR_RE.search(text)
-    year = int(year_match.group()) if year_match else None
+    pub = _PUBLISHED_YEAR_RE.search(text[:3000])
+    year_match = pub or YEAR_RE.search(text[:3000])
+    year = int((pub.group(1) if pub else year_match.group())) if year_match else None
     abstract = extract_abstract_from_text(text)
     return {
         "title": title,

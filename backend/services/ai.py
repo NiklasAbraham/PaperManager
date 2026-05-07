@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 import httpx
 import anthropic
@@ -261,6 +262,84 @@ def chat_with_paper_ollama(
 
 CONTEXT_WINDOW = 200_000  # Claude Opus 4.6 token limit
 
+# Tool definition for live Cypher queries
+CYPHER_TOOL: dict[str, Any] = {
+    "name": "run_cypher",
+    "description": (
+        "Execute a read-only Cypher query against the Neo4j graph database. "
+        "Use this to retrieve counts, find specific papers or authors, traverse "
+        "relationships, or gather any structured data that is not in the pre-loaded "
+        "paper context. Only MATCH/RETURN queries are permitted — no write operations."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "A read-only Cypher query. Must use MATCH and RETURN. "
+                    "Always include a LIMIT clause. Never use CREATE, MERGE, SET, "
+                    "DELETE, DETACH DELETE, or REMOVE."
+                ),
+            },
+            "description": {
+                "type": "string",
+                "description": "Short human-readable description of what this query fetches (shown in the UI as a reasoning step).",
+            },
+        },
+        "required": ["query", "description"],
+    },
+}
+
+# Regex to block write operations
+_CYPHER_WRITE_RE = re.compile(
+    r"\b(CREATE|MERGE|SET\s+\w|DELETE|DETACH\s+DELETE|REMOVE|DROP)\b",
+    re.IGNORECASE,
+)
+
+
+def _safe_value(v: Any) -> Any:
+    """Convert a Neo4j driver value to a JSON-serialisable Python object."""
+    try:
+        from neo4j.graph import Node, Relationship, Path
+        if isinstance(v, Node):
+            return {k: _safe_value(val) for k, val in v.items() if k != "raw_text"}
+        if isinstance(v, (Relationship, Path)):
+            return str(v)
+    except ImportError:
+        pass
+    if isinstance(v, list):
+        return [_safe_value(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _safe_value(val) for k, val in v.items() if k != "raw_text"}
+    return v
+
+
+def _run_cypher_safe(driver: Any, query: str) -> list[dict[str, Any]]:
+    """Execute *query* against Neo4j with safety constraints.
+
+    Blocks write operations, enforces a result LIMIT of 50, and strips
+    ``raw_text`` properties from every returned value.
+    Returns a list of row dicts or a single-element error list.
+    """
+    if _CYPHER_WRITE_RE.search(query):
+        return [{"error": "Write operations are not permitted in Knowledge Chat."}]
+
+    # Append LIMIT if not present
+    if not re.search(r"\bLIMIT\s+\d+", query, re.IGNORECASE):
+        query = query.rstrip().rstrip(";") + " LIMIT 50"
+
+    try:
+        with driver.session() as session:
+            result = session.run(query)
+            rows = []
+            for record in result:
+                row = {k: _safe_value(v) for k, v in record.items() if k != "raw_text"}
+                rows.append(row)
+            return rows[:50]
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
 
 def estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token."""
@@ -273,12 +352,19 @@ def knowledge_chat_stream(
     papers: list[dict[str, Any]],
     model: str = "claude",
     use_web: bool = True,
-) -> Any:
-    """Stream a knowledge-chat response as an anthropic MessageStream.
+    driver: Any = None,
+):
+    """Agentic generator for knowledge-chat with live Cypher tool access.
 
-    *papers* is a list of dicts with keys: id, title, abstract, summary.
-    Caller is responsible for building the system prompt via _load_prompt.
-    Returns the anthropic stream context manager (use with `with` statement).
+    Yields event dicts consumed directly by the SSE router:
+      {"type": "status",  "text": str}
+      {"type": "step",    "description": str, "cypher": str|None, "count": int|None}
+      {"type": "token",   "text": str}
+
+    The model may call ``run_cypher`` zero or more times before composing
+    its final answer.  Each tool call is executed against Neo4j, yielded as
+    a step event so the frontend can display the reasoning trace, and its
+    results are fed back into the conversation before the next call.
     """
     def _paper_block(p: dict) -> str:
         parts = [f"### {p.get('title', 'Untitled')}"]
@@ -292,24 +378,23 @@ def knowledge_chat_stream(
             parts.append(f"Previous chat history about this paper:\n{p['_conversations']}")
         return "\n".join(parts)
 
-    # Pre-search for web context if enabled
+    # ── Web pre-search ────────────────────────────────────────────────────────
     web_context = ""
     if use_web:
+        yield {"type": "status", "text": "Searching the web..."}
         try:
             web_context = _fetch_web_context(question, history)
         except Exception as exc:
             log.warning("Knowledge chat web pre-search failed (non-fatal) | %s", exc)
+        yield {"type": "status", "text": ""}
 
+    # ── Build system prompt ───────────────────────────────────────────────────
     papers_block = "\n\n".join(_paper_block(p) for p in papers)
     system = _load_prompt("knowledge_chat_system.txt").format(papers_block=papers_block)
-
-    # Inject web context if available
     if web_context:
         system += f"\n\n## Recent Web Context\n{web_context}"
 
-    messages: list[dict[str, Any]] = list(history)
-    messages.append({"role": "user", "content": question})
-
+    # ── Select client ─────────────────────────────────────────────────────────
     if model == "claude-work":
         if not settings.anthropic_work_api_key:
             raise ValueError("Work API key not configured.")
@@ -319,17 +404,88 @@ def knowledge_chat_stream(
             default_headers={"Authorization": f"Bearer {settings.anthropic_work_api_key}"},
             http_client=httpx.Client(verify=_ssl_verify()),
         )
-        claude_model = "claude-sonnet-4-6"
     else:
         client = _personal_client()
-        claude_model = "claude-sonnet-4-6"
 
-    return client.messages.stream(
-        model=claude_model,
-        max_tokens=2048,
-        system=system,
-        messages=messages,
-    )
+    claude_model = "claude-sonnet-4-6"
+    tools = [CYPHER_TOOL] if driver is not None else []
+
+    # ── Agentic tool-use loop (non-streaming) ─────────────────────────────────
+    # Phase 1: let Claude call run_cypher as many times as it needs.
+    # Each tool call is executed, the result is fed back, and a step event is
+    # yielded so the frontend can show the reasoning trace.  The loop exits
+    # when Claude returns stop_reason != "tool_use".
+    messages: list[dict[str, Any]] = list(history)
+    messages.append({"role": "user", "content": question})
+
+    had_tool_calls = False
+
+    while True:
+        response = client.messages.create(
+            model=claude_model,
+            max_tokens=4096,
+            system=system,
+            messages=messages,
+            tools=tools if tools else anthropic.NOT_GIVEN,
+        )
+
+        if response.stop_reason != "tool_use":
+            # No more tool calls — Claude is ready to write its final answer.
+            # We already have the complete text in `response`; chunk it to
+            # give the frontend the familiar token-by-token feel.
+            if not had_tool_calls:
+                # No tool calls at all → stream for better responsiveness
+                with client.messages.stream(
+                    model=claude_model,
+                    max_tokens=4096,
+                    system=system,
+                    messages=messages,
+                ) as stream:
+                    for text in stream.text_stream:
+                        yield {"type": "token", "text": text}
+            else:
+                # Tool calls happened → response is the post-tool synthesis.
+                # Chunk the already-computed text at a natural cadence.
+                CHUNK = 40
+                final_text = ""
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        final_text = block.text
+                        break
+                for i in range(0, len(final_text), CHUNK):
+                    yield {"type": "token", "text": final_text[i : i + CHUNK]}
+            break
+
+        # ── Execute tool calls ────────────────────────────────────────────────
+        had_tool_calls = True
+        tool_results: list[dict[str, Any]] = []
+
+        for block in response.content:
+            if block.type != "tool_use" or block.name != "run_cypher":
+                continue
+
+            query: str = block.input.get("query", "")
+            desc: str = block.input.get("description", "Running Cypher query")
+
+            rows = _run_cypher_safe(driver, query) if driver else [{"error": "No DB driver available"}]
+
+            yield {
+                "type": "step",
+                "description": desc,
+                "cypher": query,
+                "count": len(rows) if not (len(rows) == 1 and "error" in rows[0]) else None,
+            }
+
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": json.dumps(rows),
+            })
+
+        # Feed tool results back into the conversation and loop
+        messages = list(messages)
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
 
 
 def summarize_chapter(title: str, text: str, model: str | None = None) -> str:
@@ -594,7 +750,7 @@ def extract_claims(text: str, title: str, model: str | None = None) -> list[dict
     if not text or not text.strip():
         return []
     
-    effective_model = model or "claude-haiku-4-5-20251001"
+    effective_model = model or settings.ollama_model
     prompt = _load_prompt("claims.txt").format(
         title=title or "(unknown)",
         text=text[:40000] if effective_model.startswith("claude-") else text[:12000],
