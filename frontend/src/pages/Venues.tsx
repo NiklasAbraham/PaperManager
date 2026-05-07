@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { listVenues, getVenuePapers } from "../api/client";
-import { VenueOut, Paper } from "../types";
+import type { VenueOut, Paper } from "../types";
 import PaperCard from "../components/PaperCard";
 
 // Heuristic to detect venue type

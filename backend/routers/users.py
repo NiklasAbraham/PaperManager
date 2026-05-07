@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 from db.connection import get_driver
-from db.queries.users import get_or_create_user, list_users, get_user_conversations_for_ask
+from db.queries.users import get_or_create_user, list_users, get_user_conversations_for_ask, delete_user, rename_user
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
@@ -19,6 +19,10 @@ class AskBody(BaseModel):
     question: str
 
 
+class RenameBody(BaseModel):
+    name: str
+
+
 @router.get("")
 def get_users():
     return list_users(get_driver())
@@ -30,6 +34,24 @@ def identify(body: IdentifyBody):
     if not body.name.strip():
         raise HTTPException(status_code=422, detail="Name cannot be empty")
     return get_or_create_user(get_driver(), body.name.strip())
+
+
+@router.delete("/{name}", status_code=204)
+def remove_user(name: str):
+    """Delete a user and all their graph relationships."""
+    delete_user(get_driver(), name)
+
+
+@router.patch("/{name}")
+def update_user(name: str, body: RenameBody):
+    """Rename a user."""
+    new_name = body.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=422, detail="Name cannot be empty")
+    updated = rename_user(get_driver(), name, new_name)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+    return updated
 
 
 @router.post("/{name}/ask")

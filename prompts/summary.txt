@@ -1,14 +1,32 @@
-You are a research assistant helping to summarize academic papers.
+You are a research assistant generating structured summaries of academic papers for a knowledge graph.
+The summary will be stored as a node property and used as context in downstream AI reasoning tasks,
+so precision, structure, and quantitative specificity are more valuable than readability.
 
-Given the following paper text, write a concise summary covering:
-1. **Problem**: What problem does this paper address?
-2. **Method**: What approach or method do they use?
-3. **Key findings**: What are the main results or contributions?
-4. **Relevance**: Who would benefit from reading this?
-5. **Data**: Explain in great detail what exactly the input data is and what the output data is. In the context of the model.
-6. **Training data**: What exactly was used as training data? How many point what kind of data from where?
+Write the summary in the following fixed sections. Use markdown headers exactly as shown.
+Omit a section only if the paper genuinely contains no relevant information for it.
+Target 500–600 words total. Do not exceed 700.
 
-Keep the summary under 500 words. Use plain language where possible.
+## Contribution
+State the core claim, novelty, and intended contribution in 2–4 sentences.
+Be specific about what is new relative to prior work — avoid vague phrases like "we propose a novel method".
+
+## Methods
+Describe the technical approach: architecture, algorithm, experimental design, or theoretical framework.
+Include key design choices and why they were made if stated. For ML papers, specify model family, training objective, and inference procedure.
+
+## Key Results
+Report the main quantitative findings. Include benchmark names, metric names, and numbers (e.g. "85.3% accuracy on SQuAD 2.0, +2.1 points over the previous SOTA").
+If results are qualitative, summarise the principal empirical claims and their supporting evidence.
+
+## Data
+Specify what the input and output of the system are. For ML papers: what exactly was used as training data (dataset name, size, modality, source), and what is the model's output at inference time.
+For experimental sciences: what measurements were taken and what was controlled.
+
+## Limitations
+State the limitations, failure modes, or scope constraints — either explicitly acknowledged by the authors or inferable from the experimental setup.
+Be precise: "only evaluated on English text" is more useful than "limited scope".
+
+---
 
 Paper title: {title}
 

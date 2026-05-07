@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { uploadPdf, ingestFromUrlFull, saveReferences, applyTags, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, addPaperToProject, previewUrlPdf, uploadPdfForPaper, parsePdf, suggestTags, createTag } from "../api/client";
+import { uploadPdf, ingestFromUrlFull, saveReferences, applyTags, apiFetch, getOrCreatePerson, linkPersonInvolves, listPeople, listProjects, addPaperToProject, previewUrlPdf, uploadPdfForPaper, parsePdf, suggestTags, createTag, updatePaper } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut, Reference, Paper } from "../types";
 
@@ -20,9 +20,16 @@ interface Props {
   /** When provided (no file), ingest via URL instead of PDF upload. */
   url?: string;
   debug?: boolean;
+  /** Queue position indicator, e.g. position=2 total=5 → "Paper 2 of 5" */
+  queuePosition?: number;
+  queueTotal?: number;
+  /** Already-running upload promise (speculative). If provided, awaited instead of starting a new upload. */
+  backgroundUpload?: Promise<T_IngestOut>;
+  /** When true, skip the summary prompt step (upload already started in background). */
+  skipSummaryStep?: boolean;
 }
 
-export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug }: Props) {
+export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug, queuePosition, queueTotal, backgroundUpload, skipSummaryStep }: Props) {
   const urlMode = !file && !!url;
   const { settings } = useAppSettings();
 
@@ -113,7 +120,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   };
 
   // Step 4: tags
-  const [tagSuggestions, setTagSuggestions] = useState<{ existing: string[]; new: string[] }>({ existing: [], new: [] });
+  const [tagSuggestions, setTagSuggestions] = useState<{ existing: string[]; new: string[]; all_tags: string[] }>({ existing: [], new: [], all_tags: [] });
   const [appliedTags, setAppliedTags]       = useState<Set<string>>(new Set());
   const [tagsLoading, setTagsLoading]       = useState(false);
   const [customTag, setCustomTag]           = useState("");
@@ -217,7 +224,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
       suggestTags(paper.title, paper.abstract),
     ]).then(([current, res]) => {
       setAppliedTags(new Set(current.map((t) => t.name)));
-      setTagSuggestions(res);
+      setTagSuggestions({ existing: res.existing, new: res.new, all_tags: res.all_tags ?? [] });
     }).catch(() => {}).finally(() => setTagsLoading(false));
   };
 
@@ -269,6 +276,19 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
         // If user provided a PDF manually before import, attach it now
         if (preImportPdf && paper.pdf_fetched === false) {
           try { await uploadPdfForPaper(paper.id, preImportPdf); } catch { /* non-fatal */ }
+        }
+      } else if (backgroundUpload) {
+        // Await the already-running speculative upload (AI summary started in background)
+        paper = await backgroundUpload;
+        // Patch any metadata the user changed in step 1
+        const changed: Parameters<typeof updatePaper>[1] = {};
+        if (title.trim() && title.trim() !== meta.title) changed.title = title.trim();
+        if (year !== (meta.year?.toString() ?? "")) changed.year = year ? parseInt(year) : null;
+        if (doi !== (meta.doi ?? "")) changed.doi = doi.trim() || null;
+        if (abstract !== (meta.abstract ?? "")) changed.abstract = abstract.trim() || null;
+        if (Object.keys(changed).length > 0) {
+          try { await updatePaper(paper.id, changed); } catch { /* best-effort */ }
+          paper = { ...paper, ...changed };
         }
       } else {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
@@ -631,38 +651,72 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
 
   if (step === 4 && uploadedPaper) {
     const allSuggested = [...new Set([...tagSuggestions.existing, ...tagSuggestions.new])];
+    const remainingTags = tagSuggestions.all_tags.filter((t) => !allSuggested.includes(t));
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="bg-raised rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
           <ModalHeader step={4} title="Add tags" subtitle="Click to apply. Tags help you filter and organise your library." />
-          <div className="px-6 py-4 space-y-3">
+          <div className="px-6 py-4 space-y-3 max-h-[65vh] overflow-y-auto">
             {tagsLoading ? (
               <p className="text-xs text-ink-3 animate-pulse">Suggesting tags…</p>
-            ) : allSuggested.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {allSuggested.map((tag) => {
-                  const isOn = appliedTags.has(tag);
-                  const isNew = tagSuggestions.new.includes(tag) && !tagSuggestions.existing.includes(tag);
-                  return (
-                    <button
-                      key={tag}
-                      onClick={() => addTagToApplied(tag)}
-                      disabled={addingTag || isOn}
-                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                        isOn
-                          ? "bg-accent text-white border-accent"
-                          : "bg-raised text-ink-2 border-line hover:border-violet-400 hover:text-accent"
-                      }`}
-                    >
-                      {isNew && !isOn && <span className="mr-1 text-violet-400">✦</span>}
-                      {tag}
-                      {isOn && <span className="ml-1">✓</span>}
-                    </button>
-                  );
-                })}
-              </div>
             ) : (
-              <p className="text-xs text-ink-3">No suggestions — add a custom tag below.</p>
+              <>
+                {allSuggested.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-ink-3 uppercase tracking-wide mb-1.5">Suggested</p>
+                    <div className="flex flex-wrap gap-2">
+                      {allSuggested.map((tag) => {
+                        const isOn = appliedTags.has(tag);
+                        const isNew = tagSuggestions.new.includes(tag) && !tagSuggestions.existing.includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            onClick={() => addTagToApplied(tag)}
+                            disabled={addingTag || isOn}
+                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                              isOn
+                                ? "bg-accent text-white border-accent"
+                                : "bg-raised text-ink-2 border-line hover:border-violet-400 hover:text-accent"
+                            }`}
+                          >
+                            {isNew && !isOn && <span className="mr-1 text-violet-400">✦</span>}
+                            {tag}
+                            {isOn && <span className="ml-1">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {remainingTags.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-ink-3 uppercase tracking-wide mb-1.5">Your library tags</p>
+                    <div className="flex flex-wrap gap-2">
+                      {remainingTags.map((tag) => {
+                        const isOn = appliedTags.has(tag);
+                        return (
+                          <button
+                            key={tag}
+                            onClick={() => addTagToApplied(tag)}
+                            disabled={addingTag || isOn}
+                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                              isOn
+                                ? "bg-accent text-white border-accent"
+                                : "bg-raised text-ink-2 border-line hover:border-violet-400 hover:text-accent"
+                            }`}
+                          >
+                            {tag}
+                            {isOn && <span className="ml-1">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {allSuggested.length === 0 && remainingTags.length === 0 && (
+                  <p className="text-xs text-ink-3">No tags in your library yet — add one below.</p>
+                )}
+              </>
             )}
             {appliedTags.size > 0 && (
               <p className="text-xs text-ink-3">{appliedTags.size} tag{appliedTags.size !== 1 ? "s" : ""} applied: {[...appliedTags].join(", ")}</p>
@@ -836,7 +890,14 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             <h2 className="font-semibold text-ink">Confirm paper details</h2>
             <StepDots current={1} />
           </div>
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${source.color}`}>{source.label}</span>
+          <div className="flex items-center gap-2">
+            {queuePosition && queueTotal && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-raised text-ink-3 border border-line-s">
+                {queuePosition} / {queueTotal}
+              </span>
+            )}
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${source.color}`}>{source.label}</span>
+          </div>
         </div>
 
         <div className="px-6 py-4 space-y-3 max-h-[70vh] overflow-y-auto">
@@ -989,8 +1050,10 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
         </div>
 
         <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
-          <button onClick={onCancel} disabled={saving} className="px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50">Cancel</button>
-          {settings.showSummaryPromptStep ? (
+          <button onClick={onCancel} disabled={saving} className="px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50">
+            {error ? "Cancel this paper" : queueTotal ? "← Queue" : "Cancel"}
+          </button>
+          {settings.showSummaryPromptStep && !skipSummaryStep ? (
             <button onClick={() => setStep(2)} disabled={!title.trim()}
               className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50">
               Next →
@@ -999,7 +1062,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             <button onClick={confirm} disabled={saving || !title.trim()}
               className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent disabled:opacity-50 flex items-center gap-2">
               {saving && <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
-              {saving ? "Importing…" : urlMode ? "Import →" : "Upload →"}
+              {saving ? (backgroundUpload ? "Summarising…" : urlMode ? "Importing…" : "Uploading…") : urlMode ? "Import →" : "Upload →"}
             </button>
           )}
         </div>

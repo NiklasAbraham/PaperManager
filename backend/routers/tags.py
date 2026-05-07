@@ -236,27 +236,32 @@ def suggest_tags(body: SuggestBody):
         ]
         return valid_existing, new_tags
 
-    # ── Strategy A: Claude Haiku ──────────────────────────────────────────────
-    if _settings.anthropic_api_key:
+    import anthropic, httpx
+    _ssl = False if not _settings.ssl_verify else (_settings.ssl_ca_bundle or True)
+
+    def _call_claude(client: "anthropic.Anthropic", model: str) -> tuple[list, list]:
+        resp = client.messages.create(
+            model=model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _parse(resp.content[0].text)
+
+    # ── Strategy A: Claude Work (Palantir gateway) ────────────────────────────
+    if _settings.anthropic_work_api_key:
         try:
-            import anthropic, httpx
-            _BASE = "https://api.anthropic.com"
-            _ssl = False if not _settings.ssl_verify else (_settings.ssl_ca_bundle or True)
-            client = anthropic.Anthropic(
-                api_key=_settings.anthropic_api_key,
-                base_url=_BASE,
-                http_client=httpx.Client(verify=_ssl),
-            )
-            resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=512,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            valid_existing, new_tags = _parse(resp.content[0].text)
-            log.debug("Tag suggestion via Claude | existing=%d new=%d", len(valid_existing), len(new_tags))
+            kwargs: dict = {
+                "api_key": _settings.anthropic_work_api_key,
+                "http_client": httpx.Client(verify=_ssl),
+            }
+            if _settings.anthropic_work_base_url:
+                kwargs["base_url"] = _settings.anthropic_work_base_url
+            client = anthropic.Anthropic(**kwargs)
+            valid_existing, new_tags = _call_claude(client, "claude-haiku-4-5-20251001")
+            log.debug("Tag suggestion via Claude Work | existing=%d new=%d", len(valid_existing), len(new_tags))
             return {"existing": valid_existing, "new": new_tags, "all_tags": existing_tags}
         except Exception as e:
-            log.warning("Claude tag suggestion failed, trying Ollama | %s", e)
+            log.warning("Claude Work tag suggestion failed, trying Ollama | %s", e)
 
     # ── Strategy B: Ollama fallback ───────────────────────────────────────────
     try:

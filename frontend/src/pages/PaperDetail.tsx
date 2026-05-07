@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd } from "../api/client";
+import { apiFetch, extractReferences, aiExtractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, addAuthorByName, aiExtractAuthors, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, aiExtractMetadata, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
@@ -66,7 +66,8 @@ export default function PaperDetail() {
   const dragging = useRef(false);
   const [references, setReferences] = useState<Reference[]>([]);
   const [citedBy, setCitedBy]       = useState<Reference[]>([]);
-  const [extracting, setExtracting]     = useState(false);
+  const [extracting, setExtracting]         = useState(false);
+  const [aiExtractingRefs, setAiExtractingRefs] = useState(false);
   const [pendingRefs, setPendingRefs]   = useState<Reference[] | null>(null);
   const [checkedRefs, setCheckedRefs]   = useState<boolean[]>([]);
   const [pullingDoi, setPullingDoi]     = useState<string | null>(null);
@@ -107,6 +108,11 @@ export default function PaperDetail() {
   const [claimsLoaded, setClaimsLoaded] = useState(false);
   const [extractingClaims, setExtractingClaims] = useState(false);
   const [claimsModel, setClaimsModel] = useState<"claude" | "ollama">("claude");
+  // Authors (meta tab)
+  const [newAuthorName, setNewAuthorName] = useState("");
+  const [addingAuthor, setAddingAuthor] = useState(false);
+  const [aiExtractingAuthors, setAiExtractingAuthors] = useState(false);
+  const [aiExtractAuthorsError, setAiExtractAuthorsError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -261,6 +267,8 @@ export default function PaperDetail() {
   const [refetchError, setRefetchError] = useState<string | null>(null);
   const [extractingAbstract, setExtractingAbstract] = useState(false);
   const [extractAbstractError, setExtractAbstractError] = useState<string | null>(null);
+  const [aiExtracting, setAiExtracting] = useState(false);
+  const [aiExtractError, setAiExtractError] = useState<string | null>(null);
   // Inline meta editing
   const [metaEdit, setMetaEdit] = useState<Partial<{ title: string; year: string; doi: string; venue: string; abstract: string }>>({});
 
@@ -319,6 +327,20 @@ export default function PaperDetail() {
       // ignore
     } finally {
       setExtracting(false);
+    }
+  };
+
+  const handleAiExtractRefs = async () => {
+    if (!id) return;
+    setAiExtractingRefs(true);
+    try {
+      const { references: found } = await aiExtractReferences(id);
+      setPendingRefs(found);
+      setCheckedRefs(found.map(() => true));
+    } catch {
+      // ignore
+    } finally {
+      setAiExtractingRefs(false);
     }
   };
 
@@ -1021,10 +1043,23 @@ export default function PaperDetail() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={handleExtract}
-                    disabled={extracting || pullingAll}
+                    disabled={extracting || aiExtractingRefs || pullingAll}
                     className="text-xs py-2 px-4 bg-violet-50 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 font-medium"
                   >
                     {extracting ? "Extracting…" : "Extract from PDF"}
+                  </button>
+                  <button
+                    onClick={handleAiExtractRefs}
+                    disabled={aiExtractingRefs || extracting || pullingAll}
+                    className="text-xs py-2 px-4 bg-violet-100 text-violet-700 rounded-lg hover:bg-violet-200 disabled:opacity-50 font-medium flex items-center gap-1.5"
+                  >
+                    {aiExtractingRefs && (
+                      <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                    )}
+                    {aiExtractingRefs ? "Extracting…" : "✦ Extract with AI"}
                   </button>
                   {references.some((ref) => !(ref as any).summary && ref.doi) && (
                     <button
@@ -1303,8 +1338,19 @@ export default function PaperDetail() {
                                 setExtractAbstractError(null);
                                 try {
                                   const res = await reextractAbstract(id);
-                                  setPaper((p) => p ? { ...p, abstract: res.abstract } : p);
-                                  setMetaEdit((s) => { const n = { ...s }; delete n.abstract; return n; });
+                                  setPaper((p) => p ? {
+                                    ...p,
+                                    abstract: res.abstract,
+                                    ...(res.doi  ? { doi:  res.doi  } : {}),
+                                    ...(res.year ? { year: res.year } : {}),
+                                  } : p);
+                                  setMetaEdit((s) => {
+                                    const n = { ...s };
+                                    delete n.abstract;
+                                    if (res.doi)  delete n.doi;
+                                    if (res.year) delete n.year;
+                                    return n;
+                                  });
                                 } catch (e) {
                                   setExtractAbstractError(e instanceof Error ? e.message : "Extraction failed");
                                 } finally {
@@ -1323,6 +1369,44 @@ export default function PaperDetail() {
                               {extractingAbstract ? "Extracting…" : "↺ Re-extract from PDF"}
                             </button>
                             {extractAbstractError && <p className="text-[10px] text-red-500">{extractAbstractError}</p>}
+                            <button
+                              onClick={async () => {
+                                if (!id || aiExtracting) return;
+                                setAiExtracting(true);
+                                setAiExtractError(null);
+                                try {
+                                  const res = await aiExtractMetadata(id);
+                                  setPaper((p) => p ? {
+                                    ...p,
+                                    ...(res.abstract ? { abstract: res.abstract } : {}),
+                                    ...(res.doi  ? { doi:  res.doi  } : {}),
+                                    ...(res.year ? { year: res.year } : {}),
+                                  } : p);
+                                  setMetaEdit((s) => {
+                                    const n = { ...s };
+                                    if (res.abstract) delete n.abstract;
+                                    if (res.doi)  delete n.doi;
+                                    if (res.year) delete n.year;
+                                    return n;
+                                  });
+                                } catch (e) {
+                                  setAiExtractError(e instanceof Error ? e.message : "AI extraction failed");
+                                } finally {
+                                  setAiExtracting(false);
+                                }
+                              }}
+                              disabled={aiExtracting}
+                              className="text-[10px] px-2 py-1 bg-violet-50 text-violet-600 rounded hover:bg-violet-100 hover:text-violet-700 disabled:opacity-50 flex items-center gap-1 transition-colors"
+                            >
+                              {aiExtracting && (
+                                <svg className="animate-spin h-2.5 w-2.5" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                </svg>
+                              )}
+                              {aiExtracting ? "Extracting…" : "✦ Extract with AI"}
+                            </button>
+                            {aiExtractError && <p className="text-[10px] text-red-500">{aiExtractError}</p>}
                             </div>
                           ) : (
                             <input
@@ -1361,6 +1445,96 @@ export default function PaperDetail() {
                       </div>
                     )}
                   </div>
+                </MetaSection>
+
+                {/* Authors */}
+                <MetaSection title="Authors">
+                  <div className="space-y-1.5 mb-2">
+                    {authors.length === 0 && (
+                      <p className="text-xs text-gray-400">No authors recorded.</p>
+                    )}
+                    {authors.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between gap-2 group">
+                        <Link to={`/people?id=${a.id}`} className="text-xs text-gray-700 hover:text-violet-600 transition-colors truncate">
+                          {a.name}
+                        </Link>
+                        <button
+                          onClick={async () => {
+                            if (!id) return;
+                            await removeAuthor(id, a.id);
+                            setAuthors((prev) => prev.filter((p) => p.id !== a.id));
+                          }}
+                          title="Remove author"
+                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-xs leading-none shrink-0"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-1 mt-1">
+                    <input
+                      type="text"
+                      value={newAuthorName}
+                      onChange={(e) => setNewAuthorName(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key !== "Enter" || !newAuthorName.trim() || !id || addingAuthor) return;
+                        setAddingAuthor(true);
+                        try {
+                          const person = await addAuthorByName(id, newAuthorName.trim());
+                          setAuthors((prev) => prev.some((p) => p.id === person.id) ? prev : [...prev, person]);
+                          setNewAuthorName("");
+                        } finally {
+                          setAddingAuthor(false);
+                        }
+                      }}
+                      placeholder="Add author…"
+                      className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-300"
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!newAuthorName.trim() || !id || addingAuthor) return;
+                        setAddingAuthor(true);
+                        try {
+                          const person = await addAuthorByName(id, newAuthorName.trim());
+                          setAuthors((prev) => prev.some((p) => p.id === person.id) ? prev : [...prev, person]);
+                          setNewAuthorName("");
+                        } finally {
+                          setAddingAuthor(false);
+                        }
+                      }}
+                      disabled={addingAuthor || !newAuthorName.trim()}
+                      className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-40 transition-colors"
+                    >+</button>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!id || aiExtractingAuthors) return;
+                      setAiExtractingAuthors(true);
+                      setAiExtractAuthorsError(null);
+                      try {
+                        const res = await aiExtractAuthors(id);
+                        setAuthors((prev) => {
+                          const existingIds = new Set(prev.map((p) => p.id));
+                          const newOnes = res.authors.filter((a) => !existingIds.has(a.id));
+                          return [...prev, ...newOnes];
+                        });
+                      } catch (e) {
+                        setAiExtractAuthorsError(e instanceof Error ? e.message : "Extraction failed");
+                      } finally {
+                        setAiExtractingAuthors(false);
+                      }
+                    }}
+                    disabled={aiExtractingAuthors}
+                    className="mt-1.5 w-full text-xs py-1 px-2 bg-violet-50 text-violet-600 rounded hover:bg-violet-100 disabled:opacity-50 flex items-center justify-center gap-1"
+                  >
+                    {aiExtractingAuthors && (
+                      <svg className="animate-spin h-2.5 w-2.5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                    )}
+                    {aiExtractingAuthors ? "Extracting…" : "✦ Extract authors with AI"}
+                  </button>
+                  {aiExtractAuthorsError && <p className="text-[10px] text-red-500 mt-1">{aiExtractAuthorsError}</p>}
                 </MetaSection>
 
                 {/* AI Summary */}
@@ -1939,7 +2113,18 @@ export default function PaperDetail() {
 
           {/* Tab content */}
           <div className="flex-1 overflow-hidden p-3">
-            {tab === "notes" && id && <NoteEditor paperId={id} compact />}
+            {tab === "notes" && id && (
+              <NoteEditor
+                key={id}
+                fetchNote={() => apiFetch(`/papers/${id}/note`)}
+                saveNote={(content) => apiFetch(`/papers/${id}/note`, {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ content }),
+                })}
+                compact
+              />
+            )}
             {tab === "chat"  && id && <ChatPanel paperId={id} />}
           </div>
         </div>

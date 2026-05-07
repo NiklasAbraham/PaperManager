@@ -111,6 +111,30 @@ def get_conversation_started_by(driver: Driver, conv_id: str) -> str | None:
         return result["name"] if result else None
 
 
+def delete_user(driver: Driver, name: str) -> bool:
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (u:User {name: $name}) DETACH DELETE u RETURN count(u) AS deleted",
+            name=name,
+        )
+        return (result.single() or {}).get("deleted", 0) > 0
+
+
+def rename_user(driver: Driver, old_name: str, new_name: str) -> dict | None:
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (u:User {name: $old_name})
+            SET u.name = $new_name
+            RETURN u
+            """,
+            old_name=old_name,
+            new_name=new_name,
+        )
+        row = result.single()
+        return dict(row["u"]) if row else None
+
+
 def get_user_conversations_for_ask(driver: Driver, user_name: str, limit: int = 200) -> list[dict]:
     """Return all messages from a user's conversations, newest first, for Claude synthesis."""
     with driver.session() as session:

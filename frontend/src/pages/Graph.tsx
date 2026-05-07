@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { useAppSettings } from "../contexts/SettingsContext";
@@ -8,19 +8,23 @@ type Mode = "full" | "papers";
 
 interface VisSettings {
   nodeSize: number;
+  maxNodeSize: number;
   linkDistance: number;
   charge: number;
+  linkWidth: number;
+  arrowSize: number;
+  linkCurvature: number;
+  gravity: number;
+  showParticles: boolean;
+  dashedLinks: boolean;
   showEdgeLabels: boolean;
   showNodeLabels: boolean;
+  sizeByDegree: boolean;
+  maxNodes: number;
+  hiddenTypes: string[];
+  nodeColors: Record<string, string>;
+  bgColor: string;
 }
-
-const DEFAULT_SETTINGS: VisSettings = {
-  nodeSize: 16,
-  linkDistance: 120,
-  charge: -200,
-  showEdgeLabels: true,
-  showNodeLabels: true,
-};
 
 const NODE_COLORS: Record<string, string> = {
   paper:   "#7c3aed",
@@ -32,18 +36,98 @@ const NODE_COLORS: Record<string, string> = {
   unknown: "#9ca3af",
 };
 
+const DEFAULT_SETTINGS: VisSettings = {
+  nodeSize: 16,
+  maxNodeSize: 8,
+  linkDistance: 120,
+  charge: -200,
+  linkWidth: 1.5,
+  arrowSize: 6,
+  linkCurvature: 0,
+  gravity: 0.3,
+  showParticles: false,
+  dashedLinks: false,
+  showEdgeLabels: true,
+  showNodeLabels: true,
+  sizeByDegree: true,
+  maxNodes: 2000,
+  hiddenTypes: [],
+  nodeColors: { ...NODE_COLORS },
+  bgColor: "#f9fafb",
+};
+
+function defaultQuery(mode: Mode, maxNodes: number): string {
+  if (mode === "papers") {
+    return `MATCH (n)\nWHERE n:Paper OR n:Person OR n:Project\nWITH n LIMIT ${maxNodes}\nOPTIONAL MATCH (n)-[r]-(m)\nWHERE m:Paper OR m:Person OR m:Topic OR m:Project\nRETURN n, r, m`;
+  }
+  return `MATCH (n)\nWITH n LIMIT ${maxNodes}\nOPTIONAL MATCH (n)-[r]->(m)\nRETURN n, r, m`;
+}
+
 const SKIP_PROPS = new Set(["x", "y", "vx", "vy", "fx", "fy", "__indexColor", "index"]);
 
-// ── Node properties panel ────────────────────────────────────────────────────
+// ── Small reusable UI pieces ──────────────────────────────────────────────────
 
-function NodePanel({ node, onClose, onNavigate, onDelete }: {
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className={`relative w-9 h-5 rounded-full transition-colors ${value ? "bg-violet-600" : "bg-gray-300"}`}
+    >
+      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${value ? "translate-x-4" : "translate-x-0"}`} />
+    </button>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="pt-2 pb-0.5 border-t border-gray-100 first:border-t-0 first:pt-0">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{children}</span>
+    </div>
+  );
+}
+
+function SliderRow({ label, value, min, max, step, onChange, format }: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  format?: (v: number) => string;
+}) {
+  return (
+    <label className="block">
+      <div className="flex justify-between text-xs text-gray-500 mb-1">
+        <span>{label}</span>
+        <span className="font-mono text-gray-700">{format ? format(value) : value}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(+e.target.value)}
+        className="w-full accent-violet-600" />
+    </label>
+  );
+}
+
+function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-xs text-gray-500">{label}</span>
+      <Toggle value={value} onChange={onChange} />
+    </div>
+  );
+}
+
+// ── Node properties panel ─────────────────────────────────────────────────────
+
+function NodePanel({ node, onClose, onNavigate, onDelete, nodeColors }: {
   node: GraphNode;
   onClose: () => void;
   onNavigate: () => void;
   onDelete: () => void;
+  nodeColors: Record<string, string>;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const color = NODE_COLORS[node.type] ?? NODE_COLORS.unknown;
+  const color = nodeColors[node.type] ?? NODE_COLORS.unknown;
   const entries = Object.entries(node).filter(
     ([k, v]) => !SKIP_PROPS.has(k) && k !== "label" && k !== "type" && v !== null && v !== undefined && v !== ""
   );
@@ -112,135 +196,140 @@ function NodePanel({ node, onClose, onNavigate, onDelete }: {
   );
 }
 
-// ── Settings panel ───────────────────────────────────────────────────────────
+// ── Settings panel ────────────────────────────────────────────────────────────
 
 function SettingsPanel({ settings, onChange, onClose }: {
   settings: VisSettings;
   onChange: (patch: Partial<VisSettings>) => void;
   onClose: () => void;
 }) {
+  const typeEntries = Object.entries(NODE_COLORS).filter(([k]) => k !== "unknown");
+
   return (
-    <div className="absolute top-10 right-2 z-20 w-60 bg-white rounded-lg shadow-xl border border-gray-200 p-4">
-      <div className="flex items-center justify-between mb-4">
+    <div className="absolute top-10 right-2 z-20 w-72 bg-white rounded-lg shadow-xl border border-gray-200 p-4 overflow-y-auto max-h-[90vh]">
+      <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Visualization</span>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-base leading-none">×</button>
       </div>
 
-      <div className="space-y-4">
-        <label className="block">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>Node size</span><span className="font-mono">{settings.nodeSize}</span>
-          </div>
-          <input type="range" min="6" max="36" step="1" value={settings.nodeSize}
-            onChange={e => onChange({ nodeSize: +e.target.value })}
-            className="w-full accent-violet-600" />
-        </label>
+      <div className="space-y-3">
 
-        <label className="block">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>Link distance</span><span className="font-mono">{settings.linkDistance}</span>
-          </div>
-          <input type="range" min="30" max="400" step="10" value={settings.linkDistance}
-            onChange={e => onChange({ linkDistance: +e.target.value })}
-            className="w-full accent-violet-600" />
-        </label>
+        {/* ── NODES ── */}
+        <SectionLabel>Nodes</SectionLabel>
+        <SliderRow label="Node size" value={settings.nodeSize} min={6} max={36} step={1}
+          onChange={v => onChange({ nodeSize: v })} />
+        <SliderRow label="Max node size (cap)" value={settings.maxNodeSize} min={2} max={20} step={1}
+          onChange={v => onChange({ maxNodeSize: v })} />
+        <ToggleRow label="Scale by connections" value={settings.sizeByDegree}
+          onChange={v => onChange({ sizeByDegree: v })} />
 
-        <label className="block">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>Repulsion</span><span className="font-mono">{Math.abs(settings.charge)}</span>
-          </div>
-          <input type="range" min="30" max="600" step="10" value={Math.abs(settings.charge)}
-            onChange={e => onChange({ charge: -Number(e.target.value) })}
-            className="w-full accent-violet-600" />
-        </label>
+        {/* ── LINKS ── */}
+        <SectionLabel>Links</SectionLabel>
+        <SliderRow label="Link distance" value={settings.linkDistance} min={30} max={400} step={10}
+          onChange={v => onChange({ linkDistance: v })} />
+        <SliderRow label="Repulsion" value={Math.abs(settings.charge)} min={30} max={600} step={10}
+          onChange={v => onChange({ charge: -v })} />
+        <SliderRow label="Link width" value={settings.linkWidth} min={0.5} max={6} step={0.5}
+          onChange={v => onChange({ linkWidth: v })} />
+        <SliderRow label="Arrow size" value={settings.arrowSize} min={0} max={14} step={1}
+          onChange={v => onChange({ arrowSize: v })} />
+        <SliderRow label="Curvature" value={settings.linkCurvature} min={0} max={0.5} step={0.05}
+          onChange={v => onChange({ linkCurvature: v })} />
+        <ToggleRow label="Animated particles" value={settings.showParticles}
+          onChange={v => onChange({ showParticles: v })} />
+        <ToggleRow label="Dashed edges" value={settings.dashedLinks}
+          onChange={v => onChange({ dashedLinks: v })} />
 
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-500">Node labels</span>
-          <button
-            onClick={() => onChange({ showNodeLabels: !settings.showNodeLabels })}
-            className={`relative w-9 h-5 rounded-full transition-colors ${settings.showNodeLabels ? "bg-violet-600" : "bg-gray-300"}`}
-          >
-            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${settings.showNodeLabels ? "translate-x-4" : "translate-x-0"}`} />
-          </button>
+        {/* ── LABELS ── */}
+        <SectionLabel>Labels</SectionLabel>
+        <ToggleRow label="Node labels" value={settings.showNodeLabels}
+          onChange={v => onChange({ showNodeLabels: v })} />
+        <ToggleRow label="Edge labels" value={settings.showEdgeLabels}
+          onChange={v => onChange({ showEdgeLabels: v })} />
+
+        {/* ── NODE TYPES ── */}
+        <SectionLabel>Node types (click to hide)</SectionLabel>
+        <div className="flex flex-wrap gap-1.5">
+          {typeEntries.map(([type]) => {
+            const hidden = settings.hiddenTypes.includes(type);
+            const color = settings.nodeColors[type] ?? NODE_COLORS[type];
+            return (
+              <button
+                key={type}
+                onClick={() => {
+                  const next = hidden
+                    ? settings.hiddenTypes.filter(t => t !== type)
+                    : [...settings.hiddenTypes, type];
+                  onChange({ hiddenTypes: next });
+                }}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors ${
+                  hidden
+                    ? "border-gray-200 text-gray-400 bg-gray-50 line-through opacity-60"
+                    : "border-gray-200 text-gray-700 bg-white hover:bg-gray-50"
+                }`}
+              >
+                <span
+                  className="w-2 h-2 rounded-full inline-block shrink-0"
+                  style={{ background: hidden ? "#d1d5db" : color }}
+                />
+                {type}
+              </button>
+            );
+          })}
         </div>
 
+        {/* ── COLORS ── */}
+        <SectionLabel>Colors</SectionLabel>
+        {typeEntries.map(([type]) => (
+          <div key={type} className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ background: settings.nodeColors[type] ?? NODE_COLORS[type] }} />
+              <span className="text-xs text-gray-500 capitalize">{type}</span>
+            </div>
+            <input
+              type="color"
+              value={settings.nodeColors[type] ?? NODE_COLORS[type]}
+              onChange={e => onChange({ nodeColors: { ...settings.nodeColors, [type]: e.target.value } })}
+              className="w-7 h-7 rounded cursor-pointer border border-gray-200 p-0.5"
+              title={`${type} color`}
+            />
+          </div>
+        ))}
         <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-500">Edge labels</span>
-          <button
-            onClick={() => onChange({ showEdgeLabels: !settings.showEdgeLabels })}
-            className={`relative w-9 h-5 rounded-full transition-colors ${settings.showEdgeLabels ? "bg-violet-600" : "bg-gray-300"}`}
-          >
-            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${settings.showEdgeLabels ? "translate-x-4" : "translate-x-0"}`} />
-          </button>
+          <span className="text-xs text-gray-500">Background</span>
+          <input
+            type="color"
+            value={settings.bgColor}
+            onChange={e => onChange({ bgColor: e.target.value })}
+            className="w-7 h-7 rounded cursor-pointer border border-gray-200 p-0.5"
+            title="Background color"
+          />
         </div>
+        <button
+          onClick={() => onChange({ nodeColors: { ...NODE_COLORS }, bgColor: "#f9fafb" })}
+          className="w-full text-xs text-gray-400 hover:text-gray-600 py-1 border border-dashed border-gray-200 rounded hover:border-gray-300 transition-colors"
+        >
+          Reset colors
+        </button>
+
+        {/* ── LIMITS & PHYSICS ── */}
+        <SectionLabel>Limits &amp; Physics</SectionLabel>
+        <SliderRow label="Max nodes" value={settings.maxNodes} min={100} max={5000} step={100}
+          onChange={v => onChange({ maxNodes: v })} />
+        <SliderRow label="Gravity" value={settings.gravity} min={0} max={1} step={0.05}
+          format={v => v.toFixed(2)}
+          onChange={v => onChange({ gravity: v })} />
+
       </div>
     </div>
   );
 }
 
-// ── Cypher bar ───────────────────────────────────────────────────────────────
-
-function CypherBar({ onRun }: { onRun: (q: string) => Promise<void> }) {
-  const [open, setOpen]       = useState(false);
-  const [query, setQuery]     = useState("");
-  const [error, setError]     = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-
-  const run = async () => {
-    if (!query.trim() || running) return;
-    setRunning(true);
-    setError(null);
-    try {
-      await onRun(query.trim());
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error");
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <div className="shrink-0 bg-white border-t border-gray-200">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 w-full px-4 py-2 text-xs text-gray-500 hover:text-gray-700"
-      >
-        <span className="font-mono font-semibold text-violet-600">CYPHER</span>
-        <span className="text-gray-300 ml-1">run a custom query</span>
-        <span className="ml-auto">{open ? "▾" : "▴"}</span>
-      </button>
-
-      {open && (
-        <div className="px-4 pb-3 space-y-2">
-          <textarea
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder={"MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 50"}
-            rows={3}
-            className="w-full text-xs font-mono border border-gray-200 rounded p-2 resize-y focus:outline-none focus:ring-1 focus:ring-violet-500"
-            onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); }}
-          />
-          <div className="flex items-center gap-3">
-            <button
-              onClick={run}
-              disabled={running}
-              className="px-3 py-1 text-xs font-medium bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50 transition-colors"
-            >
-              {running ? "Running…" : "Run  (⌘↵)"}
-            </button>
-            {error && <span className="text-xs text-red-500 break-all">{error}</span>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main graph page ──────────────────────────────────────────────────────────
+// ── Main graph page ───────────────────────────────────────────────────────────
 
 export default function Graph() {
   const { settings: appSettings } = useAppSettings();
-  const [mode, setMode]           = useState<Mode>(appSettings.defaultGraphMode);
+  const [mode, setMode]           = useState<Mode>(appSettings.defaultGraphMode as Mode);
   const [data, setData]           = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading]     = useState(true);
   const [selected, setSelected]   = useState<GraphNode | null>(null);
@@ -252,10 +341,15 @@ export default function Graph() {
     showEdgeLabels: appSettings.graphShowEdgeLabels,
   });
 
+  const [queryText, setQueryText]     = useState(() => defaultQuery(appSettings.defaultGraphMode as Mode, DEFAULT_SETTINGS.maxNodes));
+  const [queryError, setQueryError]   = useState<string | null>(null);
+  const [queryRunning, setQueryRunning] = useState(false);
+
   const containerRef  = useRef<HTMLDivElement>(null);
   const graphRef      = useRef<unknown>(null);
   const settingsRef   = useRef<VisSettings>(settings);
   settingsRef.current = settings;
+  const degreeRef     = useRef<Map<string, number>>(new Map());
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -266,11 +360,31 @@ export default function Graph() {
 
   const hasCypherState = !!(location.state as { cypherQuery?: string } | null)?.cypherQuery;
 
+  // Filtered data: exclude hidden node types and their links
+  const filteredData = useMemo(() => {
+    if (settings.hiddenTypes.length === 0) return data;
+    const hidden = new Set(settings.hiddenTypes);
+    const nodes = data.nodes.filter(n => !hidden.has(n.type));
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const links = data.links.filter(l => {
+      const src = typeof l.source === "object" ? (l.source as GraphNode).id : l.source as string;
+      const tgt = typeof l.target === "object" ? (l.target as GraphNode).id : l.target as string;
+      return nodeIds.has(src) && nodeIds.has(tgt);
+    });
+    return { nodes, links };
+  }, [data, settings.hiddenTypes]);
+
+  // Sync query bar text when mode changes
+  useEffect(() => {
+    setQueryText(defaultQuery(mode, settings.maxNodes));
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-run Cypher query passed from the Cypher page via router state
   useEffect(() => {
     if (!hasCypherState) return;
     const q = (location.state as { cypherQuery?: string }).cypherQuery!;
     window.history.replaceState({}, "");
+    setQueryText(q);
     setLoading(true);
     apiFetch<GraphData & { error?: string }>("/graph/cypher", {
       method: "POST",
@@ -283,6 +397,18 @@ export default function Graph() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Recompute node degrees from filtered links
+  useEffect(() => {
+    const map = new Map<string, number>();
+    for (const l of filteredData.links) {
+      const src = typeof l.source === "object" ? (l.source as GraphNode).id : l.source as string;
+      const tgt = typeof l.target === "object" ? (l.target as GraphNode).id : l.target as string;
+      map.set(src, (map.get(src) ?? 0) + 1);
+      map.set(tgt, (map.get(tgt) ?? 0) + 1);
+    }
+    degreeRef.current = map;
+  }, [filteredData]);
+
   // Fetch data on mode change (skip initial load when a cypher query was injected)
   const initialLoadDone = useRef(false);
   useEffect(() => {
@@ -292,15 +418,15 @@ export default function Graph() {
     }
     initialLoadDone.current = true;
     setLoading(true);
-    apiFetch<GraphData>(`/graph?mode=${mode}`)
+    apiFetch<GraphData>(`/graph?mode=${mode}&max_nodes=${settings.maxNodes}`)
       .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, settings.maxNodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Build graph when data is ready
+  // Build graph when filtered data is ready
   useEffect(() => {
-    if (loading || !containerRef.current || data.nodes.length === 0) return;
+    if (loading || !containerRef.current || filteredData.nodes.length === 0) return;
 
     import("force-graph").then(({ default: ForceGraph }) => {
       if (graphRef.current) {
@@ -312,14 +438,20 @@ export default function Graph() {
       const height = containerRef.current!.clientHeight;
       const s      = settingsRef.current;
 
-      const graph = ForceGraph()(containerRef.current!)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const graph = (ForceGraph as any)()(containerRef.current!);
+      graph
         .width(width)
         .height(height)
-        .backgroundColor("#f9fafb")
+        .backgroundColor(s.bgColor)
         .nodeId("id")
         .nodeLabel((n: unknown) => (n as GraphNode).label ?? "")
-        .nodeColor((n: unknown) => NODE_COLORS[(n as GraphNode).type] ?? NODE_COLORS.unknown)
+        .nodeColor((n: unknown) => settingsRef.current.nodeColors[(n as GraphNode).type] ?? NODE_COLORS.unknown)
         .nodeRelSize(s.nodeSize)
+        .nodeVal((n: unknown) => {
+          if (!settingsRef.current.sizeByDegree) return 1;
+          return Math.min(Math.max(1, degreeRef.current.get((n as GraphNode).id) ?? 1), settingsRef.current.maxNodeSize);
+        })
         .nodeCanvasObjectMode(() => "after")
         .nodeCanvasObject((node: unknown, ctx: CanvasRenderingContext2D, globalScale: number) => {
           if (!settingsRef.current.showNodeLabels) return;
@@ -328,11 +460,13 @@ export default function Graph() {
           const label = n.label ?? "";
           if (!label) return;
 
-          const r = settingsRef.current.nodeSize;
+          const val = settingsRef.current.sizeByDegree
+            ? Math.min(Math.max(1, degreeRef.current.get(n.id) ?? 1), settingsRef.current.maxNodeSize)
+            : 1;
+          const r = Math.cbrt(val) * settingsRef.current.nodeSize;
           const fontSize = Math.max(10 / globalScale, 2.5);
           ctx.font = `${fontSize}px Inter, sans-serif`;
 
-          // Truncate long labels
           const maxChars = 20;
           const display = label.length > maxChars ? label.slice(0, maxChars - 1) + "…" : label;
           const tw = ctx.measureText(display).width;
@@ -342,17 +476,19 @@ export default function Graph() {
 
           ctx.fillStyle = "rgba(249,250,251,0.85)";
           ctx.fillRect(px - tw / 2 - 2, py - fontSize / 2 - 1, tw + 4, fontSize + 2);
-
           ctx.fillStyle = "#1e293b";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(display, px, py);
         })
         .linkColor(() => "#cbd5e1")
-        .linkWidth(1.5)
-        .linkDirectionalArrowLength(6)
+        .linkWidth(s.linkWidth)
+        .linkCurvature(s.linkCurvature)
+        .linkDirectionalArrowLength(s.arrowSize)
         .linkDirectionalArrowRelPos(1)
-        // Edge labels drawn on canvas
+        .linkDirectionalParticles(s.showParticles ? 2 : 0)
+        .linkDirectionalParticleSpeed(0.005)
+        .linkLineDash(s.dashedLinks ? [4, 2] : null)
         .linkCanvasObjectMode(() => "after")
         .linkCanvasObject((link: unknown, ctx: CanvasRenderingContext2D, globalScale: number) => {
           if (!settingsRef.current.showEdgeLabels) return;
@@ -366,13 +502,11 @@ export default function Graph() {
           const midX = (src.x! + tgt.x!) / 2;
           const midY = (src.y! + tgt.y!) / 2;
           const fontSize = Math.max(9 / globalScale, 2);
-
           ctx.font = `${fontSize}px Inter, sans-serif`;
           const tw = ctx.measureText(label).width;
 
           ctx.fillStyle = "rgba(249,250,251,0.85)";
           ctx.fillRect(midX - tw / 2 - 2, midY - fontSize / 2 - 1, tw + 4, fontSize + 2);
-
           ctx.fillStyle = "#64748b";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
@@ -380,15 +514,13 @@ export default function Graph() {
         })
         .onNodeClick((n: unknown) => setSelected(n as GraphNode))
         .graphData({
-          nodes: data.nodes.map(n => ({ ...n })),
-          links: data.links.map(l => ({ ...l })),
+          nodes: filteredData.nodes.map(n => ({ ...n })),
+          links: filteredData.links.map(l => ({ ...l })),
         });
 
-      // Apply force settings
-      (graph as unknown as { d3Force: (name: string) => { distance?: (d: number) => unknown; strength?: (s: number) => unknown } | null })
-        .d3Force("link")?.distance?.(s.linkDistance);
-      (graph as unknown as { d3Force: (name: string) => { distance?: (d: number) => unknown; strength?: (s: number) => unknown } | null })
-        .d3Force("charge")?.strength?.(s.charge);
+      graph.d3Force("link")?.distance?.(s.linkDistance);
+      graph.d3Force("charge")?.strength?.(s.charge);
+      graph.d3Force("center")?.strength?.(s.gravity);
 
       graphRef.current = graph;
     });
@@ -399,15 +531,64 @@ export default function Graph() {
         graphRef.current = null;
       }
     };
-  }, [data, loading]);
+  }, [filteredData, loading]);
 
-  // Apply node size without rebuilding
+  // ── Reactive settings (no full rebuild) ────────────────────────────────────
+
   useEffect(() => {
     if (!graphRef.current) return;
-    (graphRef.current as { nodeRelSize: (s: number) => void }).nodeRelSize(settings.nodeSize);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (graphRef.current as any).nodeRelSize(settings.nodeSize);
   }, [settings.nodeSize]);
 
-  // Apply force settings without rebuilding
+  useEffect(() => {
+    if (!graphRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (graphRef.current as any).linkWidth(settings.linkWidth);
+  }, [settings.linkWidth]);
+
+  useEffect(() => {
+    if (!graphRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (graphRef.current as any).linkDirectionalArrowLength(settings.arrowSize);
+  }, [settings.arrowSize]);
+
+  useEffect(() => {
+    if (!graphRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = graphRef.current as any;
+    g.linkCurvature(settings.linkCurvature);
+    g.refresh?.();
+  }, [settings.linkCurvature]);
+
+  useEffect(() => {
+    if (!graphRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (graphRef.current as any).linkDirectionalParticles(settings.showParticles ? 2 : 0);
+  }, [settings.showParticles]);
+
+  useEffect(() => {
+    if (!graphRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = graphRef.current as any;
+    g.linkLineDash(settings.dashedLinks ? [4, 2] : null);
+    g.refresh?.();
+  }, [settings.dashedLinks]);
+
+  useEffect(() => {
+    if (!graphRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (graphRef.current as any).backgroundColor(settings.bgColor);
+  }, [settings.bgColor]);
+
+  useEffect(() => {
+    if (!graphRef.current) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = graphRef.current as any;
+    g.nodeColor((n: unknown) => settingsRef.current.nodeColors[(n as GraphNode).type] ?? NODE_COLORS.unknown);
+    g.refresh?.();
+  }, [settings.nodeColors]);
+
   useEffect(() => {
     if (!graphRef.current) return;
     const g = graphRef.current as {
@@ -419,24 +600,55 @@ export default function Graph() {
     g.d3ReheatSimulation();
   }, [settings.linkDistance, settings.charge]);
 
-  // Refresh canvas on label toggles
+  useEffect(() => {
+    if (!graphRef.current) return;
+    const g = graphRef.current as {
+      d3Force: (n: string) => { strength?: (s: number) => unknown } | null;
+      d3ReheatSimulation: () => void;
+    };
+    g.d3Force("center")?.strength?.(settings.gravity);
+    g.d3ReheatSimulation();
+  }, [settings.gravity]);
+
   useEffect(() => {
     if (!graphRef.current) return;
     (graphRef.current as { refresh?: () => void }).refresh?.();
-  }, [settings.showEdgeLabels, settings.showNodeLabels]);
+  }, [settings.showEdgeLabels, settings.showNodeLabels, settings.sizeByDegree]);
 
-  // Run custom Cypher query
-  const runCypher = useCallback(async (query: string) => {
-    const result = await apiFetch<GraphData & { error?: string }>("/graph/cypher", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-    });
-    if (result.error) throw new Error(result.error);
-    setData(result);
-  }, []);
+  // ── Query bar ──────────────────────────────────────────────────────────────
 
-  // Delete a node and surgically remove it from the live graph
+  const runQuery = useCallback(async () => {
+    if (!queryText.trim() || queryRunning) return;
+    setQueryRunning(true);
+    setQueryError(null);
+    try {
+      const result = await apiFetch<GraphData & { error?: string }>("/graph/cypher", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: queryText.trim() }),
+      });
+      if (result.error) throw new Error(result.error);
+      setData(result);
+    } catch (e: unknown) {
+      setQueryError(e instanceof Error ? e.message : "Error");
+    } finally {
+      setQueryRunning(false);
+    }
+  }, [queryText, queryRunning]);
+
+  const resetQuery = useCallback(() => {
+    const q = defaultQuery(mode, settings.maxNodes);
+    setQueryText(q);
+    setQueryError(null);
+    setLoading(true);
+    apiFetch<GraphData>(`/graph?mode=${mode}&max_nodes=${settings.maxNodes}`)
+      .then(setData)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [mode, settings.maxNodes]);
+
+  // ── Delete node ────────────────────────────────────────────────────────────
+
   const handleDeleteNode = useCallback(async (node: GraphNode) => {
     await apiFetch(`/cypher/nodes/${node.id}`, { method: "DELETE" });
     setSelected(null);
@@ -449,7 +661,6 @@ export default function Graph() {
           return src !== node.id && tgt !== node.id;
         }),
       };
-      // Update the live force-graph without full rebuild
       if (graphRef.current) {
         (graphRef.current as { graphData: (d: GraphData) => void }).graphData({
           nodes: filtered.nodes.map(n => ({ ...n })),
@@ -460,8 +671,11 @@ export default function Graph() {
     });
   }, []);
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="h-[calc(100vh-53px)] flex flex-col">
+
       {/* Top bar */}
       <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-gray-200 shrink-0">
         {(["full", "papers"] as Mode[]).map(m => (
@@ -471,22 +685,25 @@ export default function Graph() {
             className={`px-3 py-1 text-xs rounded-full font-medium transition-colors
               ${mode === m ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
           >
-            {m === "full" ? "All nodes" : "Papers + People + Topics"}
+            {m === "full" ? "All nodes" : "Papers + People + Projects"}
           </button>
         ))}
 
         <span className="ml-auto text-xs text-gray-400">
-          {loading ? "Loading…" : `${data.nodes.length} nodes · ${data.links.length} edges`}
+          {loading ? "Loading…" : `${filteredData.nodes.length} nodes · ${filteredData.links.length} edges`}
         </span>
 
-        {/* Legend */}
+        {/* Legend — uses live node colors */}
         <div className="flex items-center gap-3 ml-4">
-          {Object.entries(NODE_COLORS).filter(([k]) => k !== "unknown").map(([type, color]) => (
-            <span key={type} className="flex items-center gap-1 text-xs text-gray-500">
-              <span className="w-2 h-2 rounded-full inline-block" style={{ background: color }} />
-              {type}
-            </span>
-          ))}
+          {Object.entries(settings.nodeColors).filter(([k]) => k !== "unknown").map(([type, color]) => {
+            const hidden = settings.hiddenTypes.includes(type);
+            return (
+              <span key={type} className={`flex items-center gap-1 text-xs transition-opacity ${hidden ? "opacity-30" : "text-gray-500"}`}>
+                <span className="w-2 h-2 rounded-full inline-block" style={{ background: color }} />
+                {type}
+              </span>
+            );
+          })}
         </div>
 
         {/* Gear icon */}
@@ -502,16 +719,48 @@ export default function Graph() {
         </button>
       </div>
 
+      {/* Active Cypher query bar */}
+      <div className="shrink-0 bg-white border-b border-gray-200 px-4 py-2">
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-violet-500 pt-2 shrink-0">Cypher</span>
+          <textarea
+            value={queryText}
+            onChange={e => setQueryText(e.target.value)}
+            rows={8}
+            spellCheck={false}
+            className="flex-1 text-xs font-mono border border-gray-200 rounded p-1.5 resize-y focus:outline-none focus:ring-1 focus:ring-violet-400 bg-gray-50 leading-relaxed"
+            onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) runQuery(); }}
+          />
+          <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+            <button
+              onClick={runQuery}
+              disabled={queryRunning}
+              className="px-2.5 py-1 text-xs font-medium bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              {queryRunning ? "…" : "Run ⌘↵"}
+            </button>
+            <button
+              onClick={resetQuery}
+              className="px-2.5 py-1 text-xs font-medium border border-gray-200 text-gray-500 rounded hover:bg-gray-50 transition-colors"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        {queryError && <p className="text-xs text-red-500 mt-1 ml-14">{queryError}</p>}
+      </div>
+
       {/* Graph + properties panel */}
       <div className="flex-1 flex overflow-hidden">
+
         {/* Canvas area */}
-        <div className="flex-1 relative bg-gray-50 overflow-hidden">
+        <div className="flex-1 relative overflow-hidden" style={{ background: settings.bgColor }}>
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400 z-10">
               Loading graph…
             </div>
           )}
-          {!loading && data.nodes.length === 0 && (
+          {!loading && filteredData.nodes.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
               No data yet — upload some papers or run a Cypher query.
             </div>
@@ -535,12 +784,10 @@ export default function Graph() {
             onClose={() => setSelected(null)}
             onNavigate={() => navigate(`/paper/${selected.id}`)}
             onDelete={() => handleDeleteNode(selected)}
+            nodeColors={settings.nodeColors}
           />
         )}
       </div>
-
-      {/* Cypher query bar */}
-      <CypherBar onRun={runCypher} />
     </div>
   );
 }

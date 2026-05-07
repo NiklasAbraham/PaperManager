@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { apiFetch } from "../api/client";
 import type { Note } from "../types";
 
 interface Props {
-  paperId: string;
+  /** Callback to load the existing note (return the Note object; throw/reject on 404 → empty editor) */
+  fetchNote: () => Promise<Note>;
+  /** Callback to save the note content (return the updated Note) */
+  saveNote: (content: string) => Promise<Note>;
   /** When true, shows a compact single-column layout (for narrow panels) */
   compact?: boolean;
 }
@@ -12,7 +14,7 @@ interface Props {
 const PERSON_RE = /@([\w][\w-]*)/g;
 const TOPIC_RE = /#([\w][\w-]*)/g;
 
-export default function NoteEditor({ paperId, compact }: Props) {
+export default function NoteEditor({ fetchNote, saveNote, compact }: Props) {
   const [content, setContent]   = useState("");
   const [saving, setSaving]     = useState(false);
   const [saved, setSaved]       = useState(false);
@@ -22,25 +24,23 @@ export default function NoteEditor({ paperId, compact }: Props) {
   const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    apiFetch<Note>(`/papers/${paperId}/note`)
+    fetchNote()
       .then((n) => { setContent(n.content); setLoaded(true); })
       .catch(() => setLoaded(true));
-  }, [paperId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const doSave = useCallback(async (text: string) => {
     setSaving(true);
     try {
-      await apiFetch(`/papers/${paperId}/note`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
-      });
+      await saveNote(text);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } finally {
       setSaving(false);
     }
-  }, [paperId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleChange = (val: string) => {
     setContent(val);

@@ -232,6 +232,21 @@ def list_tracked_people(driver: Driver) -> list[dict]:
         return [dict(r["p"]) for r in result]
 
 
+def update_person_props(driver: Driver, person_id: str, props: dict) -> dict | None:
+    """Set arbitrary properties on a Person node, skipping None values."""
+    clean = {k: v for k, v in props.items() if v is not None}
+    if not clean:
+        return get_person(driver, person_id)
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (p:Person {id: $id}) SET p += $props RETURN p",
+            id=person_id,
+            props=clean,
+        )
+        record = result.single()
+        return dict(record["p"]) if record else None
+
+
 def get_person_library_dois(driver: Driver, person_id: str) -> set[str]:
     """Return set of DOIs for papers authored by this person that are in the library."""
     with driver.session() as session:

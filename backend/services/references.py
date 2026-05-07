@@ -118,6 +118,112 @@ def _guess_title(entry: str) -> str | None:
     return candidate
 
 
+_REF_AI_PROMPT = (
+    "Extract every cited reference from the text below into a JSON array.\n"
+    "Rules:\n"
+    "- Only include real academic references (papers, books, reports, preprints).\n"
+    "- Skip section headers, acknowledgements, footnotes, and non-reference text.\n"
+    "- Each entry must have these keys:\n"
+    "    title (string, required — the paper/book title only, not authors or venue),\n"
+    "    authors (array of strings — last, first or full names),\n"
+    "    year (integer or null),\n"
+    "    doi (string or null — only if explicitly present in the text),\n"
+    "    arxiv_id (string or null — e.g. '2301.07041', only if explicitly present)\n"
+    "- Return ONLY valid JSON array — no markdown fences, no explanation.\n\n"
+    "Text:\n{ref_text}"
+)
+
+
+def _parse_ref_json(raw: str) -> list[dict]:
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    data = json.loads(raw.strip())
+    if not isinstance(data, list):
+        return []
+    refs = []
+    for item in data:
+        if not isinstance(item, dict) or not item.get("title"):
+            continue
+        refs.append({
+            "title": str(item.get("title", "")).strip(),
+            "authors": [str(a) for a in (item.get("authors") or [])],
+            "year": item.get("year"),
+            "doi": item.get("doi"),
+            "arxiv_id": item.get("arxiv_id"),
+        })
+    return refs
+
+
+def extract_references_ai_full(raw_text: str) -> list[dict]:
+    """Extract references using Claude Work → Claude personal → Ollama (no S2)."""
+    ref_section = _get_ref_section_text(raw_text)
+    ref_text = (ref_section or raw_text)[:14000]
+    prompt = _REF_AI_PROMPT.format(ref_text=ref_text)
+
+    # Claude Work
+    if settings.anthropic_work_api_key:
+        try:
+            import anthropic
+            kwargs: dict = {
+                "api_key": settings.anthropic_work_api_key,
+                "http_client": httpx.Client(verify=False),
+            }
+            if settings.anthropic_work_base_url:
+                kwargs["base_url"] = settings.anthropic_work_base_url
+            client = anthropic.Anthropic(**kwargs)
+            resp = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=8192,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            refs = _parse_ref_json(resp.content[0].text)
+            if refs:
+                log.debug("References via Claude Work | count=%d", len(refs))
+                return refs
+        except Exception as exc:
+            log.debug("Claude Work references failed: %s", exc)
+
+    # Claude personal
+    if settings.anthropic_api_key:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(
+                api_key=settings.anthropic_api_key,
+                base_url="https://api.anthropic.com",
+                http_client=httpx.Client(verify=settings.ssl_verify if settings.ssl_verify is not False else False),
+            )
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=8192,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            refs = _parse_ref_json(resp.content[0].text)
+            if refs:
+                log.debug("References via Claude personal | count=%d", len(refs))
+                return refs
+        except Exception as exc:
+            log.debug("Claude personal references failed: %s", exc)
+
+    # Ollama (shorter context)
+    try:
+        import ollama
+        short_prompt = _REF_AI_PROMPT.format(ref_text=ref_text[:4000])
+        resp = ollama.chat(
+            model=settings.ollama_model,
+            messages=[{"role": "user", "content": short_prompt}],
+            format="json",
+        )
+        refs = _parse_ref_json(resp["message"]["content"])
+        if refs:
+            log.debug("References via Ollama | count=%d", len(refs))
+            return refs
+    except Exception as exc:
+        log.debug("Ollama references failed: %s", exc)
+
+    return []
+
+
 def _extract_references_with_ai(ref_text: str) -> list[dict]:
     """Use Claude to parse references from text when regex fails or returns too few."""
     try:

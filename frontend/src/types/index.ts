@@ -18,6 +18,12 @@ export interface Paper {
   added_by?: string;
 }
 
+export interface StartupRole {
+  name: string;
+  role: string;
+  active: boolean;
+}
+
 export interface Person {
   id: string;
   name: string;
@@ -25,6 +31,16 @@ export interface Person {
   email?: string;
   tracked?: boolean;
   s2_author_id?: string;
+  citation_count?: number;
+  bio?: string;
+  phone?: string;
+  orcid_url?: string;
+  scholar_url?: string;
+  linkedin_url?: string;
+  website_url?: string;
+  skills?: string;        // JSON-encoded string[]
+  startup_roles?: string; // JSON-encoded StartupRole[]
+  last_enriched_at?: string;
 }
 
 export interface Topic {
@@ -37,6 +53,7 @@ export interface Tag {
   id: string;
   name: string;
   paper_count?: number;
+  person_count?: number;
 }
 
 export interface Project {

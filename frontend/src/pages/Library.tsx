@@ -1,17 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { apiFetch, deletePaper } from "../api/client";
+import { apiFetch, interpretSearch, getVenuePapers } from "../api/client";
 import PaperCard from "../components/PaperCard";
 import PaperDrop from "../components/PaperDrop";
 import EditPaperModal from "../components/EditPaperModal";
-import OnboardingModal from "../components/OnboardingModal";
 import EntityPanel from "../components/EntityPanel";
 import ResearchGapPanel from "../components/ResearchGapPanel";
 import type { EntityType } from "../components/EntityPanel";
 import { useAppSettings } from "../contexts/SettingsContext";
-import type { Paper, Project, SearchResponse, T_IngestOut, Stats } from "../types";
-
-type ViewMode = "grid" | "list";
+import type { Paper, Project, SearchResponse, T_IngestOut, Stats, VenueOut } from "../types";
 
 export default function Library() {
   const { settings } = useAppSettings();
@@ -20,14 +17,13 @@ export default function Library() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [stats, setStats]           = useState<Stats | null>(null);
   const [loading, setLoading]       = useState(true);
-  const [viewMode, setViewMode]     = useState<ViewMode>(settings.defaultView);
   const [page, setPage]             = useState(1);
   const [editingPaper, setEditingPaper] = useState<Paper | null>(null);
-  const [onboardingPaper, setOnboardingPaper] = useState<T_IngestOut | null>(null);
   const [activePanel, setActivePanel]   = useState<EntityType | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [surprisingMe, setSurprisingMe] = useState(false);
   const [showResearchGaps, setShowResearchGaps] = useState(false);
+  const [aiSearching, setAiSearching] = useState(false);
 
   const q             = searchParams.get("q") ?? "";
   const activeTag     = searchParams.get("tag") ?? "";
@@ -35,7 +31,8 @@ export default function Library() {
   const activeProject = searchParams.get("project_id") ?? "";
   const activeStatus  = searchParams.get("reading_status") ?? "";
   const activeBookmarked = searchParams.get("bookmarked") === "true";
-  const hasFilters    = q || activeTag || activeTopic || activeProject || activeStatus || activeBookmarked;
+  const activeVenue   = searchParams.get("venue") ?? "";
+  const hasFilters    = q || activeTag || activeTopic || activeProject || activeStatus || activeBookmarked || activeVenue;
 
   // Sort papers per settings
   const sortedPapers = useMemo(() => {
@@ -59,14 +56,26 @@ export default function Library() {
   const loadPapers = async (params: URLSearchParams) => {
     setLoading(true);
     try {
-      const hasFilter = params.get("q") || params.get("tag") || params.get("topic") ||
-        params.get("project_id") || params.get("reading_status") || params.get("bookmarked");
-      if (hasFilter) {
-        const res = await apiFetch<SearchResponse>(`/search?${params}`);
-        setPapers(res.results);
+      const venue = params.get("venue");
+      if (venue) {
+        // Venue filter — fetch from venue endpoint, apply any remaining filters client-side
+        const all = await getVenuePapers(venue);
+        const tag = params.get("tag");
+        const q   = params.get("q")?.toLowerCase();
+        setPapers(all.filter((p) => {
+          if (q && !p.title.toLowerCase().includes(q) && !(p.abstract ?? "").toLowerCase().includes(q)) return false;
+          return !tag; // tag filtering would need separate lookup; omit for simplicity
+        }));
       } else {
-        const res = await apiFetch<Paper[]>("/papers");
-        setPapers(res);
+        const hasFilter = params.get("q") || params.get("tag") || params.get("topic") ||
+          params.get("project_id") || params.get("reading_status") || params.get("bookmarked");
+        if (hasFilter) {
+          const res = await apiFetch<SearchResponse>(`/search?${params}`);
+          setPapers(res.results);
+        } else {
+          const res = await apiFetch<Paper[]>("/papers");
+          setPapers(res);
+        }
       }
     } finally {
       setLoading(false);
@@ -118,6 +127,24 @@ export default function Library() {
     }
   };
 
+  const runAiSearch = async () => {
+    if (!q.trim() || aiSearching) return;
+    setAiSearching(true);
+    try {
+      const result = await interpretSearch(q.trim());
+      const next = new URLSearchParams();
+      if (result.keyword) next.set("q", result.keyword);
+      if (result.tag)     next.set("tag", result.tag);
+      if (result.topic)   next.set("topic", result.topic);
+      if (result.venue)   next.set("venue", result.venue);
+      if (result.year_min) next.set("year_min", String(result.year_min));
+      if (result.year_max) next.set("year_max", String(result.year_max));
+      setSearchParams(next);
+    } catch { /* ignore */ } finally {
+      setAiSearching(false);
+    }
+  };
+
   const refreshStats = () => apiFetch<Stats>("/stats").then(setStats).catch(() => {});
 
   const handleDeleted = (id: string) => {
@@ -135,19 +162,36 @@ export default function Library() {
       <main>
         {/* Search + upload + view toggle bar */}
         <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-3 flex gap-2 items-center flex-wrap">
-          {/* Search */}
-          <input
-            type="search"
-            value={q}
-            onChange={(e) => {
-              const next = new URLSearchParams(searchParams);
-              if (e.target.value) next.set("q", e.target.value);
-              else next.delete("q");
-              setSearchParams(next);
-            }}
-            placeholder="Search papers, notes…"
-            className="flex-1 min-w-[160px] h-9 border border-gray-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
+          {/* Search + AI button */}
+          <div className="flex flex-1 min-w-[160px] items-center gap-1">
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => {
+                const next = new URLSearchParams(searchParams);
+                if (e.target.value) next.set("q", e.target.value);
+                else next.delete("q");
+                setSearchParams(next);
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") runAiSearch(); }}
+              placeholder="Search… or describe in plain language and press ✦"
+              className="flex-1 h-9 border border-gray-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+            <button
+              onClick={runAiSearch}
+              disabled={aiSearching || !q.trim()}
+              title="Let AI interpret your query into filters"
+              className={`h-9 px-2.5 rounded-lg border text-sm font-semibold transition-colors shrink-0 ${
+                aiSearching
+                  ? "border-violet-300 text-violet-400 bg-violet-50 cursor-wait"
+                  : "border-violet-200 text-violet-500 bg-white hover:bg-violet-50 hover:border-violet-400 disabled:opacity-30"
+              }`}
+            >
+              {aiSearching
+                ? <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                : "✦"}
+            </button>
+          </div>
 
           {/* Reading status filter */}
           <select
@@ -206,28 +250,9 @@ export default function Library() {
               <span>Find Gaps</span>
             </button>
 
-            {/* View toggle */}
-            <div className="flex h-9 border border-gray-200 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setViewMode("grid")}
-                title="Grid view"
-                className={`w-9 flex items-center justify-center transition-colors ${viewMode === "grid" ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-50"}`}
-              >
-                <GridIcon />
-              </button>
-              <button
-                onClick={() => setViewMode("list")}
-                title="List view"
-                className={`w-9 flex items-center justify-center border-l border-gray-200 transition-colors ${viewMode === "list" ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-50"}`}
-              >
-                <ListIcon />
-              </button>
-            </div>
-
             <PaperDrop onUploaded={(p: T_IngestOut) => {
               setPapers((prev) => [p, ...prev]);
               refreshStats();
-              setOnboardingPaper(p);
             }} debug={settings.debugMode} />
           </div>
         </div>
@@ -248,6 +273,7 @@ export default function Library() {
               )}
               {activeStatus && <Chip label={`Status: ${activeStatus}`} onRemove={() => setFilter("reading_status", activeStatus)} />}
               {activeBookmarked && <Chip label="★ Bookmarked" onRemove={toggleBookmarked} />}
+              {activeVenue && <Chip label={`Venue: ${activeVenue}`} onRemove={() => setFilter("venue", activeVenue)} />}
               <button onClick={clearAll} className="text-xs text-gray-400 hover:text-gray-600 underline">
                 Clear all
               </button>
@@ -260,6 +286,7 @@ export default function Library() {
               stats={stats}
               onTopicClick={(name) => setFilter("topic", name)}
               onEntityClick={(type) => setActivePanel(type)}
+              onVenueClick={(name) => setFilter("venue", name)}
             />
           )}
 
@@ -275,23 +302,15 @@ export default function Library() {
                   All papers ({papers.length})
                 </h2>
               )}
-              {viewMode === "grid" ? (
-                <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
-                  {visiblePapers.map((p) => (
-                    <PaperCard key={p.id} paper={p}
-                      showAbstract={settings.showAbstractPreview}
-                      onDeleted={handleDeleted}
-                      onUpdated={handleUpdated}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <PaperListView
-                  papers={visiblePapers}
-                  onDeleted={handleDeleted}
-                  onEdit={setEditingPaper}
-                />
-              )}
+              <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+                {visiblePapers.map((p) => (
+                  <PaperCard key={p.id} paper={p}
+                    showAbstract={settings.showAbstractPreview}
+                    onDeleted={handleDeleted}
+                    onUpdated={handleUpdated}
+                  />
+                ))}
+              </div>
 
               {/* Pagination */}
               {totalPages > 1 && (
@@ -328,12 +347,6 @@ export default function Library() {
         />
       )}
 
-      {onboardingPaper && (
-        <OnboardingModal
-          paper={onboardingPaper}
-          onClose={() => setOnboardingPaper(null)}
-        />
-      )}
 
       {activePanel && (
         <EntityPanel
@@ -353,150 +366,20 @@ export default function Library() {
   );
 }
 
-// ── List view ────────────────────────────────────────────────────────────────
-
-function PaperListView({ papers, onDeleted, onEdit }: {
-  papers: Paper[];
-  onDeleted: (id: string) => void;
-  onEdit: (p: Paper) => void;
-}) {
-  const navigate = useNavigate();
-  const [confirmId, setConfirmId]   = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  const handleDelete = async (p: Paper) => {
-    if (confirmId !== p.id) { setConfirmId(p.id); return; }
-    setDeletingId(p.id);
-    try {
-      await deletePaper(p.id);
-      onDeleted(p.id);
-    } finally {
-      setDeletingId(null);
-      setConfirmId(null);
-    }
-  };
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      {/* Header row */}
-      <div className="grid grid-cols-[1fr_60px_180px_90px_90px] gap-4 px-4 py-2 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-        <span>Title</span>
-        <span>Year</span>
-        <span>DOI</span>
-        <span>Source</span>
-        <span className="text-right">Actions</span>
-      </div>
-
-      {papers.map((p, i) => (
-        <div
-          key={p.id}
-          onMouseLeave={() => setConfirmId(null)}
-          className={`grid grid-cols-[1fr_60px_180px_90px_90px] gap-4 px-4 py-3 items-center text-sm
-            hover:bg-violet-50 transition-colors cursor-pointer
-            ${i !== papers.length - 1 ? "border-b border-gray-100" : ""}`}
-        >
-          {/* Title */}
-          <span
-            onClick={() => navigate(`/paper/${p.id}`)}
-            className="font-medium text-gray-800 hover:text-violet-700 truncate"
-          >
-            {p.title}
-          </span>
-
-          {/* Year */}
-          <span className="text-gray-400 text-xs">{p.year ?? "—"}</span>
-
-          {/* DOI */}
-          <span className="text-gray-400 text-xs truncate">{p.doi ?? "—"}</span>
-
-          {/* Source */}
-          <span className="text-xs">
-            {p.metadata_source ? (
-              <span className={`px-2 py-0.5 rounded-full font-medium ${
-                p.metadata_source === "semantic_scholar" || p.metadata_source === "crossref"
-                  ? "bg-green-100 text-green-700"
-                  : p.metadata_source === "llm"
-                  ? "bg-yellow-100 text-yellow-700"
-                  : "bg-red-100 text-red-700"
-              }`}>
-                {p.metadata_source === "semantic_scholar" ? "S2" : p.metadata_source}
-              </span>
-            ) : "—"}
-          </span>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-1">
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(p); }}
-              title="Edit metadata"
-              className="p-1.5 rounded border border-gray-200 text-gray-400 hover:text-violet-600 hover:border-violet-300 transition-colors"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-              </svg>
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleDelete(p); }}
-              disabled={deletingId === p.id}
-              title={confirmId === p.id ? "Click again to confirm delete" : "Delete paper"}
-              className={`p-1.5 rounded border transition-colors disabled:opacity-50 ${
-                confirmId === p.id
-                  ? "bg-red-600 border-red-600 text-white"
-                  : "border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300"
-              }`}
-            >
-              {deletingId === p.id ? (
-                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round"
-                    d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Icons ──────────────────────────────────────────────────────────────────────
-
-function GridIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-      <rect x="3" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="3" width="7" height="7" rx="1" />
-      <rect x="3" y="14" width="7" height="7" rx="1" />
-      <rect x="14" y="14" width="7" height="7" rx="1" />
-    </svg>
-  );
-}
-
-function ListIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <line x1="3" y1="18" x2="21" y2="18" />
-    </svg>
-  );
-}
-
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
-function Dashboard({ stats, onTopicClick, onEntityClick }: {
+function Dashboard({ stats, onTopicClick, onEntityClick, onVenueClick }: {
   stats: Stats;
   onTopicClick: (name: string) => void;
   onEntityClick: (type: EntityType) => void;
+  onVenueClick: (name: string) => void;
 }) {
   const { counts, papers_by_year, top_topics, recent_papers, reading_status } = stats;
   const navigate = useNavigate();
+  const [venues, setVenues] = useState<VenueOut[]>([]);
+  useEffect(() => {
+    apiFetch<VenueOut[]>("/venues?min_count=2").then(setVenues).catch(() => {});
+  }, []);
 
   const maxYear = Math.max(...papers_by_year.map((y) => y.count), 1);
 
@@ -613,6 +496,27 @@ function Dashboard({ stats, onTopicClick, onEntityClick }: {
           )}
         </div>
       </div>
+
+      {/* Venues */}
+      {venues.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Venues</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {venues.map((v) => (
+              <button
+                key={v.name}
+                onClick={() => onVenueClick(v.name)}
+                className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full hover:bg-indigo-100 transition-colors"
+              >
+                {v.name}
+                <span className="bg-indigo-100 text-indigo-500 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
+                  {v.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
