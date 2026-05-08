@@ -118,3 +118,76 @@ def backfill_figures(caption_method: str = "ollama"):
             errors += 1
 
     return {"processed": processed, "skipped": skipped, "errors": errors}
+
+
+@router.post("/claims")
+def backfill_claims():
+    """Extract claims for papers that have raw text but no Claim nodes yet."""
+    from services.ai import extract_claims
+    from db.queries.claims import create_claims
+
+    driver = get_driver()
+    with driver.session() as session:
+        rows = session.run(
+            "MATCH (p:Paper) WHERE p.raw_text IS NOT NULL AND NOT (p)-[:HAS_CLAIM]->() "
+            "RETURN p.id AS id, p.title AS title, p.raw_text AS raw_text"
+        )
+        candidates = [dict(r) for r in rows]
+
+    processed = skipped = errors = 0
+    for paper in candidates:
+        raw_text = paper.get("raw_text") or ""
+        if not raw_text.strip():
+            skipped += 1
+            continue
+        try:
+            claims_data = extract_claims(raw_text, paper.get("title", ""), model="claude-haiku-4-5-20251001")
+            if claims_data:
+                create_claims(driver, paper["id"], claims_data)
+                log.info("Backfill claims | paper=%s | count=%d", paper["id"], len(claims_data))
+            processed += 1
+        except Exception as exc:
+            log.warning("Backfill claims error | paper=%s | %s", paper["id"], exc)
+            errors += 1
+
+    return {"processed": processed, "skipped": skipped, "errors": errors}
+
+
+@router.post("/embeddings")
+def backfill_embeddings():
+    """Generate and store vector embeddings for papers that do not have one yet."""
+    from services.embeddings import embed_paper
+
+    driver = get_driver()
+    with driver.session() as session:
+        rows = session.run(
+            "MATCH (p:Paper) WHERE p.embedding IS NULL "
+            "AND (p.abstract IS NOT NULL OR p.summary IS NOT NULL) "
+            "RETURN p.id AS id, p.title AS title, p.abstract AS abstract, p.summary AS summary"
+        )
+        candidates = [dict(r) for r in rows]
+
+    processed = skipped = errors = 0
+    for paper in candidates:
+        if not paper.get("title"):
+            skipped += 1
+            continue
+        try:
+            embedding = embed_paper(
+                title=paper.get("title", ""),
+                abstract=paper.get("abstract", "") or "",
+                summary=paper.get("summary", "") or "",
+            )
+            with driver.session() as session:
+                session.run(
+                    "MATCH (p:Paper {id: $id}) SET p.embedding = $emb",
+                    id=paper["id"],
+                    emb=embedding,
+                )
+            processed += 1
+            log.info("Backfill embedding | paper=%s", paper["id"])
+        except Exception as exc:
+            log.warning("Backfill embedding error | paper=%s | %s", paper["id"], exc)
+            errors += 1
+
+    return {"processed": processed, "skipped": skipped, "errors": errors}

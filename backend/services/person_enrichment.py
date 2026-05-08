@@ -393,13 +393,36 @@ def enrich_person_from_papers_ollama(driver, person_id: str) -> dict:
     return merged
 
 
-def enrich_all_people(driver) -> dict:
-    """Enrich all people connected to at least one paper.
+def _is_empty_profile(person: dict) -> bool:
+    """Return True if the person has no meaningful profile data and needs enrichment.
 
-    For each person:
-    - ORCID/S2 API lookup if they have stored orcid_url or s2_author_id
-    - Ollama scan of connected paper texts for affiliation, bio, skills
+    A person is considered "empty" if they are missing at least one of the two
+    core fields (affiliation, citation_count) AND have no bio, ORCID, Scholar,
+    or S2 URL set. People who already have a reasonably complete profile are skipped.
     """
+    has_affiliation = bool(person.get("affiliation"))
+    has_citation_count = person.get("citation_count") is not None
+    has_bio = bool(person.get("bio"))
+    has_orcid = bool(person.get("orcid_url"))
+    has_scholar = bool(person.get("scholar_url"))
+
+    # Already has a full core profile — skip
+    if has_affiliation and has_citation_count:
+        return False
+    # Has at least two strong signals — skip
+    if sum([has_affiliation, has_citation_count, has_bio, has_orcid, has_scholar]) >= 2:
+        return False
+    return True
+
+
+def enrich_all_people(driver) -> dict:
+    """Enrich people connected to at least one paper who have little/no profile data.
+
+    Skips people who already have a reasonably complete profile (affiliation +
+    citation_count, or two or more profile fields set).
+    """
+    from db.queries.people import get_person
+
     with driver.session() as session:
         result = session.run(
             """
@@ -411,9 +434,14 @@ def enrich_all_people(driver) -> dict:
         person_ids = [r["id"] for r in result]
 
     enriched_count = 0
+    skipped_count = 0
     error_count = 0
     for person_id in person_ids:
         try:
+            person = get_person(driver, person_id)
+            if not person or not _is_empty_profile(person):
+                skipped_count += 1
+                continue
             # ORCID / S2 enrichment (only runs if person has those IDs)
             res = enrich_person_by_id(driver, person_id)
             ollama_res = enrich_person_from_papers_ollama(driver, person_id)
@@ -423,4 +451,9 @@ def enrich_all_people(driver) -> dict:
             log.warning("enrich_all_people error | id=%s | %s", person_id, exc)
             error_count += 1
 
-    return {"enriched": enriched_count, "errors": error_count, "total": len(person_ids)}
+    return {
+        "enriched": enriched_count,
+        "skipped": skipped_count,
+        "errors": error_count,
+        "total": len(person_ids),
+    }

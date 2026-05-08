@@ -292,7 +292,14 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
         }
       } else {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
-        paper = await uploadPdf(file!, title.trim(), undefined, undefined, isDefault ? undefined : summaryInstructions, debug, documentType !== "paper" ? documentType : undefined);
+        paper = await uploadPdf(
+          file!, title.trim(), undefined, undefined,
+          isDefault ? undefined : summaryInstructions,
+          debug,
+          documentType !== "paper" ? documentType : undefined,
+          settings.autoExtractClaims ? settings.claimsModel : "",
+          settings.generateEmbeddingsOnUpload,
+        );
       }
       await applySource(paper.id);
       if (urlMode && paper.pdf_fetched === false) setPdfMissing(true);

@@ -242,6 +242,18 @@ export default function ChatPanel({ paperId }: Props) {
     );
   }
 
+  // ── Context bar helpers ───────────────────────────────────────────────────
+  const estimatedTokens = messages
+    .filter((m) => m.role !== "system")
+    .reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
+
+  const contextPercent = Math.min(100, Math.round((estimatedTokens / 100000) * 100));
+  const contextColor =
+    contextPercent >= 75 ? "bg-red-400" : contextPercent >= 45 ? "bg-amber-400" : "bg-violet-400";
+
+  const fmtTokens = (n: number) =>
+    n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+
   // ── Active conversation view ───────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full gap-2">
@@ -294,6 +306,27 @@ export default function ChatPanel({ paperId }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Context bar */}
+      {messages.length > 0 && (
+        <div className="shrink-0 rounded-md border border-gray-100 bg-gray-50 px-2.5 py-1.5 text-[10px] text-gray-500 space-y-1">
+          <div className="flex items-center justify-between">
+            <span>
+              Context: <span className="font-medium text-gray-700">{fmtTokens(estimatedTokens)} tokens</span>
+              {" · "}{messages.filter((m) => m.role !== "system").length} messages
+              {activeConv?.compacted && <span className="ml-1 text-amber-600 font-medium">· compacted</span>}
+            </span>
+            <span className="text-[9px] text-gray-400">{contextPercent}%</span>
+          </div>
+          <div className="h-1 w-full rounded-full bg-gray-200 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${contextColor}`}
+              style={{ width: `${contextPercent}%` }}
+            />
+          </div>
+          <p className="text-[9px] text-gray-400">Paper full text is always included as context</p>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-3 min-h-0">

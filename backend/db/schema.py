@@ -30,6 +30,13 @@ _INDEXES = [
        FOR (n:Message) ON EACH [n.content]""",
     """CREATE FULLTEXT INDEX claim_search IF NOT EXISTS
        FOR (c:Claim) ON EACH [c.text]""",
+    # Vector index for semantic similarity search (nomic-embed-text, 768-dim)
+    """CREATE VECTOR INDEX paper_embeddings IF NOT EXISTS
+       FOR (n:Paper) ON n.embedding
+       OPTIONS {indexConfig: {
+         `vector.dimensions`: 768,
+         `vector.similarity_function`: 'cosine'
+       }}""",
 ]
 
 

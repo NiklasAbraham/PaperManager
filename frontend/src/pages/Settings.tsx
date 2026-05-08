@@ -3,7 +3,7 @@ import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "
 import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults, listOllamaModels, deleteUser, renameUser } from "../api/client";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
-type BackfillOp = "topics" | "summary" | "figures";
+type BackfillOp = "topics" | "summary" | "figures" | "claims" | "embeddings";
 type BackfillState = { status: "idle" | "running" | "done" | "error"; result?: BackfillResult };
 
 export default function Settings() {
@@ -38,9 +38,11 @@ export default function Settings() {
     apiFetch<UserInfo[]>("/users").then(setUsers).catch(() => {});
   }, []);
   const [backfill, setBackfill] = useState<Record<BackfillOp, BackfillState>>({
-    topics:  { status: "idle" },
-    summary: { status: "idle" },
-    figures: { status: "idle" },
+    topics:     { status: "idle" },
+    summary:    { status: "idle" },
+    figures:    { status: "idle" },
+    claims:     { status: "idle" },
+    embeddings: { status: "idle" },
   });
 
   const runBackfill = async (op: BackfillOp) => {
@@ -250,6 +252,105 @@ export default function Settings() {
         </div>
       </Section>
 
+      {/* ── Knowledge Chat ── */}
+      <Section title="Knowledge Chat" description="Controls the default behaviour of the cross-library chat interface.">
+        <Row label="Default model" description="Pre-selected model when a new conversation is opened. Can be overridden per-session in the chat header.">
+          <ToggleGroup
+            value={settings.knowledgeChatDefaultModel}
+            options={[
+              { value: "claude",      label: "Claude" },
+              { value: "claude-work", label: "Claude (Work)" },
+              { value: "ollama",      label: "Ollama" },
+            ]}
+            onChange={(v) => update({ knowledgeChatDefaultModel: v as AppSettings["knowledgeChatDefaultModel"] })}
+          />
+        </Row>
+
+        <Row label="Web search by default" description="Pre-enable the web search toggle when starting a new conversation. Adds recent context from the web to every answer.">
+          <Toggle
+            value={settings.knowledgeChatUseWeb}
+            onChange={(v) => update({ knowledgeChatUseWeb: v })}
+          />
+        </Row>
+
+        <Row
+          label="Auto-route large context to Opus"
+          description={`When the total context (system prompt + papers + history) exceeds the threshold, switch from Sonnet to Claude Opus 4.6 for better multi-document reasoning. Current threshold: ${settings.knowledgeChatOpusThreshold.toLocaleString()} tokens.`}
+        >
+          <div className="flex items-center gap-3">
+            <input
+              type="range" min="10000" max="100000" step="5000"
+              value={settings.knowledgeChatOpusThreshold}
+              onChange={(e) => update({ knowledgeChatOpusThreshold: +e.target.value })}
+              className="w-36 accent-violet-600"
+            />
+            <span className="text-xs text-gray-500 font-mono w-16 text-right">
+              {(settings.knowledgeChatOpusThreshold / 1000).toFixed(0)}k tok
+            </span>
+          </div>
+        </Row>
+
+        <Row
+          label="Compaction window"
+          description={`Sliding-window compaction keeps the last N messages verbatim and replaces the rest with a structured working-memory block. Current: keep last ${settings.compactionKeepLastN} messages.`}
+        >
+          <div className="flex items-center gap-3">
+            <input
+              type="range" min="2" max="20" step="2"
+              value={settings.compactionKeepLastN}
+              onChange={(e) => update({ compactionKeepLastN: +e.target.value })}
+              className="w-32 accent-violet-600"
+            />
+            <span className="text-xs text-gray-500 font-mono w-8 text-right">
+              {settings.compactionKeepLastN}
+            </span>
+          </div>
+        </Row>
+      </Section>
+
+      {/* ── Inference ── */}
+      <Section title="Inference" description="Controls which AI enrichment steps run when a paper is uploaded.">
+        <Row label="Extract claims on upload" description="Automatically extract typed intellectual claims (findings, methods, limitations) from every paper's text using Claude Haiku. Adds Claim nodes to the graph, queryable in Knowledge Chat.">
+          <Toggle
+            value={settings.autoExtractClaims}
+            onChange={(v) => update({ autoExtractClaims: v })}
+          />
+        </Row>
+
+        <Row label="Claims extraction model" description="Model used to extract claims. Claude Haiku is fast and cheap; Ollama runs locally.">
+          {(() => {
+            const CLAUDE_OPTIONS = [
+              { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+              { value: "claude-opus-4-6",           label: "Claude Opus 4.6" },
+            ];
+            const localOptions = ollamaModels.map((m) => ({ value: m, label: m }));
+            const allOptions = [
+              ...CLAUDE_OPTIONS,
+              ...(localOptions.length > 0
+                ? [{ value: "─────────", label: "─────────" }, ...localOptions]
+                : []),
+              ...(!CLAUDE_OPTIONS.some((o) => o.value === settings.claimsModel) && !ollamaModels.includes(settings.claimsModel)
+                ? [{ value: settings.claimsModel, label: settings.claimsModel }]
+                : []),
+            ];
+            return (
+              <Select
+                value={settings.claimsModel}
+                options={allOptions}
+                onChange={(v) => { if (v !== "─────────") update({ claimsModel: v }); }}
+              />
+            );
+          })()}
+        </Row>
+
+        <Row label="Generate embeddings on upload" description="Compute a 768-dim vector embedding for each paper using local Ollama (nomic-embed-text) after upload. Enables semantic search in Knowledge Chat. Requires Ollama to be running.">
+          <Toggle
+            value={settings.generateEmbeddingsOnUpload}
+            onChange={(v) => update({ generateEmbeddingsOnUpload: v })}
+          />
+        </Row>
+      </Section>
+
       {/* ── Graph ── */}
       <Section title="Graph" description="Default state when the graph view is opened.">
         <Row label="Default mode" description="Which nodes to show by default.">
@@ -351,7 +452,7 @@ export default function Settings() {
       </Section>
 
       {/* ── Library Maintenance ── */}
-      <Section title="Library Maintenance" description="Apply AI enrichment to papers already in your library. Skips papers that already have the data.">
+      <Section title="Library Maintenance" description="Apply AI enrichment to papers already in your library. Each operation skips papers that already have the data.">
         <BackfillRow
           label="Suggest topics"
           description="Run AI topic suggestion on papers that have no topics yet."
@@ -369,6 +470,18 @@ export default function Settings() {
           description="Extract figures from PDFs for papers that have no figures yet."
           state={backfill.figures}
           onRun={() => runBackfill("figures")}
+        />
+        <BackfillRow
+          label="Extract claims"
+          description="Extract typed intellectual claims (findings, methods, limitations) for papers that have raw text but no claims yet. Uses Claude Haiku."
+          state={backfill.claims}
+          onRun={() => runBackfill("claims")}
+        />
+        <BackfillRow
+          label="Generate embeddings"
+          description="Compute vector embeddings for papers that have no embedding yet using local Ollama (nomic-embed-text). Required for semantic search in Knowledge Chat."
+          state={backfill.embeddings}
+          onRun={() => runBackfill("embeddings")}
         />
       </Section>
 

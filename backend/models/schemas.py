@@ -68,6 +68,20 @@ class PersonCreate(BaseModel):
     startup_roles: str | None = None   # JSON-encoded list of {name, role, active}
 
 
+class PersonUpdate(BaseModel):
+    name: str | None = None
+    affiliation: str | None = None
+    email: str | None = None
+    bio: str | None = None
+    phone: str | None = None
+    orcid_url: str | None = None
+    scholar_url: str | None = None
+    linkedin_url: str | None = None
+    website_url: str | None = None
+    skills: str | None = None
+    startup_roles: str | None = None
+
+
 class PersonOut(BaseModel):
     id: str
     name: str

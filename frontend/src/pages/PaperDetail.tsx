@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, aiExtractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, addAuthorByName, aiExtractAuthors, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, aiExtractMetadata, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd } from "../api/client";
+import { apiFetch, extractReferences, aiExtractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, addAuthorByName, aiExtractAuthors, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, aiExtractMetadata, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd, listAnnotations } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
 import BookChapters from "../components/BookChapters";
 import PdfAnnotator from "../components/PdfAnnotator";
+import type { PdfAnnotatorHandle } from "../components/PdfAnnotator";
+import { SpecialZoomLevel } from "@react-pdf-viewer/core";
 import UploadConfirmModal from "../components/UploadConfirmModal";
 import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
-import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut, Claim, RelatedPaper } from "../types";
+import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut, Claim, RelatedPaper, Annotation, AnnotationColor } from "../types";
 
 const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
   paper: "#7c3aed", person: "#2563eb", topic: "#16a34a",
@@ -23,7 +25,7 @@ interface PaperFull extends Paper {
   tags?: Tag[];
 }
 
-type RightTab = "notes" | "chat";
+type RightTab = "notes" | "chat" | "highlights";
 
 export default function PaperDetail() {
   const { id } = useParams<{ id: string }>();
@@ -64,6 +66,38 @@ export default function PaperDetail() {
   const { settings } = useAppSettings();
   const [rightWidth, setRightWidth] = useState(320);
   const dragging = useRef(false);
+
+  // PDF annotations + zoom (lifted for the legend bar and sidebar panel)
+  const pdfRef = useRef<PdfAnnotatorHandle>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [pdfScale, setPdfScale] = useState<number | SpecialZoomLevel>(SpecialZoomLevel.PageWidth);
+  const resolvedScale = useRef<number>(1);
+  const [pdfInitialPage, setPdfInitialPage] = useState(0);
+
+  const adjustScale = (delta: number) => {
+    setPdfScale((s) => {
+      const cur = typeof s === "number" ? s : resolvedScale.current;
+      const next = Math.min(5, Math.max(0.1, Math.round((cur + delta) * 20) / 20));
+      resolvedScale.current = next; // keep ref in sync for next press
+      return next;
+    });
+  };
+
+  // Color labels for the PDF legend
+  const COLOR_LABELS: Record<AnnotationColor, string> = {
+    yellow: "Key insight",
+    green: "Evidence",
+    blue: "Context",
+    red: "Question",
+    purple: "Follow-up",
+  };
+  const COLOR_SWATCH: Record<AnnotationColor, string> = {
+    yellow: "#f5e800",
+    green: "#00c850",
+    blue: "#3884ff",
+    red: "#ff3c3c",
+    purple: "#a020f0",
+  };
   const [references, setReferences] = useState<Reference[]>([]);
   const [citedBy, setCitedBy]       = useState<Reference[]>([]);
   const [extracting, setExtracting]         = useState(false);
@@ -111,6 +145,9 @@ export default function PaperDetail() {
   // Authors (meta tab)
   const [newAuthorName, setNewAuthorName] = useState("");
   const [addingAuthor, setAddingAuthor] = useState(false);
+  const [authorSuggestions, setAuthorSuggestions] = useState<{id: string; name: string; affiliation?: string}[]>([]);
+  const [allPeople, setAllPeople] = useState<{id: string; name: string; affiliation?: string}[]>([]);
+  const authorDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [aiExtractingAuthors, setAiExtractingAuthors] = useState(false);
   const [aiExtractAuthorsError, setAiExtractAuthorsError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -124,6 +161,8 @@ export default function PaperDetail() {
     listReferences(id)
       .then(({ references, cited_by }) => { setReferences(references); setCitedBy(cited_by); })
       .catch(() => {});
+    apiFetch<{id: string; name: string; affiliation?: string}[]>("/people").then(setAllPeople).catch(() => {});
+    listAnnotations(id).then(setAnnotations).catch(() => {});
   }, [id]);
 
   // Load figures lazily when left tab is first opened
@@ -1227,7 +1266,49 @@ export default function PaperDetail() {
 
           {/* PDF tab */}
           {leftTab === "pdf" && paper?.drive_file_id && (
-            <PdfAnnotator paperId={id!} pdfUrl={`${BASE}/papers/${id}/pdf`} />
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Color legend + zoom control */}
+              <div className="shrink-0 flex items-center gap-3 px-3 py-1.5 border-b border-gray-100 bg-white text-[10px] text-gray-500">
+                <span className="font-medium text-gray-400 uppercase tracking-wide text-[9px] shrink-0">Colors:</span>
+                <div className="flex items-center gap-2.5 flex-wrap flex-1">
+                  {(["yellow", "green", "blue", "red", "purple"] as AnnotationColor[]).map((c) => (
+                    <span key={c} className="flex items-center gap-1 whitespace-nowrap">
+                      <span className="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" style={{ background: COLOR_SWATCH[c] }} />
+                      {COLOR_LABELS[c]}
+                    </span>
+                  ))}
+                </div>
+                {/* Zoom control */}
+                <div className="flex items-center gap-1 shrink-0 ml-auto">
+                  <button
+                    onClick={() => setPdfScale(SpecialZoomLevel.PageWidth)}
+                    className="text-[10px] px-1.5 h-5 flex items-center justify-center rounded border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600"
+                  >Fit</button>
+                  <button
+                    onClick={() => adjustScale(-0.05)}
+                    disabled={pdfScale <= 0.25}
+                    className="w-5 h-5 flex items-center justify-center rounded border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 disabled:opacity-30 text-xs"
+                  >−</button>
+                  <span className="font-mono text-[10px] text-gray-600 w-9 text-center">
+                    {typeof pdfScale === "number" ? `${Math.round(pdfScale * 100)}%` : "fit"}
+                  </span>
+                  <button
+                    onClick={() => adjustScale(0.05)}
+                    disabled={typeof pdfScale === "number" && pdfScale >= 5}
+                    className="w-5 h-5 flex items-center justify-center rounded border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 disabled:opacity-30 text-xs"
+                  >+</button>
+                </div>
+              </div>
+              <PdfAnnotator
+                ref={pdfRef}
+                paperId={id!}
+                pdfUrl={`${BASE}/papers/${id}/pdf`}
+                onHighlightsChange={setAnnotations}
+                scale={pdfScale}
+                initialPage={pdfInitialPage}
+                onScaleResolved={(s) => { resolvedScale.current = s; }}
+              />
+            </div>
           )}
           {leftTab === "pdf" && !paper?.drive_file_id && (
             <p className="text-xs text-gray-400 text-center pt-6">No PDF available.</p>
@@ -1470,40 +1551,98 @@ export default function PaperDetail() {
                       </div>
                     ))}
                   </div>
-                  <div className="flex gap-1 mt-1">
-                    <input
-                      type="text"
-                      value={newAuthorName}
-                      onChange={(e) => setNewAuthorName(e.target.value)}
-                      onKeyDown={async (e) => {
-                        if (e.key !== "Enter" || !newAuthorName.trim() || !id || addingAuthor) return;
-                        setAddingAuthor(true);
-                        try {
-                          const person = await addAuthorByName(id, newAuthorName.trim());
-                          setAuthors((prev) => prev.some((p) => p.id === person.id) ? prev : [...prev, person]);
-                          setNewAuthorName("");
-                        } finally {
-                          setAddingAuthor(false);
-                        }
-                      }}
-                      placeholder="Add author…"
-                      className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-300"
-                    />
-                    <button
-                      onClick={async () => {
-                        if (!newAuthorName.trim() || !id || addingAuthor) return;
-                        setAddingAuthor(true);
-                        try {
-                          const person = await addAuthorByName(id, newAuthorName.trim());
-                          setAuthors((prev) => prev.some((p) => p.id === person.id) ? prev : [...prev, person]);
-                          setNewAuthorName("");
-                        } finally {
-                          setAddingAuthor(false);
-                        }
-                      }}
-                      disabled={addingAuthor || !newAuthorName.trim()}
-                      className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-40 transition-colors"
-                    >+</button>
+                  <div className="relative mt-1">
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        value={newAuthorName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewAuthorName(val);
+                          if (!val.trim()) { setAuthorSuggestions([]); return; }
+                          setAuthorSuggestions(
+                            allPeople
+                              .filter((p) => p.name.toLowerCase().includes(val.toLowerCase()))
+                              .slice(0, 6)
+                          );
+                        }}
+                        onKeyDown={async (e) => {
+                          if (e.key === "Escape") { setAuthorSuggestions([]); return; }
+                          if (e.key !== "Enter" || !newAuthorName.trim() || !id || addingAuthor) return;
+                          setAddingAuthor(true);
+                          try {
+                            const person = await addAuthorByName(id, newAuthorName.trim());
+                            setAuthors((prev) => prev.some((p) => p.id === person.id) ? prev : [...prev, person]);
+                            setNewAuthorName("");
+                            setAuthorSuggestions([]);
+                          } finally { setAddingAuthor(false); }
+                        }}
+                        onBlur={() => setTimeout(() => setAuthorSuggestions([]), 150)}
+                        placeholder="Add author…"
+                        className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-300"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!newAuthorName.trim() || !id || addingAuthor) return;
+                          setAddingAuthor(true);
+                          try {
+                            const person = await addAuthorByName(id, newAuthorName.trim());
+                            setAuthors((prev) => prev.some((p) => p.id === person.id) ? prev : [...prev, person]);
+                            setNewAuthorName("");
+                            setAuthorSuggestions([]);
+                          } finally { setAddingAuthor(false); }
+                        }}
+                        disabled={addingAuthor || !newAuthorName.trim()}
+                        className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-40 transition-colors"
+                      >+</button>
+                    </div>
+                    {authorSuggestions.length > 0 && (
+                      <ul className="absolute z-20 top-full mt-0.5 left-0 right-0 bg-white border border-gray-200 rounded shadow-lg overflow-hidden text-xs">
+                        {authorSuggestions.map((s) => (
+                          <li key={s.id}>
+                            <button
+                              onMouseDown={async (e) => {
+                                e.preventDefault();
+                                if (!id) return;
+                                setAddingAuthor(true);
+                                try {
+                                  await apiFetch(`/papers/${id}/authors`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ person_id: s.id }),
+                                  });
+                                  setAuthors((prev) => prev.some((p) => p.id === s.id) ? prev : [...prev, s]);
+                                  setNewAuthorName("");
+                                  setAuthorSuggestions([]);
+                                } finally { setAddingAuthor(false); }
+                              }}
+                              className="w-full text-left px-2.5 py-1.5 hover:bg-violet-50 transition-colors"
+                            >
+                              <span className="font-medium text-gray-800">{s.name}</span>
+                              {s.affiliation && <span className="text-gray-400 ml-1.5">{s.affiliation}</span>}
+                            </button>
+                          </li>
+                        ))}
+                        <li className="border-t border-gray-100">
+                          <button
+                            onMouseDown={async (e) => {
+                              e.preventDefault();
+                              if (!newAuthorName.trim() || !id) return;
+                              setAddingAuthor(true);
+                              try {
+                                const person = await addAuthorByName(id, newAuthorName.trim());
+                                setAuthors((prev) => prev.some((p) => p.id === person.id) ? prev : [...prev, person]);
+                                setNewAuthorName("");
+                                setAuthorSuggestions([]);
+                              } finally { setAddingAuthor(false); }
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 hover:bg-gray-50 text-gray-400 transition-colors"
+                          >
+                            + Add "{newAuthorName}" as new person
+                          </button>
+                        </li>
+                      </ul>
+                    )}
                   </div>
                   <button
                     onClick={async () => {
@@ -2085,18 +2224,24 @@ export default function PaperDetail() {
           )}
         </div>
 
-        {/* Drag handle */}
+        {/* Drag handle with % indicator */}
         <div
           onMouseDown={startDrag}
-          className="w-1 shrink-0 cursor-col-resize bg-gray-200 hover:bg-violet-400 transition-colors active:bg-violet-500"
-        />
+          title="Drag to resize"
+          className="shrink-0 relative w-5 cursor-col-resize group select-none flex flex-col items-center justify-center"
+        >
+          <div className="w-px h-full bg-gray-200 group-hover:bg-violet-400 transition-colors" />
+          <span className="absolute text-[8px] text-gray-400 group-hover:text-violet-600 font-mono bg-white border border-gray-200 rounded px-0.5 leading-tight">
+            {Math.round(((window.innerWidth - rightWidth) / window.innerWidth) * 100)}%
+          </span>
+        </div>
 
         {/* RIGHT — metadata + notes/chat */}
         <div className="shrink-0 flex flex-col bg-white overflow-hidden" style={{ width: rightWidth }}>
 
-          {/* Tabs: Notes / Chat */}
+          {/* Tabs: Notes / Chat / Highlights */}
           <div className="flex border-b border-gray-100 shrink-0">
-            {(["notes", "chat"] as RightTab[]).map((t) => (
+            {(["notes", "chat", "highlights"] as RightTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -2106,7 +2251,9 @@ export default function PaperDetail() {
                     : "text-gray-500 hover:text-gray-700"
                   }`}
               >
-                {t}
+                {t === "highlights"
+                  ? `Highlights${annotations.length > 0 ? ` (${annotations.length})` : ""}`
+                  : t}
               </button>
             ))}
           </div>
@@ -2125,7 +2272,53 @@ export default function PaperDetail() {
                 compact
               />
             )}
-            {tab === "chat"  && id && <ChatPanel paperId={id} />}
+            {tab === "chat" && id && <ChatPanel paperId={id} />}
+            {tab === "highlights" && (
+              <div className="h-full overflow-y-auto">
+                {annotations.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center mt-8">
+                    No highlights yet.<br />Select text in the PDF to add one.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {[...annotations]
+                      .sort((a, b) => a.page_number - b.page_number)
+                      .map((ann) => (
+                        <button
+                          key={ann.id}
+                          onClick={() => {
+                            if (leftTab === "pdf") {
+                              // Viewer already mounted — jump via ref (remounts at target page)
+                              pdfRef.current?.jumpToPage(ann.page_number);
+                            } else {
+                              // Viewer about to mount — set initialPage so it opens at correct page
+                              setPdfInitialPage(ann.page_number);
+                              setLeftTab("pdf");
+                            }
+                          }}
+                          className="w-full flex items-start gap-2.5 rounded-lg border border-gray-100 bg-white px-3 py-2.5 text-left hover:border-violet-200 hover:bg-violet-50 transition-colors group"
+                        >
+                          <span
+                            className="w-3 h-3 rounded-full flex-shrink-0 mt-0.5 ring-1 ring-black/10"
+                            style={{ background: COLOR_SWATCH[ann.color as AnnotationColor] ?? "#f5e800" }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs text-gray-800 line-clamp-2 group-hover:text-violet-700 leading-snug">
+                              {ann.highlighted_text || "(no text)"}
+                            </p>
+                            {ann.note && (
+                              <p className="text-[10px] text-gray-400 mt-1 line-clamp-2 italic">{ann.note}</p>
+                            )}
+                            <p className="text-[10px] text-gray-400 mt-1">
+                              {COLOR_LABELS[ann.color as AnnotationColor] ?? ann.color} · p.{ann.page_number + 1}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

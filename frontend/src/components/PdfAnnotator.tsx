@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Viewer, Worker } from "@react-pdf-viewer/core";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Viewer, Worker, SpecialZoomLevel } from "@react-pdf-viewer/core";
 import { highlightPlugin, Trigger } from "@react-pdf-viewer/highlight";
 import type {
   HighlightArea,
@@ -42,6 +42,14 @@ const COLOR_SWATCH: Record<AnnotationColor, string> = {
 interface Props {
   paperId: string;
   pdfUrl: string;
+  /** Called whenever highlights are created, updated, or deleted */
+  onHighlightsChange?: (highlights: Annotation[]) => void;
+  /** Zoom scale (0–2 as a fraction, e.g. 1 = 100%). Changing this remounts the viewer. */
+  scale?: number | SpecialZoomLevel;
+  /** Called with the resolved numeric scale after the viewer applies a SpecialZoomLevel */
+  onScaleResolved?: (scale: number) => void;
+  /** Initial page to show (0-indexed). Used when the component first mounts. */
+  initialPage?: number;
 }
 
 interface TooltipPos {
@@ -49,15 +57,41 @@ interface TooltipPos {
   y: number;
 }
 
+export interface PdfAnnotatorHandle {
+  jumpToPage: (pageIndex: number) => void;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function PdfAnnotator({ paperId, pdfUrl }: Props) {
+const PdfAnnotator = forwardRef<PdfAnnotatorHandle, Props>(function PdfAnnotator({ paperId, pdfUrl, onHighlightsChange, onScaleResolved, scale = SpecialZoomLevel.PageWidth, initialPage = 0 }, ref) {
   const [highlights, setHighlights] = useState<Annotation[]>([]);
   const [activeAnnotation, setActiveAnnotation] = useState<Annotation | null>(null);
   const [tooltipPos, setTooltipPos] = useState<TooltipPos | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Track the current page so we can restore position on zoom remounts
+  const [currentPage, setCurrentPage] = useState(initialPage);
+  // The page to pass as initialPage on the next Viewer mount
+  const [viewerInitialPage, setViewerInitialPage] = useState(initialPage);
+
+  // Remount viewer when scale changes, preserving the current page position
+  const [viewerKey, setViewerKey] = useState(0);
+  const prevScale = useRef(scale);
+  if (prevScale.current !== scale) {
+    prevScale.current = scale;
+    setViewerInitialPage(currentPage);
+    setViewerKey((k) => k + 1);
+  }
+
+  useImperativeHandle(ref, () => ({
+    jumpToPage(pageIndex: number) {
+      setViewerInitialPage(pageIndex);
+      setViewerKey((k) => k + 1);
+    },
+  }));
 
   // Load annotations on mount
   useEffect(() => {
@@ -232,13 +266,44 @@ export default function PdfAnnotator({ paperId, pdfUrl }: Props) {
     }
   }
 
+  // Notify parent when highlights change
+  useEffect(() => {
+    onHighlightsChange?.(highlights);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlights]);
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex-1 w-full relative overflow-auto">
-      <Worker workerUrl="/pdf.worker.min.js">
-        <Viewer fileUrl={pdfUrl} plugins={[plugin]} />
-      </Worker>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div ref={containerRef} className="flex-1 relative overflow-auto">
+        <Worker workerUrl="/pdf.worker.min.js">
+          <Viewer
+            key={viewerKey}
+            fileUrl={pdfUrl}
+            defaultScale={scale}
+            initialPage={viewerInitialPage}
+            plugins={[plugin]}
+            onPageChange={(e) => setCurrentPage(e.currentPage)}
+            onDocumentLoad={(e) => {
+              // Only resolve the fit scale when the scale is a SpecialZoomLevel.
+              // For numeric zoom steps the viewer remounts too, but we must NOT
+              // overwrite resolvedScale.current back to the fit value.
+              if (typeof scale !== "number") {
+                e.doc.getPage(0).then((page) => {
+                  const pdfPageWidth = page.getViewport({ scale: 1 }).width;
+                  requestAnimationFrame(() => {
+                    const scroller = containerRef.current?.querySelector(".rpv-core__inner-pages") as HTMLElement | null;
+                    const w = scroller?.clientWidth ?? containerRef.current?.clientWidth ?? 0;
+                    if (w > 0 && pdfPageWidth > 0) {
+                      onScaleResolved?.(w / pdfPageWidth);
+                    }
+                  });
+                });
+              }
+            }}
+          />
+        </Worker>
 
       {/* Annotation tooltip */}
       {activeAnnotation && tooltipPos && (
@@ -310,6 +375,9 @@ export default function PdfAnnotator({ paperId, pdfUrl }: Props) {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
-}
+});
+
+export default PdfAnnotator;
