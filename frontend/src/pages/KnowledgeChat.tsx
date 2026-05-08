@@ -9,6 +9,7 @@ import type {
   Conversation, KnowledgeMessage, ContextPaper, TokenTotals, SseEvent,
   Tag, Topic, Project, Paper,
 } from "../types";
+import { useAppSettings } from "../contexts/SettingsContext";
 
 const CONTEXT_LIMIT = 200_000;
 type Model = "claude" | "claude-work" | "ollama";
@@ -139,11 +140,13 @@ type DisplayMessage =
   | { kind: "chat"; role: "user" | "assistant" | "system"; content: string; streaming?: boolean };
 
 export default function KnowledgeChat() {
+  const { settings } = useAppSettings();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
-  const [model, setModel] = useState<Model>("claude");
+  const [model, setModel] = useState<Model>(settings.knowledgeChatDefaultModel);
+  const [useWeb, setUseWeb] = useState<boolean>(settings.knowledgeChatUseWeb);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");  // web search status
@@ -159,6 +162,7 @@ export default function KnowledgeChat() {
   const [allProjects, setAllProjects] = useState<string[]>([]);
   const [allPapers, setAllPapers] = useState<string[]>([]);
   const [allUsers, setAllUsers] = useState<string[]>([]);
+  const [allPeople, setAllPeople] = useState<string[]>([]);
   const [mentionDropdown, setMentionDropdown] = useState<MentionOption[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -171,6 +175,10 @@ export default function KnowledgeChat() {
     apiFetch<{ id: string; name: string }[]>("/projects").then((p) => setAllProjects(p.map((x) => x.name))).catch(() => {});
     apiFetch<Paper[]>("/papers").then((p) => setAllPapers(p.map((x) => x.title))).catch(() => {});
     apiFetch<{ name: string }[]>("/users").then((u) => setAllUsers(u.map((x) => x.name))).catch(() => {});
+    // People: load names + include "known-personally" as a special shorthand
+    apiFetch<{ name: string }[]>("/people").then((ps) => {
+      setAllPeople(["known-personally", ...ps.map((x) => x.name)]);
+    }).catch(() => {});
     listConversations().then(setConversations).catch(() => {});
   }, []);
 
@@ -183,13 +191,17 @@ export default function KnowledgeChat() {
     setInput(val);
     const cursor = textareaRef.current?.selectionStart ?? val.length;
     const before = val.slice(0, cursor);
-    const match = before.match(/@(project|tag|topic|paper|user)?:?(\w*)$/i);
+    const match = before.match(/@(project|tag|topic|paper|user|person)?:?([\w-]*)$/i);
     if (!match) { setMentionDropdown([]); return; }
 
     const [, type, partial] = match;
     const p = partial.toLowerCase();
 
     const opts: MentionOption[] = [];
+    if (!type || type === "person") {
+      allPeople.filter((n) => n.toLowerCase().includes(p)).slice(0, 4).forEach((n) =>
+        opts.push({ type: "person", value: n, label: n === "known-personally" ? "known-personally (people you know)" : n }));
+    }
     if (!type || type === "user") {
       allUsers.filter((n) => n.toLowerCase().includes(p)).slice(0, 4).forEach((n) =>
         opts.push({ type: "user", value: n, label: n }));
@@ -301,6 +313,7 @@ export default function KnowledgeChat() {
         history,
         model,
         conversation_id: activeConvId ?? undefined,
+        use_web: useWeb,
       });
 
       for await (const event of stream) {
@@ -453,6 +466,19 @@ export default function KnowledgeChat() {
                 </p>
               )}
             </div>
+
+            {/* Web search toggle */}
+            <button
+              onClick={() => setUseWeb((v) => !v)}
+              title={useWeb ? "Web search on — click to disable" : "Web search off — click to enable"}
+              className={`text-xs px-2 py-1 rounded border transition-colors ${
+                useWeb
+                  ? "border-blue-600 text-blue-400 bg-blue-950 hover:bg-blue-900"
+                  : "border-gray-700 text-gray-600 hover:bg-gray-800"
+              }`}
+            >
+              Web
+            </button>
 
             {/* Model selector */}
             <div className="flex rounded-md border border-gray-700 overflow-hidden text-xs">

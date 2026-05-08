@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   suggestTags, createTag, listProjects, addPaperToProject,
   apiFetch, getOrCreatePerson, linkPersonInvolves,
@@ -277,6 +277,24 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
   const [role, setRole] = useState<string>(INVOLVE_ROLES[0]);
   const [adding, setAdding] = useState(false);
   const [linked, setLinked] = useState<{ name: string; role: string }[]>([]);
+  const [allPeople, setAllPeople] = useState<{ id: string; name: string; affiliation?: string }[]>([]);
+  const [suggestions, setSuggestions] = useState<{ id: string; name: string; affiliation?: string }[]>([]);
+
+  useEffect(() => {
+    apiFetch<{ id: string; name: string; affiliation?: string }[]>("/people")
+      .then(setAllPeople).catch(() => {});
+  }, []);
+
+  const linkPerson = async (personId: string, personName: string) => {
+    setAdding(true);
+    try {
+      await linkPersonInvolves(paper.id, personId, role);
+      setLinked((prev) => [...prev, { name: personName, role }]);
+      setName("");
+      setSuggestions([]);
+    } catch { /* ignore */ }
+    finally { setAdding(false); }
+  };
 
   const handleAdd = async () => {
     const n = name.trim();
@@ -287,6 +305,7 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
       await linkPersonInvolves(paper.id, person.id, role);
       setLinked((prev) => [...prev, { name: n, role }]);
       setName("");
+      setSuggestions([]);
     } catch { /* ignore */ }
     finally { setAdding(false); }
   };
@@ -318,13 +337,50 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
         )}
 
         <div className="flex gap-2">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            placeholder="Person's name…"
-            className="flex-1 border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
+          <div className="relative flex-1">
+            <input
+              value={name}
+              onChange={(e) => {
+                const val = e.target.value;
+                setName(val);
+                setSuggestions(
+                  val.trim()
+                    ? allPeople.filter((p) => p.name.toLowerCase().includes(val.toLowerCase())).slice(0, 6)
+                    : []
+                );
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") { setSuggestions([]); return; }
+                if (e.key === "Enter") handleAdd();
+              }}
+              onBlur={() => setTimeout(() => setSuggestions([]), 150)}
+              placeholder="Person's name…"
+              className="w-full border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+            {suggestions.length > 0 && (
+              <ul className="absolute z-20 top-full mt-0.5 left-0 right-0 bg-white border border-gray-200 rounded shadow-lg overflow-hidden text-xs">
+                {suggestions.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); linkPerson(s.id, s.name); }}
+                      className="w-full text-left px-3 py-2 hover:bg-violet-50 transition-colors"
+                    >
+                      <span className="font-medium text-gray-800">{s.name}</span>
+                      {s.affiliation && <span className="text-gray-400 ml-1.5">{s.affiliation}</span>}
+                    </button>
+                  </li>
+                ))}
+                <li className="border-t border-gray-100">
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); handleAdd(); }}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-400 transition-colors"
+                  >
+                    + Add "{name}" as new person
+                  </button>
+                </li>
+              </ul>
+            )}
+          </div>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value)}

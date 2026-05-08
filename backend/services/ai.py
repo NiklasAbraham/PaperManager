@@ -291,6 +291,35 @@ CYPHER_TOOL: dict[str, Any] = {
     },
 }
 
+# Tool definition for semantic vector search
+SEMANTIC_SEARCH_TOOL: dict[str, Any] = {
+    "name": "semantic_search",
+    "description": (
+        "Find papers by semantic similarity to a free-text query. "
+        "Use this when keyword or tag matching would miss papers that express the same "
+        "concept with different terminology (e.g. 'attention mechanism' vs 'scaled dot-product similarity'). "
+        "Returns papers ranked by cosine similarity to the embedded query."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Free-text query to embed and match against paper embeddings.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Number of results to return, between 1 and 20. Defaults to 10.",
+            },
+            "description": {
+                "type": "string",
+                "description": "Short human-readable label for the UI reasoning step.",
+            },
+        },
+        "required": ["query", "description"],
+    },
+}
+
 # Regex to block write operations
 _CYPHER_WRITE_RE = re.compile(
     r"\b(CREATE|MERGE|SET\s+\w|DELETE|DETACH\s+DELETE|REMOVE|DROP)\b",
@@ -407,14 +436,25 @@ def knowledge_chat_stream(
     else:
         client = _personal_client()
 
-    claude_model = "claude-sonnet-4-6"
-    tools = [CYPHER_TOOL] if driver is not None else []
+    # ── Model routing: use Opus when context is large ────────────────────────
+    estimated_ctx = (
+        estimate_tokens(system)
+        + sum(estimate_tokens(m.get("content", "")) for m in history)
+        + estimate_tokens(question)
+    )
+    if model == "claude" and estimated_ctx > 40_000:
+        claude_model = "claude-opus-4-6"
+        log.info("knowledge_chat: routing to claude-opus-4-6 (estimated ctx=%d tokens)", estimated_ctx)
+    else:
+        claude_model = "claude-sonnet-4-6"
+
+    tools = [CYPHER_TOOL, SEMANTIC_SEARCH_TOOL] if driver is not None else []
 
     # ── Agentic tool-use loop (non-streaming) ─────────────────────────────────
-    # Phase 1: let Claude call run_cypher as many times as it needs.
-    # Each tool call is executed, the result is fed back, and a step event is
-    # yielded so the frontend can show the reasoning trace.  The loop exits
-    # when Claude returns stop_reason != "tool_use".
+    # Phase 1: let Claude call run_cypher / semantic_search as many times as
+    # it needs.  Each tool call is executed, the result is fed back, and a step
+    # event is yielded so the frontend can show the reasoning trace.  The loop
+    # exits when Claude returns stop_reason != "tool_use".
     messages: list[dict[str, Any]] = list(history)
     messages.append({"role": "user", "content": question})
 
@@ -431,8 +471,6 @@ def knowledge_chat_stream(
 
         if response.stop_reason != "tool_use":
             # No more tool calls — Claude is ready to write its final answer.
-            # We already have the complete text in `response`; chunk it to
-            # give the frontend the familiar token-by-token feel.
             if not had_tool_calls:
                 # No tool calls at all → stream for better responsiveness
                 with client.messages.stream(
@@ -444,8 +482,7 @@ def knowledge_chat_stream(
                     for text in stream.text_stream:
                         yield {"type": "token", "text": text}
             else:
-                # Tool calls happened → response is the post-tool synthesis.
-                # Chunk the already-computed text at a natural cadence.
+                # Tool calls happened → chunk the already-computed final text
                 CHUNK = 40
                 final_text = ""
                 for block in response.content:
@@ -461,26 +498,69 @@ def knowledge_chat_stream(
         tool_results: list[dict[str, Any]] = []
 
         for block in response.content:
-            if block.type != "tool_use" or block.name != "run_cypher":
+            if block.type != "tool_use":
                 continue
 
-            query: str = block.input.get("query", "")
-            desc: str = block.input.get("description", "Running Cypher query")
+            desc: str = block.input.get("description", "Running tool")
 
-            rows = _run_cypher_safe(driver, query) if driver else [{"error": "No DB driver available"}]
+            if block.name == "run_cypher":
+                query: str = block.input.get("query", "")
+                rows = _run_cypher_safe(driver, query) if driver else [{"error": "No DB driver available"}]
+                yield {
+                    "type": "step",
+                    "description": desc,
+                    "cypher": query,
+                    "count": len(rows) if not (len(rows) == 1 and "error" in rows[0]) else None,
+                }
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(rows),
+                })
 
-            yield {
-                "type": "step",
-                "description": desc,
-                "cypher": query,
-                "count": len(rows) if not (len(rows) == 1 and "error" in rows[0]) else None,
-            }
+            elif block.name == "semantic_search":
+                sem_query: str = block.input.get("query", "")
+                limit: int = min(int(block.input.get("limit", 10)), 20)
+                if driver and sem_query:
+                    try:
+                        from services.embeddings import embed_text as _embed_text
+                        emb = _embed_text(sem_query)
+                        with driver.session() as _sess:
+                            _result = _sess.run(
+                                "CALL db.index.vector.queryNodes('paper_embeddings', $k, $emb) "
+                                "YIELD node AS p, score "
+                                "WHERE score > 0.60 "
+                                "RETURN p.id AS id, p.title AS title, p.year AS year, "
+                                "p.abstract AS abstract, p.summary AS summary, score "
+                                "ORDER BY score DESC",
+                                k=limit,
+                                emb=emb,
+                            )
+                            sem_rows = [
+                                {k: _safe_value(v) for k, v in r.items() if k != "raw_text"}
+                                for r in _result
+                            ][:limit]
+                    except Exception as exc:
+                        log.warning("semantic_search tool failed | %s", exc)
+                        sem_rows = [{"error": str(exc)}]
+                else:
+                    sem_rows = [{"error": "Vector search unavailable"}]
 
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": json.dumps(rows),
-            })
+                yield {
+                    "type": "step",
+                    "description": desc,
+                    "cypher": f"[vector search] {sem_query}",
+                    "count": len(sem_rows) if not (len(sem_rows) == 1 and "error" in sem_rows[0]) else None,
+                }
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(sem_rows),
+                })
+
+        if not tool_results:
+            # No recognised tools in this response — break to avoid infinite loop
+            break
 
         # Feed tool results back into the conversation and loop
         messages = list(messages)

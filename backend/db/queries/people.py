@@ -40,15 +40,47 @@ def get_person(driver: Driver, person_id: str) -> dict | None:
         return dict(record["p"]) if record else None
 
 
-def list_people(driver: Driver) -> list[dict]:
+def list_people(driver: Driver, tag: str | None = None) -> list[dict]:
+    with driver.session() as session:
+        if tag:
+            result = session.run(
+                """
+                MATCH (p:Person)-[:TAGGED]->(:Tag {name: $tag})
+                OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
+                RETURN p, count(DISTINCT paper) AS paper_count
+                ORDER BY p.name
+                """,
+                tag=tag,
+            )
+        else:
+            result = session.run(
+                """
+                MATCH (p:Person)
+                OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
+                RETURN p, count(DISTINCT paper) AS paper_count
+                ORDER BY p.name
+                """
+            )
+        rows = []
+        for r in result:
+            d = dict(r["p"])
+            d["paper_count"] = r["paper_count"]
+            rows.append(d)
+        return rows
+
+
+def list_people_without_tag(driver: Driver, tag: str) -> list[dict]:
+    """Return people who do NOT have the given tag."""
     with driver.session() as session:
         result = session.run(
             """
             MATCH (p:Person)
+            WHERE NOT (p)-[:TAGGED]->(:Tag {name: $tag})
             OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
             RETURN p, count(DISTINCT paper) AS paper_count
             ORDER BY p.name
-            """
+            """,
+            tag=tag,
         )
         rows = []
         for r in result:

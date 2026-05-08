@@ -1,7 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from db.connection import get_driver
 from db.queries.people import (
-    create_person, get_person, list_people, delete_person,
+    create_person, get_person, list_people, list_people_without_tag, delete_person,
     link_author, link_involves, link_specializes,
     unlink_author, unlink_involves,
     get_papers_by_person, get_specialties, get_involves_for_paper, get_authors_for_paper,
@@ -11,23 +11,24 @@ from db.queries.tags import tag_person, untag_person, get_tags_for_person, get_o
 from services.note_parser import parse_mentions
 from services.person_enrichment import enrich_person_by_id, enrich_all_people, enrich_person_from_papers_ollama
 from models.schemas import (
-    PersonCreate, PersonOut, AuthorLink, InvolvesLink, SpecialtyLink,
+    PersonCreate, PersonUpdate, PersonOut, AuthorLink, InvolvesLink, SpecialtyLink,
     NoteBody, NoteOut, TagBody, PersonEnrichOut,
 )
 from db.queries.topics import get_or_create_topic
-
-PersonUpdate = PersonCreate
 
 router = APIRouter(tags=["people"])
 people_router = APIRouter(prefix="/people", tags=["people"])
 papers_router = APIRouter(prefix="/papers", tags=["people"])
 
 DEFAULT_PEOPLE_TAGS = [
+    "known-personally",
     "collaborator", "recruiter", "advisor", "mentor", "investor",
     "tech-lead", "co-founder", "hiring-manager", "contact",
     "met-at-conference", "follow-up", "strong-reference", "potential-hire",
     "phd-student", "postdoc", "professor", "industry", "academia",
 ]
+
+KNOWN_PERSONALLY_TAG = "known-personally"
 
 
 def seed_people_tags(driver):
@@ -39,7 +40,11 @@ def seed_people_tags(driver):
 
 @people_router.post("", response_model=PersonOut, status_code=status.HTTP_201_CREATED)
 def create(body: PersonCreate):
-    return create_person(get_driver(), body.model_dump())
+    driver = get_driver()
+    person = create_person(driver, body.model_dump())
+    # Auto-tag manually added people as "known-personally"
+    tag_person(driver, person["id"], KNOWN_PERSONALLY_TAG)
+    return person
 
 
 @people_router.post("/get-or-create", response_model=PersonOut)
@@ -50,8 +55,13 @@ def get_or_create(body: PersonCreate):
 
 
 @people_router.get("", response_model=list[PersonOut])
-def list_all():
-    return list_people(get_driver())
+def list_all(tag: str | None = Query(None), exclude_tag: str | None = Query(None)):
+    driver = get_driver()
+    if tag:
+        return list_people(driver, tag=tag)
+    if exclude_tag:
+        return list_people_without_tag(driver, tag=exclude_tag)
+    return list_people(driver)
 
 
 @people_router.get("/{person_id}")
@@ -157,15 +167,22 @@ def enrich_from_papers(person_id: str):
 
 @people_router.post("/enrich-all")
 def enrich_all(background_tasks: BackgroundTasks):
-    """Kick off background enrichment for all people with ORCID url or S2 author id."""
-    with get_driver().session() as session:
+    """Kick off background enrichment for people who have little/no profile data."""
+    from services.person_enrichment import _is_empty_profile
+    from db.queries.people import get_person as _get_person
+    driver = get_driver()
+    with driver.session() as session:
         result = session.run(
-            "MATCH (p:Person) WHERE p.orcid_url IS NOT NULL OR p.s2_author_id IS NOT NULL "
-            "RETURN count(p) AS total"
+            "MATCH (p:Person) WHERE ()-[:AUTHORED_BY|INVOLVES]->(p) RETURN p.id AS id"
         )
-        total = result.single()["total"]
-    background_tasks.add_task(enrich_all_people, get_driver())
-    return {"status": "started", "total_people": total}
+        all_ids = [r["id"] for r in result]
+    # Count only those who actually need enrichment
+    needs_enrich = sum(
+        1 for pid in all_ids
+        if (p := _get_person(driver, pid)) and _is_empty_profile(p)
+    )
+    background_tasks.add_task(enrich_all_people, driver)
+    return {"status": "started", "total_people": needs_enrich}
 
 
 # ── Paper ↔ Person relationships ──────────────────────────────────────────────

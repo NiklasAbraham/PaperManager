@@ -3,6 +3,7 @@ import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 import { parsePdf, previewUrl, uploadPdf, deletePaper, checkDuplicate } from "../api/client";
 import UploadConfirmModal from "./UploadConfirmModal";
+import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut } from "../types";
 
 interface Props {
@@ -27,6 +28,7 @@ type QueuedPdf = {
 
 export default function PaperDrop({ onUploaded, debug }: Props) {
   const navigate = useNavigate();
+  const { settings } = useAppSettings();
   const [open, setOpen]   = useState(false);
   const [tab, setTab]     = useState<Tab>("pdf");
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +90,12 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
       }
     } catch { /* best-effort — proceed to upload if check fails */ }
 
-    const uploadPromise = uploadPdf(item.file, meta.title || "Untitled");
+    const uploadPromise = uploadPdf(
+      item.file, meta.title || "Untitled",
+      undefined, undefined, undefined, undefined, undefined,
+      settings.autoExtractClaims ? settings.claimsModel : "",
+      settings.generateEmbeddingsOnUpload,
+    );
     updateItem(item.id, { uploadPromise });
     uploadPromise
       .then((result) => updateItem(item.id, { status: "ready", uploadResult: result, uploadPromise: undefined }))

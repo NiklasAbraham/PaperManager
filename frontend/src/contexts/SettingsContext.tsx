@@ -36,6 +36,19 @@ export interface AppSettings {
   graphShowNodeLabels: boolean;
   graphShowEdgeLabels: boolean;
 
+  // Knowledge Chat
+  knowledgeChatDefaultModel: "claude" | "claude-work" | "ollama";
+  knowledgeChatUseWeb: boolean;
+  knowledgeChatOpusThreshold: number; // token count above which Opus is used instead of Sonnet
+
+  // Inference — upload-time enrichment
+  autoExtractClaims: boolean;
+  claimsModel: string;
+  generateEmbeddingsOnUpload: boolean;
+
+  // Inference — compaction
+  compactionKeepLastN: number; // how many messages to keep verbatim in sliding-window compact
+
   // Debug
   debugMode: boolean;
 }
@@ -54,6 +67,13 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   graphNodeSize: 16,
   graphShowNodeLabels: true,
   graphShowEdgeLabels: true,
+  knowledgeChatDefaultModel: "claude",
+  knowledgeChatUseWeb: true,
+  knowledgeChatOpusThreshold: 40000,
+  autoExtractClaims: true,
+  claimsModel: "claude-haiku-4-5-20251001",
+  generateEmbeddingsOnUpload: true,
+  compactionKeepLastN: 6,
   debugMode: false,
 };
 

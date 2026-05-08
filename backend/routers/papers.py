@@ -71,7 +71,8 @@ async def upload(
     caption_method: Optional[str] = Form("ollama"),
     summary_instructions: Optional[str] = Form(None),
     document_type: Optional[str] = Form(None),
-    claims_model: Optional[str] = Form(None),
+    claims_model: Optional[str] = Form("claude-haiku-4-5-20251001"),
+    skip_embedding: bool = Form(False),
     debug: bool = Form(False),
     x_user_name: Optional[str] = Header(None),
 ):
@@ -109,6 +110,19 @@ async def upload(
         log.info("Summary generated | title=%.60s", meta.get("title"))
     except Exception as exc:
         log.warning("Summary failed (non-fatal) | %s", exc)
+
+    # Step 5b: Generate vector embedding (best-effort — don't fail if Ollama is down)
+    if not skip_embedding:
+        try:
+            from services.embeddings import embed_paper as _embed_paper
+            meta["embedding"] = _embed_paper(
+                title=meta.get("title", ""),
+                abstract=meta.get("abstract", "") or "",
+                summary=summary or "",
+            )
+            log.info("Embedding generated | title=%.60s", meta.get("title"))
+        except Exception as exc:
+            log.warning("Embedding failed (non-fatal) | %s", exc)
 
     # Step 6: Save paper to Neo4j — deduplicate by DOI then by title
     driver = get_driver()

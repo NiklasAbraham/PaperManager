@@ -118,19 +118,14 @@ def get_messages(driver: Driver, conv_id: str) -> list[dict]:
 
 
 def compact_conversation(driver: Driver, conv_id: str, summary_content: str) -> dict:
-    """Replace all messages with a single system summary message."""
+    """Replace all messages with a single system summary message (legacy path)."""
     now = _now()
     msg_id = str(uuid.uuid4())
     with driver.session() as session:
-        # Delete all existing messages
         session.run(
-            """
-            MATCH (c:Conversation {id: $id})-[:HAS_MESSAGE]->(m:Message)
-            DETACH DELETE m
-            """,
+            "MATCH (c:Conversation {id: $id})-[:HAS_MESSAGE]->(m:Message) DETACH DELETE m",
             id=conv_id,
         )
-        # Create compacted summary message
         result = session.run(
             """
             MATCH (c:Conversation {id: $conv_id})
@@ -151,6 +146,67 @@ def compact_conversation(driver: Driver, conv_id: str, summary_content: str) -> 
         msg = dict(result.single()["m"])
         msg["paper_refs"] = []
         return msg
+
+
+def compact_conversation_sliding_window(
+    driver: Driver,
+    conv_id: str,
+    working_memory_json: str,
+    prose_summary: str,
+    keep_last_n: int = 6,
+) -> dict:
+    """Sliding-window compaction: keep the last *keep_last_n* messages verbatim and
+    replace all older messages with a single system message containing a structured
+    JSON working memory block followed by a prose summary.
+
+    This preserves specific paper titles, numbers, and claims discussed earlier in
+    the conversation, which a pure prose summarisation would elide.
+    """
+    now = _now()
+    all_msgs = get_messages(driver, conv_id)
+    if not all_msgs:
+        return {}
+
+    # Messages to delete: everything except the last keep_last_n
+    to_delete = all_msgs[:-keep_last_n] if len(all_msgs) > keep_last_n else []
+
+    system_content = (
+        f"## Working memory (structured)\n\n```json\n{working_memory_json}\n```\n\n"
+        f"## Summary of earlier conversation\n\n{prose_summary}"
+    )
+    system_id = str(uuid.uuid4())
+
+    with driver.session() as session:
+        # Delete old messages
+        for msg in to_delete:
+            session.run(
+                "MATCH (m:Message {id: $id}) DETACH DELETE m",
+                id=msg["id"],
+            )
+        # Insert the system compaction message at the head of the conversation
+        session.run(
+            """
+            MATCH (c:Conversation {id: $conv_id})
+            CREATE (m:Message {
+                id: $msg_id, role: 'system',
+                content: $content, tokens_used: $tokens,
+                created_at: $now
+            })
+            CREATE (c)-[:HAS_MESSAGE]->(m)
+            SET c.compacted = true, c.updated_at = $now
+            """,
+            conv_id=conv_id, msg_id=system_id,
+            content=system_content,
+            tokens=len(system_content) // 4,
+            now=now,
+        )
+
+    # Return the new system message
+    result_msg = {
+        "id": system_id, "role": "system",
+        "content": system_content, "paper_refs": [],
+    }
+    return result_msg
 
 
 def delete_conversation(driver: Driver, conv_id: str) -> None:

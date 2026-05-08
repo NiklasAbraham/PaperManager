@@ -13,6 +13,10 @@ import NoteEditor from "../components/NoteEditor";
 
 const TAG_GROUPS = [
   {
+    question: "Do you know this person personally?",
+    tags: ["known-personally"],
+  },
+  {
     question: "Where did you meet?",
     tags: ["met-at-conference", "colleague", "collaborator", "contact"],
   },
@@ -161,6 +165,8 @@ function relKey(link: PaperLink): RoleKey {
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
+type PeopleFilter = "all" | "known" | "authors";
+
 export default function People() {
   const [people, setPeople]       = useState<PersonSummary[]>([]);
   const [selected, setSelected]   = useState<PersonDetail | null>(null);
@@ -171,12 +177,21 @@ export default function People() {
   const [saving, setSaving]       = useState(false);
   const [enrichingAll, setEnrichingAll] = useState(false);
   const [enrichAllMsg, setEnrichAllMsg] = useState("");
+  const [filter, setFilter]       = useState<PeopleFilter>("all");
+  const [search, setSearch]       = useState("");
 
   const [searchParams] = useSearchParams();
 
+  const fetchPeople = async (f: PeopleFilter = filter) => {
+    let url = "/people";
+    if (f === "known") url = "/people?tag=known-personally";
+    else if (f === "authors") url = "/people?exclude_tag=known-personally";
+    return apiFetch<PersonSummary[]>(url);
+  };
+
   useEffect(() => {
     const targetId = searchParams.get("id");
-    apiFetch<PersonSummary[]>("/people").then((list) => {
+    fetchPeople("all").then((list) => {
       setPeople(list);
       if (targetId) {
         const target = list.find((p) => p.id === targetId);
@@ -184,6 +199,10 @@ export default function People() {
       }
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetchPeople(filter).then(setPeople).catch(() => {});
+  }, [filter]);
 
   const selectPerson = async (p: PersonSummary) => {
     setLoading(true);
@@ -219,7 +238,7 @@ export default function People() {
     if (!selected) return;
     const [detail, list] = await Promise.all([
       apiFetch<PersonDetail>(`/people/${selected.id}`),
-      apiFetch<PersonSummary[]>("/people"),
+      fetchPeople(),
     ]);
     setSelected(detail);
     setPeople(list);
@@ -264,6 +283,34 @@ export default function People() {
           </div>
         </div>
 
+        {/* Search */}
+        <div className="px-3 py-2 border-b border-gray-100">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search people…"
+            className="w-full text-xs border border-gray-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+          />
+        </div>
+
+        {/* Filter toggle */}
+        <div className="px-3 py-2 border-b border-gray-100 flex gap-1">
+          {(["all", "known", "authors"] as PeopleFilter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`flex-1 text-xs py-1 rounded-md font-medium transition-colors ${
+                filter === f
+                  ? "bg-violet-600 text-white"
+                  : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              {f === "all" ? "All" : f === "known" ? "Known" : "Authors"}
+            </button>
+          ))}
+        </div>
+
         {enrichAllMsg && (
           <div className="px-4 py-2 text-xs text-violet-700 bg-violet-50 border-b border-violet-100">
             {enrichAllMsg}
@@ -305,7 +352,7 @@ export default function People() {
           </p>
         ) : (
           <ul className="divide-y divide-gray-50">
-            {people.map((p) => (
+            {people.filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.affiliation?.toLowerCase().includes(search.toLowerCase())).map((p) => (
               <li key={p.id}>
                 <button
                   onClick={() => selectPerson(p)}
@@ -313,7 +360,9 @@ export default function People() {
                     selected?.id === p.id ? "bg-violet-50 border-l-2 border-violet-600" : ""
                   }`}
                 >
-                  <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                  </div>
                   {p.affiliation && (
                     <p className="text-xs text-gray-400 truncate">{p.affiliation}</p>
                   )}

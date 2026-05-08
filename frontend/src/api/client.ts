@@ -42,6 +42,8 @@ export async function uploadPdf(
   summaryInstructions?: string,
   debug?: boolean,
   documentType?: string,
+  claimsModel?: string,
+  generateEmbedding?: boolean,
 ): Promise<T_IngestOut> {
   const form = new FormData();
   form.append("file", file);
@@ -51,6 +53,9 @@ export async function uploadPdf(
   if (summaryInstructions) form.append("summary_instructions", summaryInstructions);
   if (debug) form.append("debug", "true");
   if (documentType) form.append("document_type", documentType);
+  // Pass empty string to skip claims extraction; omit to use backend default
+  if (claimsModel !== undefined) form.append("claims_model", claimsModel);
+  if (generateEmbedding === false) form.append("skip_embedding", "true");
   const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form, headers: userHeader() });
   if (!res.ok) {
     const detail = await res.text();
@@ -501,6 +506,7 @@ export async function* streamKnowledgeChat(body: {
   history: { role: string; content: string }[];
   model: string;
   conversation_id?: string;
+  use_web?: boolean;
 }): AsyncGenerator<SseEvent> {
   const res = await fetch(`${BASE}/knowledge-chat/stream`, {
     method: "POST",
