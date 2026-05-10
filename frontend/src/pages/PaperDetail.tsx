@@ -1525,6 +1525,23 @@ export default function PaperDetail() {
                         <p className="text-xs text-gray-600">{paper.added_by}</p>
                       </div>
                     )}
+                    <div>
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Document type</p>
+                      <select
+                        value={paper.document_type ?? "paper"}
+                        onChange={async (e) => {
+                          if (!id) return;
+                          const newType = e.target.value as Paper["document_type"];
+                          const updated = await updatePaper(id, { document_type: newType ?? null });
+                          setPaper((p) => p ? { ...p, ...updated } : p);
+                        }}
+                        className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white"
+                      >
+                        <option value="paper">📄 Paper</option>
+                        <option value="book">📚 Book</option>
+                        <option value="lecture_deck">🎓 Lecture deck</option>
+                      </select>
+                    </div>
                   </div>
                 </MetaSection>
 

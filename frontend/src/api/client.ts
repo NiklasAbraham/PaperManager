@@ -202,6 +202,7 @@ export async function updatePaper(paperId: string, data: Partial<{
   metadata_source: string | null;
   reading_status: string | null; rating: number | null;
   bookmarked: boolean | null; color: string | null;
+  document_type: string | null;
 }>): Promise<Paper> {
   return apiFetch<Paper>(`/papers/${paperId}`, {
     method: "PATCH",

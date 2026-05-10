@@ -206,7 +206,7 @@ def export_bibtex(project_id: str):
     with driver.session() as session:
         result = session.run(
             """
-            MATCH (proj:Project {id: $pid})-[:CONTAINS]->(p:Paper)
+            MATCH (p:Paper)-[:IN_PROJECT]->(proj:Project {id: $pid})
             OPTIONAL MATCH (p)-[:AUTHORED_BY]->(a:Person)
             WITH p, collect(a.name) AS authors
             RETURN p, authors ORDER BY p.title
@@ -250,7 +250,7 @@ def export_csv(project_id: str):
     with driver.session() as session:
         result = session.run(
             """
-            MATCH (proj:Project {id: $pid})-[:CONTAINS]->(p:Paper)
+            MATCH (p:Paper)-[:IN_PROJECT]->(proj:Project {id: $pid})
             OPTIONAL MATCH (p)-[:AUTHORED_BY]->(a:Person)
             OPTIONAL MATCH (p)-[:ABOUT]->(t:Topic)
             OPTIONAL MATCH (p)-[:TAGGED]->(tag:Tag)

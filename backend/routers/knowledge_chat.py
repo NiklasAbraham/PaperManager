@@ -79,7 +79,7 @@ def _fetch_papers_for_mention(
 
     elif mention_type == "project":
         cypher = (
-            "MATCH (proj:Project)-[:CONTAINS]->(p:Paper) "
+            "MATCH (p:Paper)-[:IN_PROJECT]->(proj:Project) "
             "WHERE toLower(proj.name) CONTAINS $val "
             "RETURN p.id AS id, p.title AS title, p.abstract AS abstract, p.summary AS summary "
             "LIMIT 30"

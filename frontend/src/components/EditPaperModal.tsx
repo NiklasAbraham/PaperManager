@@ -27,6 +27,7 @@ export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor
   const [venue,          setVenue]          = useState(paper.venue ?? "");
   const [metadataSource, setMetadataSource] = useState(paper.metadata_source ?? "");
   const [reading_status, setReadingStatus]  = useState<Paper["reading_status"]>(paper.reading_status ?? "unread");
+  const [document_type,  setDocumentType]   = useState<Paper["document_type"]>(paper.document_type ?? "paper");
   const [color,          setColor]          = useState(paper.color ?? "");
   const [tagNames, setTagNames]             = useState(() => metadataEditor?.tags.map((tag) => tag.name) ?? []);
   const [topicNames, setTopicNames]         = useState(() => metadataEditor?.topics.map((topic) => topic.name) ?? []);
@@ -62,14 +63,15 @@ export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor
     setError(null);
     try {
       const updated = await updatePaper(paper.id, {
-        title:          title.trim(),
-        year:           year ? parseInt(year) : null,
-        doi:            doi.trim() || null,
-        abstract:       abstract.trim() || null,
-        venue:          venue.trim() || null,
+        title:           title.trim(),
+        year:            year ? parseInt(year) : null,
+        doi:             doi.trim() || null,
+        abstract:        abstract.trim() || null,
+        venue:           venue.trim() || null,
         metadata_source: metadataSource.trim() || null,
-        reading_status: reading_status ?? null,
-        color:          color || null,
+        reading_status:  reading_status ?? null,
+        document_type:   document_type ?? null,
+        color:           color || null,
       });
 
       if (metadataEditor) {
@@ -144,6 +146,18 @@ export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor
           </Field>
 
           <div className="flex gap-3">
+            <Field label="Document type" className="flex-1">
+              <select
+                value={document_type ?? "paper"}
+                onChange={(e) => setDocumentType(e.target.value as Paper["document_type"])}
+                className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+              >
+                <option value="paper">📄 Paper</option>
+                <option value="book">📚 Book</option>
+                <option value="lecture_deck">🎓 Lecture deck</option>
+              </select>
+            </Field>
+
             <Field label="Reading status" className="flex-1">
               <select
                 value={reading_status ?? "unread"}
@@ -155,7 +169,9 @@ export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor
                 <option value="read">✅ Read</option>
               </select>
             </Field>
+          </div>
 
+          <div className="flex gap-3">
             <Field label="Label color">
               <div className="flex flex-wrap gap-1.5 mt-1">
                 {PAPER_COLORS.map((c) => (

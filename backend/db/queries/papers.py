@@ -158,10 +158,14 @@ def get_paper(driver: Driver, paper_id: str) -> dict | None:
         return d
 
 
-def list_papers(driver: Driver, skip: int = 0, limit: int = 20) -> list[dict]:
+def list_papers(driver: Driver, skip: int = 0, limit: int = 10000) -> list[dict]:
     with driver.session() as session:
         result = session.run(
-            "MATCH (p:Paper) RETURN p ORDER BY p.created_at DESC SKIP $skip LIMIT $limit",
+            """
+            MATCH (p:Paper)
+            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+            RETURN p ORDER BY p.created_at DESC SKIP $skip LIMIT $limit
+            """,
             skip=skip,
             limit=limit,
         )

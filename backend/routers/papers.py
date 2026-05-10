@@ -103,13 +103,8 @@ async def upload(
         log.error("Drive upload failed | %s", exc)
         raise HTTPException(status_code=503, detail=f"Drive upload failed: {exc}")
 
-    # Step 5: Summarize (best-effort — don't fail if Claude is down)
+    # Step 5: Summary skipped on upload — generate manually via POST /{id}/regenerate-summary
     summary = None
-    try:
-        summary = summarize_paper(raw_text, meta.get("title", ""), custom_instructions=summary_instructions or None)
-        log.info("Summary generated | title=%.60s", meta.get("title"))
-    except Exception as exc:
-        log.warning("Summary failed (non-fatal) | %s", exc)
 
     # Step 5b: Generate vector embedding (best-effort — don't fail if Ollama is down)
     if not skip_embedding:
@@ -783,7 +778,7 @@ def get_random_paper(reading_status: Optional[str] = None):
 
 
 @router.get("", response_model=list[PaperOut])
-def list_all(skip: int = 0, limit: int = 20):
+def list_all(skip: int = 0, limit: int = 10000):
     return list_papers(get_driver(), skip=skip, limit=limit)
 
 
@@ -792,7 +787,7 @@ def get_paper_projects(paper_id: str):
     driver = get_driver()
     with driver.session() as session:
         result = session.run(
-            "MATCH (proj:Project)-[:CONTAINS]->(p:Paper {id: $id}) RETURN proj",
+            "MATCH (p:Paper {id: $id})-[:IN_PROJECT]->(proj:Project) RETURN proj",
             id=paper_id,
         )
         return [dict(r["proj"]) for r in result]
@@ -923,7 +918,8 @@ def reextract_abstract(paper_id: str):
     if not raw_text.strip():
         raise HTTPException(status_code=422, detail="No extracted text stored for this paper — upload the PDF first")
 
-    abstract = extract_abstract_from_text(raw_text) or extract_abstract_with_ai(raw_text[:6000])
+    document_type = paper.get("document_type")
+    abstract = extract_abstract_from_text(raw_text) or extract_abstract_with_ai(raw_text[:6000], document_type=document_type)
     if not abstract:
         raise HTTPException(status_code=422, detail="Could not extract an abstract from the paper text")
 
@@ -1165,12 +1161,7 @@ async def refetch_pdf(paper_id: str):
 
     updates["raw_text"] = raw_text
 
-    # Re-generate summary if we got full text and paper has none
-    if raw_text and not paper.get("summary"):
-        try:
-            updates["summary"] = summarize_paper(raw_text, paper.get("title", ""))
-        except Exception as exc:
-            log.warning("Summary failed (non-fatal) | %s", exc)
+    # Summary skipped on PDF re-fetch — generate manually via POST /{id}/regenerate-summary
 
     updated_paper = update_paper(driver, paper_id, updates)
 
@@ -1244,12 +1235,7 @@ async def upload_pdf_for_paper(paper_id: str, file: UploadFile = File(...)):
 
     updates["raw_text"] = raw_text
 
-    # Regenerate summary if paper has none
-    if raw_text and not paper.get("summary"):
-        try:
-            updates["summary"] = _summarize(raw_text, paper.get("title", ""))
-        except Exception as exc:
-            log.warning("Summary failed (non-fatal) | %s", exc)
+    # Summary skipped on PDF attach — generate manually via POST /{id}/regenerate-summary
 
     update_paper(driver, paper_id, updates)
 

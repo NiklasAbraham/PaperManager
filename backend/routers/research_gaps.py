@@ -37,7 +37,7 @@ def analyze_research_gaps(body: ResearchGapsRequest):
         with driver.session() as session:
             result = session.run(
                 """
-                MATCH (proj:Project {id: $project_id})-[:CONTAINS]->(p:Paper)
+                MATCH (p:Paper)-[:IN_PROJECT]->(proj:Project {id: $project_id})
                 RETURN p.id AS id, p.title AS title, p.abstract AS abstract, 
                        p.summary AS summary, p.year AS year
                 ORDER BY p.year DESC, p.title

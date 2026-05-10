@@ -237,27 +237,30 @@ def detect_chapters_docling(pdf_bytes: bytes) -> list[dict]:
         item_text: str = getattr(item, "text", "") or ""
 
         if item.label == DocItemLabel.SECTION_HEADER:
-            # Save previous chapter
-            if current is not None:
-                raw_chapters.append(current)
-
             # Strip leading numbers and infer level from the number pattern
             clean_title, level = _clean_heading(item_text)
 
-            # If Docling provides its own level, use it to override (but still
-            # strip the number from the title regardless)
+            # If Docling provides its own level, use it to override
             docling_level = getattr(item, "level", None)
             if docling_level is not None:
                 level = 1 if docling_level <= 1 else 2
 
-            current = {
-                "title": clean_title,
-                "level": level,
-                "start_page": page_no,
-                "end_page": None,
-                "_text_parts": [],
-                "summary": None,
-            }
+            if level == 1:
+                # Top-level chapter — save previous and start new
+                if current is not None:
+                    raw_chapters.append(current)
+                current = {
+                    "title": clean_title,
+                    "level": 1,
+                    "start_page": page_no,
+                    "end_page": None,
+                    "_text_parts": [],
+                    "summary": None,
+                }
+            else:
+                # Sub-chapter — fold heading text into the current chapter
+                if current is not None:
+                    current["_text_parts"].append(item_text)
 
         elif current is not None and item_text.strip():
             current["_text_parts"].append(item_text)
@@ -273,10 +276,7 @@ def detect_chapters_docling(pdf_bytes: bytes) -> list[dict]:
     for ch in raw_chapters:
         ch["text"] = "\n\n".join(ch.pop("_text_parts", []))
 
-    # Use Ollama to verify and fix chapter/sub-chapter classification + clean titles
-    raw_chapters = _ollama_reclassify_headings(raw_chapters)
-
-    # Assign sequential numbers after Ollama may have changed the list
+    # Assign sequential numbers
     for i, ch in enumerate(raw_chapters):
         ch["number"] = i + 1
 
@@ -389,18 +389,27 @@ def split_long_chapter(chapter: ChapterCandidate, max_chars: int = MAX_CHAPTER_C
 
 
 def extract_chapters_with_splits(raw_text: str) -> list[dict]:
-    """Regex-based entry point: detect + split long chapters."""
+    """Regex-based entry point: detect + split long chapters (top-level only)."""
     candidates = detect_chapters(raw_text)
+
+    # Keep only top-level chapters; merge subchapter text back into parent
+    top_level: list[ChapterCandidate] = []
+    for cand in candidates:
+        if cand.level == 1:
+            top_level.append(cand)
+        elif top_level:
+            # Append subchapter text to the last top-level chapter
+            top_level[-1].text = (top_level[-1].text + "\n\n" + cand.text).strip()
 
     result: list[dict] = []
     seq = 1
-    for cand in candidates:
+    for cand in top_level:
         parts = split_long_chapter(cand)
         for part in parts:
             result.append({
                 "number": seq,
                 "title": part.title,
-                "level": part.level,
+                "level": 1,
                 "text": part.text,
                 "summary": None,
             })
