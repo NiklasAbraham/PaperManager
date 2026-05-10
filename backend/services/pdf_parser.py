@@ -112,8 +112,36 @@ def extract_abstract_from_text(text: str) -> str | None:
     return abstract if len(abstract) > 50 else None
 
 
-def extract_abstract_with_ai(text: str) -> str | None:
-    """Use Claude to flexibly extract the abstract from paper text."""
+def extract_abstract_with_ai(text: str, document_type: str | None = None) -> str | None:
+    """Use Claude to flexibly extract the abstract/description from document text.
+
+    The prompt is adapted based on document_type:
+    - 'paper' (default): look for the abstract section
+    - 'book': look for the back-cover description, preface, or introduction overview
+    - 'lecture_deck': look for the overview, objectives, or opening slide summary
+    """
+    _PROMPTS = {
+        "book": (
+            "This is text from a book. Extract a concise description of the book — "
+            "this may come from a preface, introduction, back-cover blurb, or an 'About this book' section.\n"
+            "Return ONLY the description text itself — no label or prefix.\n"
+            "If nothing suitable exists, return an empty string.\n\n"
+            f"Book text:\n{text[:5000]}"
+        ),
+        "lecture_deck": (
+            "This is text from a lecture slide deck. Extract a short overview or description of what the "
+            "slides cover — this may come from an overview slide, learning objectives, or opening summary.\n"
+            "Return ONLY the description text itself — no label or prefix.\n"
+            "If nothing suitable exists, return an empty string.\n\n"
+            f"Slide text:\n{text[:5000]}"
+        ),
+    }
+    prompt = _PROMPTS.get(document_type or "paper") or (
+        "Extract the abstract from this academic paper text.\n"
+        "Return ONLY the abstract text itself — no label, no prefix like 'Abstract:' or 'Summary:'.\n"
+        "If there is no abstract, return an empty string.\n\n"
+        f"Paper text:\n{text[:5000]}"
+    )
     try:
         import anthropic
         from config import settings
@@ -124,19 +152,11 @@ def extract_abstract_with_ai(text: str) -> str | None:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Extract the abstract from this academic paper text.\n"
-                    "Return ONLY the abstract text itself — no label, no prefix like 'Abstract:' or 'Summary:'.\n"
-                    "If there is no abstract, return an empty string.\n\n"
-                    f"Paper text:\n{text[:5000]}"
-                ),
-            }],
+            messages=[{"role": "user", "content": prompt}],
         )
         result = response.content[0].text.strip()
         # Strip accidental prefixes the model might still include
-        result = re.sub(r"^(?:abstract|summary)\s*[:\-–]\s*", "", result, flags=re.IGNORECASE).strip()
+        result = re.sub(r"^(?:abstract|summary|description|overview)\s*[:\-–]\s*", "", result, flags=re.IGNORECASE).strip()
         return result if len(result) > 50 else None
     except Exception:
         log.debug("AI abstract extraction failed", exc_info=True)

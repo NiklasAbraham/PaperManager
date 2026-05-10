@@ -29,7 +29,7 @@ Relationship types:
   (Paper)   -[:TAGGED]->      (Tag)      paper has a tag
   (Paper)   -[:ABOUT]->       (Topic)    paper is about a topic
   (Paper)   -[:AUTHORED_BY]-> (Person)   paper has an author
-  (Project) -[:CONTAINS]->    (Paper)    project contains a paper
+  (Paper)   -[:IN_PROJECT]->  (Project)  paper belongs to a project
   (Note)    -[:ABOUT]->       (Paper)    note belongs to a paper
   (Note)    -[:MENTIONS]->    (Person)   note mentions a person
   (Note)    -[:MENTIONS]->    (Topic)    note mentions a topic
