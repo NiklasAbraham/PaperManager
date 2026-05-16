@@ -687,21 +687,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Module Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routers" class="md-nav__link">
+    <span class="md-ellipsis">
+      routers/
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#services" class="md-nav__link">
+    <span class="md-ellipsis">
+      services/
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dbqueries" class="md-nav__link">
+    <span class="md-ellipsis">
+      db/queries/
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
   <a href="#paper-ingestion-flow" class="md-nav__link">
     <span class="md-ellipsis">
       Paper Ingestion Flow
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#note-save-flow" class="md-nav__link">
-    <span class="md-ellipsis">
-      Note Save Flow
     </span>
   </a>
   
@@ -920,21 +944,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Module Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routers" class="md-nav__link">
+    <span class="md-ellipsis">
+      routers/
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#services" class="md-nav__link">
+    <span class="md-ellipsis">
+      services/
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dbqueries" class="md-nav__link">
+    <span class="md-ellipsis">
+      db/queries/
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
   <a href="#paper-ingestion-flow" class="md-nav__link">
     <span class="md-ellipsis">
       Paper Ingestion Flow
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#note-save-flow" class="md-nav__link">
-    <span class="md-ellipsis">
-      Note Save Flow
     </span>
   </a>
   
@@ -974,8 +1022,8 @@
 <h2 id="high-level-overview">High-Level Overview<a class="headerlink" href="#high-level-overview" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>graph TB
     subgraph "User Interfaces"
-        Browser["🌐 Browser\n(React + Vite :5173)"]
-        ClaudeDesktop["💬 Claude Desktop\n(MCP Client)"]
+        Browser["Browser\n(React + Vite :5173)"]
+        ClaudeDesktop["Claude Desktop\n(MCP Client)"]
     end
 
     subgraph "Backend — FastAPI :8000"
@@ -986,11 +1034,11 @@
     end
 
     subgraph "External Services"
-        Neo4j["🗄️ Neo4j Aura\n(Graph DB)"]
-        Drive["📁 Google Drive\n(PDF / Figure storage)"]
-        S2["🔍 Semantic Scholar\n(Metadata / Citations)"]
-        Claude["🤖 Anthropic Claude\n(Summaries / Chat)"]
-        Ollama["🦙 Ollama\n(Local LLM)"]
+        Neo4j["Neo4j Aura\n(Graph DB)"]
+        Drive["Google Drive\n(PDF / Figure storage)"]
+        S2["Semantic Scholar\n(Metadata / Citations)"]
+        Claude["Anthropic Claude\n(Summaries / Chat / Analysis)"]
+        Ollama["Ollama\n(Local LLM)"]
     end
 
     Browser &lt;--&gt;|"HTTP / SSE"| Routers
@@ -1010,93 +1058,304 @@
 <blockquote>
 <p><strong><code>db/queries/</code> and <code>services/</code> are framework-neutral.</strong> Neither FastAPI nor MCP specifics leak into them. <code>routers/</code> and <code>tools/</code> are two different entry points over the same logic.</p>
 </blockquote>
-<pre class="mermaid"><code>flowchart LR
-    HTTP["HTTP Request"] --&gt; R["routers/"]
-    MCP["MCP Tool Call"] --&gt; T["tools/"]
-    R --&gt; Shared
-    T --&gt; Shared
-
-    subgraph Shared["Shared Layer (framework-neutral)"]
-        direction TB
-        DB["db/queries/ — all Cypher"]
-        SVC["services/ — Drive, AI, PDF parsing"]
-    end
-
-    DB --&gt; Neo4j["Neo4j Aura"]
-    SVC --&gt; External["Google Drive / Claude / Ollama"]</code></pre>
 <p>This means every capability is available both via HTTP (for the browser) and via MCP tool calls (for Claude Desktop), without any code duplication.</p>
 <hr />
 <h2 id="module-map">Module Map<a class="headerlink" href="#module-map" title="Permanent link">&para;</a></h2>
-<pre class="mermaid"><code>graph LR
-    subgraph backend["backend/"]
-        main["main.py\n(FastAPI app)"]
-        config["config.py\n(env vars)"]
-        mcp["mcp_server.py\n(MCP entry point)"]
-
-        subgraph routers["routers/"]
-            rPapers["papers.py"]
-            rPeople["people.py"]
-            rTags["tags.py"]
-            rTopics["topics.py"]
-            rProjects["projects.py"]
-            rSearch["search.py"]
-            rGraph["graph.py"]
-            rChat["knowledge_chat.py"]
-            rCypher["cypher.py"]
-            rExport["export.py"]
-            rBackfill["backfill.py"]
-            rFigures["figures.py"]
-            rBulk["bulk_import.py"]
-        end
-
-        subgraph tools["tools/"]
-            tPaper["paper_tools.py"]
-            tNote["note_tools.py"]
-            tTag["tag_tools.py"]
-            tPerson["person_tools.py"]
-            tProject["project_tools.py"]
-            tAI["ai_tools.py"]
-        end
-
-        subgraph services["services/"]
-            sAI["ai.py\n(Claude)"]
-            sDrive["drive.py\n(Google Drive)"]
-            sPDF["pdf_parser.py"]
-            sMeta["metadata_lookup.py\n(S2 / CrossRef)"]
-            sURL["metadata_from_url.py"]
-            sFig["figure_extractor.py"]
-            sNote["note_parser.py"]
-            sRefs["references.py"]
-            sBulk["bulk_resolver.py"]
-        end
-
-        subgraph db["db/"]
-            conn["connection.py\n(Neo4j driver)"]
-            schema["schema.py\n(indexes + constraints)"]
-            subgraph queries["queries/"]
-                qPapers["papers.py"]
-                qPeople["people.py"]
-                qTopics["topics.py"]
-                qTags["tags.py"]
-                qNotes["notes.py"]
-                qProjects["projects.py"]
-            end
-        end
-
-        subgraph models["models/"]
-            schemas["schemas.py\n(Pydantic)"]
-        end
-    end
-
-    main --&gt; routers
-    mcp --&gt; tools
-    routers --&gt; services
-    routers --&gt; db
-    tools --&gt; services
-    tools --&gt; db</code></pre>
+<h3 id="routers">routers/<a class="headerlink" href="#routers" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Router</th>
+<th>Prefix</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>papers.py</code></td>
+<td><code>/papers</code></td>
+<td>Core paper CRUD, upload, URL ingest, chat, notes, references</td>
+</tr>
+<tr>
+<td><code>people.py</code></td>
+<td><code>/people</code></td>
+<td>Person CRUD + paper links</td>
+</tr>
+<tr>
+<td><code>tags.py</code></td>
+<td><code>/tags</code></td>
+<td>Tag CRUD + paper tagging</td>
+</tr>
+<tr>
+<td><code>topics.py</code></td>
+<td><code>/topics</code></td>
+<td>Topic CRUD + rename</td>
+</tr>
+<tr>
+<td><code>projects.py</code></td>
+<td><code>/projects</code></td>
+<td>Project CRUD + paper membership</td>
+</tr>
+<tr>
+<td><code>search.py</code></td>
+<td><code>/search</code></td>
+<td>Full-text + filter search</td>
+</tr>
+<tr>
+<td><code>graph.py</code></td>
+<td><code>/graph</code></td>
+<td>Graph visualisation data</td>
+</tr>
+<tr>
+<td><code>stats.py</code></td>
+<td><code>/stats</code></td>
+<td>Library statistics</td>
+</tr>
+<tr>
+<td><code>cypher.py</code></td>
+<td><code>/cypher</code></td>
+<td>Raw Cypher editor + AI assist</td>
+</tr>
+<tr>
+<td><code>export.py</code></td>
+<td><code>/export</code></td>
+<td>BibTeX export</td>
+</tr>
+<tr>
+<td><code>backfill.py</code></td>
+<td><code>/backfill</code></td>
+<td>Bulk AI enrichment (topics, summaries, figures)</td>
+</tr>
+<tr>
+<td><code>knowledge_chat.py</code></td>
+<td><code>/knowledge-chat</code></td>
+<td>Multi-paper chat (SSE streaming)</td>
+</tr>
+<tr>
+<td><code>figures.py</code></td>
+<td><code>/papers/{id}/figures</code></td>
+<td>Figure extraction + image serving</td>
+</tr>
+<tr>
+<td><code>bulk_import.py</code></td>
+<td><code>/bulk-import</code></td>
+<td>Bulk import from BibTeX / DOI list (SSE)</td>
+</tr>
+<tr>
+<td><code>literature.py</code></td>
+<td><code>/literature</code></td>
+<td>Stream recent papers from arXiv / PubMed / bioRxiv</td>
+</tr>
+<tr>
+<td><code>discover.py</code></td>
+<td><code>/discover</code></td>
+<td>Search external sources + add to library</td>
+</tr>
+<tr>
+<td><code>annotations.py</code></td>
+<td><code>/papers/{id}/annotations</code></td>
+<td>PDF highlight annotations</td>
+</tr>
+<tr>
+<td><code>chapters.py</code></td>
+<td><code>/papers/{id}/chapters</code></td>
+<td>Book / lecture chapter management</td>
+</tr>
+<tr>
+<td><code>blogs.py</code></td>
+<td><code>/blogs</code></td>
+<td>Blog and blog post management</td>
+</tr>
+<tr>
+<td><code>venues.py</code></td>
+<td><code>/venues</code></td>
+<td>Venue browser</td>
+</tr>
+<tr>
+<td><code>claims.py</code></td>
+<td><code>/papers/{id}/claims</code></td>
+<td>Claim extraction and search</td>
+</tr>
+<tr>
+<td><code>synthesis.py</code></td>
+<td><code>/synthesis</code></td>
+<td>Cross-paper synthesis</td>
+</tr>
+<tr>
+<td><code>research_gaps.py</code></td>
+<td><code>/research-gaps</code></td>
+<td>Research gap analysis</td>
+</tr>
+<tr>
+<td><code>author_tracker.py</code></td>
+<td><code>/people/{id}/track</code></td>
+<td>Author tracking + auto-import</td>
+</tr>
+<tr>
+<td><code>merge.py</code></td>
+<td><code>/merge</code></td>
+<td>Duplicate detection + merge</td>
+</tr>
+<tr>
+<td><code>users.py</code></td>
+<td><code>/users</code></td>
+<td>User identity + per-user conversations</td>
+</tr>
+<tr>
+<td><code>admin.py</code></td>
+<td><code>/admin</code></td>
+<td>Admin / maintenance endpoints</td>
+</tr>
+</tbody>
+</table>
+<h3 id="services">services/<a class="headerlink" href="#services" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ai.py</code></td>
+<td>All Claude API calls — summarise, chat, topics, figures, claims, synthesis, gaps</td>
+</tr>
+<tr>
+<td><code>drive.py</code></td>
+<td>Upload/download files to Google Drive</td>
+</tr>
+<tr>
+<td><code>pdf_parser.py</code></td>
+<td>Extract raw text; orchestrate 4-layer metadata extraction pipeline</td>
+</tr>
+<tr>
+<td><code>metadata_lookup.py</code></td>
+<td>Semantic Scholar + CrossRef API clients</td>
+</tr>
+<tr>
+<td><code>metadata_from_url.py</code></td>
+<td>URL/DOI/arXiv/PubMed/bioRxiv resolver</td>
+</tr>
+<tr>
+<td><code>figure_extractor.py</code></td>
+<td>Extract figures from PDF pages; generate captions</td>
+</tr>
+<tr>
+<td><code>note_parser.py</code></td>
+<td><code>@Name</code> and <code>#Topic</code> extraction from Markdown</td>
+</tr>
+<tr>
+<td><code>references.py</code></td>
+<td>Three-strategy reference extraction pipeline</td>
+</tr>
+<tr>
+<td><code>bulk_resolver.py</code></td>
+<td>Per-entry resolver for bulk import</td>
+</tr>
+<tr>
+<td><code>literature_search.py</code></td>
+<td>Keyword-based search across arXiv / PubMed / bioRxiv</td>
+</tr>
+<tr>
+<td><code>blog_fetcher.py</code></td>
+<td>Fetch and parse blog posts from RSS feeds / URLs</td>
+</tr>
+<tr>
+<td><code>book_chapter_parser.py</code></td>
+<td>Detect chapter boundaries in PDFs (Docling + AI)</td>
+</tr>
+<tr>
+<td><code>embeddings.py</code></td>
+<td>Generate Ollama embeddings for semantic similarity</td>
+</tr>
+<tr>
+<td><code>person_enrichment.py</code></td>
+<td>Enrich Person nodes with affiliation / S2 data</td>
+</tr>
+<tr>
+<td><code>web_search.py</code></td>
+<td>Web search helper for research gap and synthesis endpoints</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dbqueries">db/queries/<a class="headerlink" href="#dbqueries" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Nodes managed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>papers.py</code></td>
+<td>Paper</td>
+</tr>
+<tr>
+<td><code>people.py</code></td>
+<td>Person</td>
+</tr>
+<tr>
+<td><code>topics.py</code></td>
+<td>Topic</td>
+</tr>
+<tr>
+<td><code>tags.py</code></td>
+<td>Tag</td>
+</tr>
+<tr>
+<td><code>notes.py</code></td>
+<td>Note + MENTIONS</td>
+</tr>
+<tr>
+<td><code>projects.py</code></td>
+<td>Project</td>
+</tr>
+<tr>
+<td><code>references.py</code></td>
+<td>CITES relationships</td>
+</tr>
+<tr>
+<td><code>figures.py</code></td>
+<td>Figure</td>
+</tr>
+<tr>
+<td><code>annotations.py</code></td>
+<td>Annotation</td>
+</tr>
+<tr>
+<td><code>chapters.py</code></td>
+<td>Chapter</td>
+</tr>
+<tr>
+<td><code>blogs.py</code></td>
+<td>Blog + BlogPost</td>
+</tr>
+<tr>
+<td><code>claims.py</code></td>
+<td>Claim</td>
+</tr>
+<tr>
+<td><code>conversations.py</code></td>
+<td>Conversation + Message</td>
+</tr>
+<tr>
+<td><code>users.py</code></td>
+<td>User</td>
+</tr>
+<tr>
+<td><code>search.py</code></td>
+<td>Full-text + filter search</td>
+</tr>
+<tr>
+<td><code>tables.py</code></td>
+<td>Table extraction</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h2 id="paper-ingestion-flow">Paper Ingestion Flow<a class="headerlink" href="#paper-ingestion-flow" title="Permanent link">&para;</a></h2>
-<p>The most complex path through the system — from PDF drop to fully enriched paper:</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant Browser
     participant Router as routers/papers.py
@@ -1126,38 +1385,26 @@
     Drive--&gt;&gt;Router: drive_file_id
     Router-&gt;&gt;AI: summarize_paper(abstract, raw_text)
     AI--&gt;&gt;Router: summary
+    Router-&gt;&gt;AI: extract_claims(raw_text)
+    AI--&gt;&gt;Router: claims
     Router-&gt;&gt;DB: create_paper(metadata + summary + drive_file_id)
     DB-&gt;&gt;Neo4j: MERGE (p:Paper {...})
     Router-&gt;&gt;DB: link_authors(paper_id, authors)
     Router-&gt;&gt;DB: link_topics(paper_id, topics)
     Router--&gt;&gt;Browser: PaperOut JSON</code></pre>
-<hr />
-<h2 id="note-save-flow">Note Save Flow<a class="headerlink" href="#note-save-flow" title="Permanent link">&para;</a></h2>
-<pre class="mermaid"><code>sequenceDiagram
-    participant Browser
-    participant Router as routers/papers.py
-    participant NoteParser as services/note_parser.py
-    participant DB as db/queries/notes.py
-    participant Neo4j
-
-    Browser-&gt;&gt;Router: PUT /papers/{id}/note (markdown)
-    Router-&gt;&gt;NoteParser: parse_mentions(markdown)
-    NoteParser--&gt;&gt;Router: {people: [...], topics: [...]}
-    Router-&gt;&gt;DB: save_note(paper_id, content)
-    DB-&gt;&gt;Neo4j: MERGE (n:Note {content})\n-[:ABOUT]-&gt;(paper)
-    Router-&gt;&gt;DB: upsert_mentions(note_id, people, topics)
-    DB-&gt;&gt;Neo4j: MERGE mentions relationships
-    Router--&gt;&gt;Browser: Note JSON</code></pre>
+<p>See <a href="../ingestion-workflow/">ingestion-workflow.md</a> for the full staged workflow including the parse/confirm/upload/onboarding flow.</p>
 <hr />
 <h2 id="key-design-decisions">Key Design Decisions<a class="headerlink" href="#key-design-decisions" title="Permanent link">&para;</a></h2>
 <p>See the full <a href="../../decisions/">Decisions Log</a> for rationale. The key principles:</p>
 <ol>
-<li><strong>Neo4j over SQL</strong> — papers, people, topics, and tags are naturally a graph; enables path queries, co-authorship derivation, topic clustering</li>
+<li><strong>Neo4j over SQL</strong> — papers, people, topics, and tags are naturally a graph</li>
 <li><strong>Tags as nodes</strong> — <code>(Paper)-[:TAGGED]-&gt;(Tag)</code> allows efficient "all papers with tag X" queries</li>
-<li><strong>Topic ≠ Tag</strong> — Topics are formal research areas linked to person specialties; Tags are free-form personal labels</li>
-<li><strong>Notes as graph nodes</strong> — Notes need their own <code>@mention</code> and <code>#topic</code> relationships; a text field on Paper would lose graph power</li>
+<li><strong>Topic ≠ Tag</strong> — Topics are formal research areas; Tags are free-form personal labels</li>
+<li><strong>Notes as graph nodes</strong> — Notes have their own <code>@mention</code> and <code>#topic</code> relationships</li>
 <li><strong>Shared service layer</strong> — MCP tools and HTTP routers call the same <code>db/</code> and <code>services/</code> code</li>
-<li><strong>Prompts as files</strong> — All prompt templates live in <code>prompts/</code> and are loaded fresh on each call; edit without restarting the backend</li>
+<li><strong>Prompts as files</strong> — All prompt templates live in <code>prompts/</code> and are loaded fresh on each call</li>
+<li><strong>Vector embeddings</strong> — Paper nodes store Ollama embeddings for semantic similarity search</li>
+<li><strong>User identity</strong> — <code>User</code> nodes enable per-user conversation history and attribution</li>
 </ol>
 
 

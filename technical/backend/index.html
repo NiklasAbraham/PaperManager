@@ -704,60 +704,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#configpy-settings" class="md-nav__link">
+  <a href="#dbschemapy-constraints-and-indexes" class="md-nav__link">
     <span class="md-ellipsis">
-      config.py — Settings
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#db-database-layer" class="md-nav__link">
-    <span class="md-ellipsis">
-      db/ — Database Layer
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="db/ — Database Layer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#connectionpy" class="md-nav__link">
-    <span class="md-ellipsis">
-      connection.py
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#schemapy" class="md-nav__link">
-    <span class="md-ellipsis">
-      schema.py
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#queries" class="md-nav__link">
-    <span class="md-ellipsis">
-      queries/
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#routers-http-endpoints" class="md-nav__link">
-    <span class="md-ellipsis">
-      routers/ — HTTP Endpoints
+      db/schema.py — Constraints and Indexes
     </span>
   </a>
   
@@ -794,15 +743,6 @@
   <a href="#prompts-prompt-templates" class="md-nav__link">
     <span class="md-ellipsis">
       prompts/ — Prompt Templates
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      Tests
     </span>
   </a>
   
@@ -983,60 +923,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#configpy-settings" class="md-nav__link">
+  <a href="#dbschemapy-constraints-and-indexes" class="md-nav__link">
     <span class="md-ellipsis">
-      config.py — Settings
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#db-database-layer" class="md-nav__link">
-    <span class="md-ellipsis">
-      db/ — Database Layer
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="db/ — Database Layer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#connectionpy" class="md-nav__link">
-    <span class="md-ellipsis">
-      connection.py
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#schemapy" class="md-nav__link">
-    <span class="md-ellipsis">
-      schema.py
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#queries" class="md-nav__link">
-    <span class="md-ellipsis">
-      queries/
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#routers-http-endpoints" class="md-nav__link">
-    <span class="md-ellipsis">
-      routers/ — HTTP Endpoints
+      db/schema.py — Constraints and Indexes
     </span>
   </a>
   
@@ -1073,15 +962,6 @@
   <a href="#prompts-prompt-templates" class="md-nav__link">
     <span class="md-ellipsis">
       prompts/ — Prompt Templates
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      Tests
     </span>
   </a>
   
@@ -1125,63 +1005,94 @@
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│       ├── topics.py        # All Cypher for Topic nodes
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│       ├── tags.py          # All Cypher for Tag nodes
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│       ├── notes.py         # All Cypher for Note nodes + MENTIONS
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│       └── projects.py      # All Cypher for Project nodes
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── routers/
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│   ├── papers.py            # POST /papers, GET /papers, etc.
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│   ├── people.py            # CRUD for Person nodes
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│   ├── topics.py            # CRUD for Topic nodes
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│   ├── tags.py              # CRUD for Tag nodes + tag seeding
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│   ├── projects.py          # CRUD for Project nodes
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│   ├── search.py            # GET /search
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│   ├── graph.py             # GET /graph (graph visualisation data)
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│   ├── stats.py             # GET /stats
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│   ├── cypher.py            # Cypher editor endpoints
-<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│   ├── export.py            # BibTeX export
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│   ├── backfill.py          # Bulk enrichment
-<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│   ├── knowledge_chat.py    # Multi-paper chat (SSE)
-<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│   ├── figures.py           # Figure extraction + image serving
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│   └── bulk_import.py       # Bulk import (SSE stream)
-<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│
-<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>├── services/
-<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│   ├── ai.py                # Claude: summarise, chat, topics, figures
-<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>│   ├── drive.py             # Upload PDF/images to Drive, get download URL
-<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>│   ├── pdf_parser.py        # Extract raw text; orchestrate metadata extraction
-<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│   ├── metadata_lookup.py   # Semantic Scholar + CrossRef API clients
-<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>│   ├── metadata_from_url.py # URL/DOI/arXiv/PubMed resolver
-<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>│   ├── figure_extractor.py  # Docling / Ollama / Claude Vision figure extraction
-<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>│   ├── note_parser.py       # Parse @Name and #Topic from markdown text
-<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>│   ├── references.py        # Reference extraction pipeline
-<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>│   └── bulk_resolver.py     # Per-entry resolver for bulk import
-<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>│
-<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>├── models/
-<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>│   └── schemas.py           # Pydantic request/response models
-<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>│
-<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>├── tools/                   # MCP tool definitions
-<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>│   ├── paper_tools.py
-<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>│   ├── note_tools.py
-<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>│   ├── tag_tools.py
-<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>│   ├── person_tools.py
-<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>│   ├── project_tools.py
-<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>│   └── ai_tools.py
-<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>│
-<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>├── tests/
-<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>│   ├── test_papers.py
-<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>│   ├── test_notes.py
-<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>│   ├── test_note_parser.py
-<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>│   ├── test_drive.py
-<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>│   ├── test_ai.py
-<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│   └── test_mcp_tools.py
-<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>│
-<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>├── prompts/                 # Prompt templates (loaded fresh each call)
-<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── summary.txt
-<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── topics.txt
-<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   ├── chat_system.txt
-<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   ├── knowledge_chat_system.txt
-<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│   ├── figure_captions.txt
-<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│   └── author_affiliations.txt
-<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│
-<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>└── requirements.txt
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│       ├── projects.py      # All Cypher for Project nodes
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│       ├── references.py    # CITES relationships
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│       ├── figures.py       # Figure nodes
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│       ├── annotations.py   # PDF Annotation nodes
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│       ├── chapters.py      # Chapter nodes
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│       ├── blogs.py         # Blog + BlogPost nodes
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│       ├── claims.py        # Claim nodes
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│       ├── conversations.py # Conversation + Message nodes
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│       ├── users.py         # User nodes
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│       ├── search.py        # Full-text + filter search queries
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│       └── tables.py        # Table extraction nodes
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>├── routers/
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│   ├── papers.py            # POST /papers, GET /papers, upload, chat, notes, refs
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│   ├── people.py            # CRUD for Person nodes
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│   ├── topics.py            # CRUD for Topic nodes
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│   ├── tags.py              # CRUD for Tag nodes + tag seeding
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│   ├── projects.py          # CRUD for Project nodes
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>│   ├── search.py            # GET /search
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│   ├── graph.py             # GET /graph (graph visualisation data)
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>│   ├── stats.py             # GET /stats
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>│   ├── cypher.py            # Cypher editor endpoints
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│   ├── export.py            # BibTeX export
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>│   ├── backfill.py          # Bulk enrichment (topics, summaries, figures)
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>│   ├── knowledge_chat.py    # Multi-paper chat (SSE)
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>│   ├── figures.py           # Figure extraction + image serving
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>│   ├── bulk_import.py       # Bulk import (SSE stream)
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>│   ├── literature.py        # Stream recent papers from arXiv / PubMed / bioRxiv
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>│   ├── discover.py          # Search external sources + add to library
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>│   ├── annotations.py       # PDF highlight annotations
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>│   ├── chapters.py          # Book / lecture chapter management
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>│   ├── blogs.py             # Blog and blog post management
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>│   ├── venues.py            # Venue browser
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>│   ├── claims.py            # Claim extraction and search
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>│   ├── synthesis.py         # Cross-paper synthesis
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>│   ├── research_gaps.py     # Research gap analysis
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>│   ├── author_tracker.py    # Author tracking + auto-import
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>│   ├── merge.py             # Duplicate detection + merge
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>│   ├── users.py             # User identity + per-user conversations
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>│   └── admin.py             # Admin / maintenance endpoints
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>│
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>├── services/
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>│   ├── ai.py                # Claude: summarise, chat, topics, figures, claims, synthesis
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>│   ├── drive.py             # Upload PDF/images to Drive, get download URL
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>│   ├── pdf_parser.py        # Extract raw text; orchestrate metadata extraction
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>│   ├── metadata_lookup.py   # Semantic Scholar + CrossRef API clients
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│   ├── metadata_from_url.py # URL/DOI/arXiv/PubMed resolver
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>│   ├── figure_extractor.py  # Docling / Ollama / Claude Vision figure extraction
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│   ├── note_parser.py       # Parse @Name and #Topic from markdown text
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── references.py        # Reference extraction pipeline
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── bulk_resolver.py     # Per-entry resolver for bulk import
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   ├── literature_search.py # Keyword-based search across arXiv / PubMed / bioRxiv
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   ├── blog_fetcher.py      # Fetch and parse blog posts from RSS feeds / URLs
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│   ├── book_chapter_parser.py # Detect chapter boundaries in PDFs (Docling + AI)
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│   ├── embeddings.py        # Ollama embeddings for semantic similarity
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│   ├── person_enrichment.py # Enrich Person nodes with affiliation / S2 data
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>│   └── web_search.py        # Web search for research gaps and synthesis
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>│
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>├── models/
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>│   └── schemas.py           # Pydantic request/response models
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>│
+<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>├── tools/                   # MCP tool definitions
+<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>│   ├── paper_tools.py
+<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>│   ├── note_tools.py
+<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>│   ├── tag_tools.py
+<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>│   ├── person_tools.py
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>│   ├── project_tools.py
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>│   └── ai_tools.py
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>│
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>├── tests/
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>│   └── ...
+<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>│
+<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>├── prompts/                 # Prompt templates (loaded fresh each call)
+<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>│   ├── summary.txt
+<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>│   ├── topics.txt
+<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>│   ├── chat_system.txt
+<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>│   ├── knowledge_chat_system.txt
+<a id="__codelineno-0-93" name="__codelineno-0-93" href="#__codelineno-0-93"></a>│   ├── figure_captions.txt
+<a id="__codelineno-0-94" name="__codelineno-0-94" href="#__codelineno-0-94"></a>│   ├── author_affiliations.txt
+<a id="__codelineno-0-95" name="__codelineno-0-95" href="#__codelineno-0-95"></a>│   ├── claims.txt
+<a id="__codelineno-0-96" name="__codelineno-0-96" href="#__codelineno-0-96"></a>│   ├── synthesis.txt
+<a id="__codelineno-0-97" name="__codelineno-0-97" href="#__codelineno-0-97"></a>│   ├── research_gaps.txt
+<a id="__codelineno-0-98" name="__codelineno-0-98" href="#__codelineno-0-98"></a>│   ├── chapter_summary.txt
+<a id="__codelineno-0-99" name="__codelineno-0-99" href="#__codelineno-0-99"></a>│   ├── chapter_chat_system.txt
+<a id="__codelineno-0-100" name="__codelineno-0-100" href="#__codelineno-0-100"></a>│   ├── literature_search_keywords.txt
+<a id="__codelineno-0-101" name="__codelineno-0-101" href="#__codelineno-0-101"></a>│   └── merge_scan.txt
+<a id="__codelineno-0-102" name="__codelineno-0-102" href="#__codelineno-0-102"></a>│
+<a id="__codelineno-0-103" name="__codelineno-0-103" href="#__codelineno-0-103"></a>└── requirements.txt
 </code></pre></div>
 <hr />
 <h2 id="mainpy-app-entry-point">main.py — App Entry Point<a class="headerlink" href="#mainpy-app-entry-point" title="Permanent link">&para;</a></h2>
@@ -1190,78 +1101,19 @@
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">async</span> <span class="k">def</span> <span class="nf">lifespan</span><span class="p">(</span><span class="n">app</span><span class="p">:</span> <span class="n">FastAPI</span><span class="p">):</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">get_driver</span><span class="p">()</span><span class="o">.</span><span class="n">verify_connectivity</span><span class="p">()</span>   <span class="c1"># verify Neo4j</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">run_schema_setup</span><span class="p">(</span><span class="n">get_driver</span><span class="p">())</span>       <span class="c1"># create indexes + constraints</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">seed_default_tags</span><span class="p">(</span><span class="n">get_driver</span><span class="p">())</span>      <span class="c1"># seed 157 default tags</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="k">yield</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">seed_default_tags</span><span class="p">(</span><span class="n">get_driver</span><span class="p">())</span>      <span class="c1"># seed default tags</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">seed_people_tags</span><span class="p">(</span><span class="n">get_driver</span><span class="p">())</span>       <span class="c1"># seed people-related tags</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="k">yield</span>
 </code></pre></div>
 <p>The app is started by <code>start.sh</code> via <code>uvicorn backend.main:app</code>.</p>
 <hr />
-<h2 id="configpy-settings">config.py — Settings<a class="headerlink" href="#configpy-settings" title="Permanent link">&para;</a></h2>
-<p>Uses <strong>Pydantic Settings</strong> to read environment variables with type validation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span> <span class="nc">Settings</span><span class="p">(</span><span class="n">BaseSettings</span><span class="p">):</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">neo4j_uri</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">neo4j_user</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">neo4j_password</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">google_client_id</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">google_client_secret</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">google_drive_folder_id</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">anthropic_api_key</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="c1"># ... etc.</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">model_config</span> <span class="o">=</span> <span class="n">SettingsConfigDict</span><span class="p">(</span><span class="n">env_file</span><span class="o">=</span><span class="s2">&quot;.env&quot;</span><span class="p">)</span>
-</code></pre></div>
-<p><code>settings</code> is a module-level singleton imported throughout the app.</p>
-<hr />
-<h2 id="db-database-layer">db/ — Database Layer<a class="headerlink" href="#db-database-layer" title="Permanent link">&para;</a></h2>
-<h3 id="connectionpy">connection.py<a class="headerlink" href="#connectionpy" title="Permanent link">&para;</a></h3>
-<p>Manages a Neo4j driver singleton:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">def</span> <span class="nf">get_driver</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Driver</span><span class="p">:</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="c1"># returns module-level cached driver instance</span>
-</code></pre></div>
-<h3 id="schemapy">schema.py<a class="headerlink" href="#schemapy" title="Permanent link">&para;</a></h3>
-<p>Runs on startup to create Neo4j indexes and uniqueness constraints. Idempotent — safe to run multiple times.</p>
-<h3 id="queries">queries/<a class="headerlink" href="#queries" title="Permanent link">&para;</a></h3>
-<p>Each file contains functions that:</p>
-<ol>
-<li>Accept plain Python arguments</li>
-<li>Build a Cypher query string</li>
-<li>Run it via <code>driver.session().run()</code></li>
-<li>Return plain dicts or lists</li>
-</ol>
-<p><strong>No FastAPI or MCP types leak into this layer.</strong></p>
-<p>Example pattern:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">def</span> <span class="nf">create_paper</span><span class="p">(</span><span class="n">driver</span><span class="p">:</span> <span class="n">Driver</span><span class="p">,</span> <span class="n">paper_data</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="k">with</span> <span class="n">driver</span><span class="o">.</span><span class="n">session</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">            </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="sd">            MERGE (p:Paper {doi: $doi})</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="sd">            SET p += $props</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="sd">            RETURN p</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="sd">            &quot;&quot;&quot;</span><span class="p">,</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>            <span class="n">doi</span><span class="o">=</span><span class="n">paper_data</span><span class="p">[</span><span class="s2">&quot;doi&quot;</span><span class="p">],</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>            <span class="n">props</span><span class="o">=</span><span class="n">paper_data</span><span class="p">,</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>        <span class="p">)</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>        <span class="k">return</span> <span class="n">result</span><span class="o">.</span><span class="n">single</span><span class="p">()[</span><span class="s2">&quot;p&quot;</span><span class="p">]</span>
-</code></pre></div>
-<hr />
-<h2 id="routers-http-endpoints">routers/ — HTTP Endpoints<a class="headerlink" href="#routers-http-endpoints" title="Permanent link">&para;</a></h2>
-<p>Each router file:</p>
-<ol>
-<li>Creates a FastAPI <code>APIRouter</code> with a prefix and tags</li>
-<li>Defines endpoint functions that call into <code>db/queries/</code> and <code>services/</code></li>
-<li>Validates input/output with <strong>Pydantic schemas</strong> from <code>models/schemas.py</code></li>
-</ol>
-<p>Example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">router</span> <span class="o">=</span> <span class="n">APIRouter</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;/papers&quot;</span><span class="p">,</span> <span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;papers&quot;</span><span class="p">])</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nd">@router</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/upload&quot;</span><span class="p">,</span> <span class="n">response_model</span><span class="o">=</span><span class="n">PaperOut</span><span class="p">)</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">async</span> <span class="k">def</span> <span class="nf">upload_paper</span><span class="p">(</span><span class="n">file</span><span class="p">:</span> <span class="n">UploadFile</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">pdf_bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">file</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">raw_text</span> <span class="o">=</span> <span class="n">pdf_parser</span><span class="o">.</span><span class="n">extract_text</span><span class="p">(</span><span class="n">pdf_bytes</span><span class="p">)</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">metadata</span> <span class="o">=</span> <span class="k">await</span> <span class="n">pdf_parser</span><span class="o">.</span><span class="n">extract_metadata</span><span class="p">(</span><span class="n">raw_text</span><span class="p">)</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="n">drive_id</span> <span class="o">=</span> <span class="n">drive</span><span class="o">.</span><span class="n">upload_pdf</span><span class="p">(</span><span class="n">pdf_bytes</span><span class="p">)</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="n">summary</span> <span class="o">=</span> <span class="k">await</span> <span class="n">ai</span><span class="o">.</span><span class="n">summarize_paper</span><span class="p">(</span><span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;abstract&quot;</span><span class="p">])</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="n">paper</span> <span class="o">=</span> <span class="n">db_papers</span><span class="o">.</span><span class="n">create_paper</span><span class="p">(</span><span class="n">driver</span><span class="p">,</span> <span class="p">{</span><span class="o">...</span><span class="p">})</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="k">return</span> <span class="n">paper</span>
-</code></pre></div>
+<h2 id="dbschemapy-constraints-and-indexes">db/schema.py — Constraints and Indexes<a class="headerlink" href="#dbschemapy-constraints-and-indexes" title="Permanent link">&para;</a></h2>
+<p>Runs on startup. Creates:</p>
+<ul>
+<li><strong>Uniqueness constraints</strong> on: <code>Paper.id</code>, <code>Person.id</code>, <code>Topic.id</code>, <code>Topic.name</code>, <code>Tag.id</code>, <code>Tag.name</code>, <code>Note.id</code>, <code>Project.id</code>, <code>Figure.id</code>, <code>Annotation.id</code>, <code>Blog.id</code>, <code>BlogPost.id</code>, <code>User.id</code>, <code>User.name</code>, <code>Claim.id</code>, <code>Table.id</code>, <code>Conversation.id</code>, <code>Message.id</code>, <code>Venue.id</code></li>
+<li><strong>Fulltext indexes</strong>: <code>paper_search</code> (title, abstract, summary), <code>note_search</code> (content), <code>message_search</code> (content), <code>claim_search</code> (text)</li>
+<li><strong>Vector index</strong>: <code>paper_embeddings</code> on <code>Paper.embedding</code> (768-dim cosine, nomic-embed-text)</li>
+</ul>
 <hr />
 <h2 id="services-business-logic">services/ — Business Logic<a class="headerlink" href="#services-business-logic" title="Permanent link">&para;</a></h2>
 <table>
@@ -1274,7 +1126,7 @@
 <tbody>
 <tr>
 <td><code>ai.py</code></td>
-<td>All Claude API calls — summarise, chat, topic suggestion, figure captions, reference extraction</td>
+<td>All Claude API calls — summarise, chat, topic suggestion, figure captions, claim extraction, cross-paper synthesis, research gap analysis</td>
 </tr>
 <tr>
 <td><code>drive.py</code></td>
@@ -1308,43 +1160,117 @@
 <td><code>bulk_resolver.py</code></td>
 <td>Per-entry resolution logic for the bulk import endpoint</td>
 </tr>
+<tr>
+<td><code>literature_search.py</code></td>
+<td>Keyword-based search across arXiv, PubMed, and bioRxiv</td>
+</tr>
+<tr>
+<td><code>blog_fetcher.py</code></td>
+<td>Fetch and parse blog posts from RSS feeds and URLs</td>
+</tr>
+<tr>
+<td><code>book_chapter_parser.py</code></td>
+<td>Detect chapter boundaries in PDFs using Docling structure and AI</td>
+</tr>
+<tr>
+<td><code>embeddings.py</code></td>
+<td>Generate Ollama (nomic-embed-text) embeddings stored on Paper nodes</td>
+</tr>
+<tr>
+<td><code>person_enrichment.py</code></td>
+<td>Enrich Person nodes with affiliations and Semantic Scholar author data</td>
+</tr>
+<tr>
+<td><code>web_search.py</code></td>
+<td>Web search helper used by research gaps and synthesis endpoints</td>
+</tr>
 </tbody>
 </table>
 <hr />
 <h2 id="modelsschemaspy-pydantic-models">models/schemas.py — Pydantic Models<a class="headerlink" href="#modelsschemaspy-pydantic-models" title="Permanent link">&para;</a></h2>
-<p>Defines all request and response models. These are used:</p>
-<ul>
-<li>As FastAPI endpoint parameters / return types (automatic validation + OpenAPI docs)</li>
-<li>As type hints in MCP tool functions</li>
-</ul>
-<p>Key models include <code>PaperOut</code>, <code>PersonOut</code>, <code>NoteOut</code>, <code>ProjectOut</code>, <code>TagOut</code>, <code>TopicOut</code>, <code>HealthResponse</code>, and various <code>*Create</code> / <code>*Update</code> input models.</p>
+<p>Defines all request and response models used by FastAPI endpoints and MCP tools. Key models include <code>PaperOut</code>, <code>PersonOut</code>, <code>NoteOut</code>, <code>ProjectOut</code>, <code>TagOut</code>, <code>TopicOut</code>, <code>AnnotationOut</code>, <code>ChapterOut</code>, <code>BlogOut</code>, <code>BlogPostOut</code>, <code>ClaimOut</code>, and various <code>*Create</code> / <code>*Update</code> input models.</p>
 <hr />
 <h2 id="tools-mcp-tool-handlers">tools/ — MCP Tool Handlers<a class="headerlink" href="#tools-mcp-tool-handlers" title="Permanent link">&para;</a></h2>
-<p>Each file in <code>tools/</code> registers MCP tools using <strong>FastMCP</strong>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span> <span class="nn">fastmcp</span> <span class="kn">import</span> <span class="n">FastMCP</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">mcp</span> <span class="o">=</span> <span class="n">FastMCP</span><span class="p">(</span><span class="s2">&quot;PaperManager&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nd">@mcp</span><span class="o">.</span><span class="n">tool</span><span class="p">()</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="k">async</span> <span class="k">def</span> <span class="nf">search_papers</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Search papers by keyword, tag, topic, project, or person.&quot;&quot;&quot;</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="k">return</span> <span class="n">db_papers</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">get_driver</span><span class="p">(),</span> <span class="n">query</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
-</code></pre></div>
-<p>Tools are thin wrappers — validation happens in FastMCP, logic lives in <code>db/queries/</code>.</p>
+<p>Each file in <code>tools/</code> registers MCP tools using <strong>FastMCP</strong>. Tools are thin wrappers — validation happens in FastMCP, logic lives in <code>db/queries/</code>.</p>
 <hr />
 <h2 id="prompts-prompt-templates">prompts/ — Prompt Templates<a class="headerlink" href="#prompts-prompt-templates" title="Permanent link">&para;</a></h2>
-<p>All AI prompt templates are plain text files loaded fresh on each API call:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">def</span> <span class="nf">load_prompt</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;prompts&quot;</span> <span class="o">/</span> <span class="n">name</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="k">return</span> <span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">()</span>
-</code></pre></div>
-<p>Edit a prompt file without restarting the backend.</p>
-<hr />
-<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
-<p>Tests live in <code>backend/tests/</code> and use <strong>pytest</strong>. Run with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">cd</span><span class="w"> </span>backend
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>pytest
-</code></pre></div>
-<p>Tests mock external services (Neo4j, Drive, Claude) to run without real credentials.</p>
+<p>All AI prompt templates are plain text files loaded fresh on each API call — edit without restarting the backend.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Used in</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>summary.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Paper summarisation</td>
+</tr>
+<tr>
+<td><code>topics.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Topic suggestion</td>
+</tr>
+<tr>
+<td><code>chat_system.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Single-paper Q&amp;A system prompt</td>
+</tr>
+<tr>
+<td><code>knowledge_chat_system.txt</code></td>
+<td><code>knowledge_chat.py</code></td>
+<td>Multi-paper synthesis system prompt</td>
+</tr>
+<tr>
+<td><code>figure_captions.txt</code></td>
+<td><code>figure_extractor.py</code></td>
+<td>Figure caption generation</td>
+</tr>
+<tr>
+<td><code>author_affiliations.txt</code></td>
+<td><code>pdf_parser.py</code></td>
+<td>Author affiliation extraction</td>
+</tr>
+<tr>
+<td><code>claims.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Claim extraction from paper text</td>
+</tr>
+<tr>
+<td><code>synthesis.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Cross-paper synthesis</td>
+</tr>
+<tr>
+<td><code>research_gaps.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Research gap analysis</td>
+</tr>
+<tr>
+<td><code>chapter_summary.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Book chapter summarisation</td>
+</tr>
+<tr>
+<td><code>chapter_chat_system.txt</code></td>
+<td><code>ai.py</code></td>
+<td>Chapter-level Q&amp;A system prompt</td>
+</tr>
+<tr>
+<td><code>literature_search_keywords.txt</code></td>
+<td><code>literature_search.py</code></td>
+<td>Keyword generation for literature search</td>
+</tr>
+<tr>
+<td><code>merge_scan.txt</code></td>
+<td><code>merge.py</code></td>
+<td>Duplicate paper detection</td>
+</tr>
+</tbody>
+</table>
 
 
 
