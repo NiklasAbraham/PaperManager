@@ -2,9 +2,36 @@
 set -e
 
 PROJECT="$(cd "$(dirname "$0")" && pwd)"
-PYTHON="/Users/M350238/miniforge3/envs/papermanager/bin/python"
 FRONTEND="$PROJECT/frontend"
 BACKEND="$PROJECT/backend"
+
+resolve_python() {
+  if [ -n "${PAPERMANAGER_PYTHON:-}" ] && [ -x "$PAPERMANAGER_PYTHON" ]; then
+    printf '%s\n' "$PAPERMANAGER_PYTHON"
+    return 0
+  fi
+
+  if [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
+    printf '%s\n' "$CONDA_PREFIX/bin/python"
+    return 0
+  fi
+
+  for candidate in "$PROJECT/.venv/bin/python" "$PROJECT/venv/bin/python"; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  if command -v python3 &>/dev/null; then
+    command -v python3
+    return 0
+  fi
+
+  return 1
+}
+
+PYTHON="$(resolve_python || true)"
 
 # Make sure Homebrew-installed binaries (node, npm, ollama) are on PATH
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -16,7 +43,7 @@ warn()  { echo -e "${YELLOW}[warn]${NC}  $*"; }
 error() { echo -e "${RED}[error]${NC} $*"; exit 1; }
 
 # ── pre-flight checks ─────────────────────────────────────────────────────────
-[ -f "$PYTHON" ]              || error "Python env not found at $PYTHON"
+[ -n "$PYTHON" ] && [ -x "$PYTHON" ] || error "Python interpreter not found. Set PAPERMANAGER_PYTHON, activate your conda env, create .venv, or install python3."
 [ -d "$FRONTEND/node_modules" ] || error "Frontend deps missing — run: cd frontend && npm install"
 command -v npm &>/dev/null    || error "npm not found — install Node.js via: brew install node"
 
