@@ -1,14 +1,15 @@
-"""
-Integration tests for Google Drive service.
-Require real credentials — skip in CI with: pytest -m "not integration"
-"""
-import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from services.drive import get_file_url, upload_pdf, delete_file
+import pytest
+
+from services.drive import _build_client_config, _get_creds_file, get_file_url, upload_pdf, delete_file
 
 FIXTURE = Path(__file__).parent / "fixtures" / "attention.pdf"
+
+
+def _drive_auth_available() -> bool:
+    return bool(_get_creds_file().exists())
 
 
 # ── Unit tests (no network) ───────────────────────────────────────────────────
@@ -40,9 +41,30 @@ def test_delete_file_calls_drive_api():
     )
 
 
+def test_build_client_config_uses_env_credentials(monkeypatch):
+    monkeypatch.setattr("services.drive._get_creds_file", lambda: Path("/tmp/missing-credentials.json"))
+    monkeypatch.setattr("services.drive.settings.google_client_id", "client-id")
+    monkeypatch.setattr("services.drive.settings.google_client_secret", "client-secret")
+
+    config = _build_client_config()
+
+    assert config["client_config"]["installed"]["client_id"] == "client-id"
+    assert config["client_config"]["installed"]["client_secret"] == "client-secret"
+
+
+def test_build_client_config_errors_when_not_configured(monkeypatch):
+    monkeypatch.setattr("services.drive._get_creds_file", lambda: Path("/tmp/missing-credentials.json"))
+    monkeypatch.setattr("services.drive.settings.google_client_id", "")
+    monkeypatch.setattr("services.drive.settings.google_client_secret", "")
+
+    with pytest.raises(FileNotFoundError, match="Google Drive OAuth client credentials not configured"):
+        _build_client_config()
+
+
 # ── Integration tests (hit real Drive) ───────────────────────────────────────
 
 @pytest.mark.integration
+@pytest.mark.skipif(not _drive_auth_available(), reason="Google Drive auth not configured locally")
 def test_upload_and_delete_real_pdf():
     """Upload fixture PDF, verify file_id returned, then delete."""
     pdf_bytes = FIXTURE.read_bytes()

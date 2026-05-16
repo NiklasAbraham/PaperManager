@@ -17,19 +17,68 @@ _CREDS_FILE = Path(__file__).parent.parent / "credentials.json"
 _TOKEN_FILE = Path(__file__).parent.parent / "token.json"
 
 
+def _resolve_path(configured_path: str, default_path: Path) -> Path:
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return default_path
+
+
+def _get_creds_file() -> Path:
+    return _resolve_path(settings.google_credentials_file, _CREDS_FILE)
+
+
+def _get_token_file() -> Path:
+    return _resolve_path(settings.google_token_file, _TOKEN_FILE)
+
+
+def _build_client_config() -> dict:
+    creds_file = _get_creds_file()
+    if creds_file.exists():
+        return {"creds_file": creds_file}
+
+    if settings.google_client_id and settings.google_client_secret:
+        return {
+            "client_config": {
+                "installed": {
+                    "client_id": settings.google_client_id,
+                    "client_secret": settings.google_client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": ["http://localhost"],
+                }
+            }
+        }
+
+    raise FileNotFoundError(
+        "Google Drive OAuth client credentials not configured. "
+        "Set GOOGLE_CREDENTIALS_FILE, add backend/credentials.json, or set "
+        "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env."
+    )
+
+
 def get_drive_service():
     """Return an authenticated Drive v3 service object."""
     creds = None
-    if _TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(_TOKEN_FILE), _SCOPES)
+    token_file = _get_token_file()
+    if token_file.exists():
+        creds = Credentials.from_authorized_user_file(str(token_file), _SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(_CREDS_FILE), _SCOPES)
+            client_source = _build_client_config()
+            if "creds_file" in client_source:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(client_source["creds_file"]), _SCOPES
+                )
+            else:
+                flow = InstalledAppFlow.from_client_config(
+                    client_source["client_config"], _SCOPES
+                )
             creds = flow.run_local_server(port=0)
-        _TOKEN_FILE.write_text(creds.to_json())
+        token_file.parent.mkdir(parents=True, exist_ok=True)
+        token_file.write_text(creds.to_json())
 
     return build("drive", "v3", credentials=creds)
 

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_drive_folder_id: str = ""
+    google_credentials_file: str = ""
+    google_token_file: str = ""
 
     # Anthropic (personal)
     anthropic_api_key: str = ""
