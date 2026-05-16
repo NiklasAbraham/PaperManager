@@ -103,8 +103,14 @@ async def upload(
         log.error("Drive upload failed | %s", exc)
         raise HTTPException(status_code=503, detail=f"Drive upload failed: {exc}")
 
-    # Step 5: Summary skipped on upload — generate manually via POST /{id}/regenerate-summary
+    # Step 5: Generate AI summary (skipped for books/lecture decks)
     summary = None
+    if not is_book and raw_text:
+        try:
+            summary = summarize_paper(raw_text, meta.get("title", ""), summary_instructions or None)
+            log.info("Summary generated | title=%.60s", meta.get("title"))
+        except Exception as exc:
+            log.warning("Summary failed (non-fatal) | %s", exc)
 
     # Step 5b: Generate vector embedding (best-effort — don't fail if Ollama is down)
     if not skip_embedding:
@@ -295,7 +301,7 @@ async def upload(
     # Step 11: Extract figures (best-effort — skipped for books/lecture decks)
     if not is_book:
         try:
-            figs = extract_figures(pdf_bytes, caption_method=caption_method or "ollama")
+            figs = extract_figures(pdf_bytes, caption_method=caption_method or "ollama").get("figures", [])
             for i, fig in enumerate(figs):
                 fig_filename = f"{paper['id']}_p{fig['page_number']}_{i+1}.png"
                 fig_drive_id = upload_image(fig["image_bytes"], fig_filename)
@@ -616,7 +622,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
             log.warning("Reference extraction failed (non-fatal) | %s", exc)
 
         try:
-            figs = extract_figures(pdf_bytes, caption_method="ollama")
+            figs = extract_figures(pdf_bytes, caption_method="ollama").get("figures", [])
             for i, fig in enumerate(figs):
                 fig_filename = f"{paper['id']}_p{fig['page_number']}_{i+1}.png"
                 fig_drive_id = upload_image(fig["image_bytes"], fig_filename)
@@ -1495,6 +1501,84 @@ def _safe_filename(title: str, max_len: int = 40) -> str:
     return "".join(c for c in title[:max_len] if c.isalnum() or c in " _-").strip()
 
 
+def _generate_search_keywords(driver, paper: dict) -> list[str]:
+    """
+    Return 5-8 search keywords for a paper.
+    Priority: existing topics from DB → Claude Haiku on title+abstract → title words.
+    """
+    # 1. Topics already linked in the graph
+    try:
+        with driver.session() as session:
+            records = session.run(
+                "MATCH (p:Paper {id: $id})-[:ABOUT]->(t:Topic) RETURN t.name AS name",
+                id=paper["id"],
+            ).data()
+        topics = [r["name"] for r in records if r.get("name")]
+        if len(topics) >= 3:
+            return topics[:8]
+    except Exception:
+        topics = []
+
+    # 2. Claude Haiku — extract keywords from title + abstract
+    title = paper.get("title", "")
+    abstract = paper.get("abstract") or paper.get("summary") or ""
+    if title and (abstract or len(title) > 20):
+        try:
+            import httpx as _httpx
+            import anthropic
+            from config import settings
+            snippet = f"Title: {title}\n\nAbstract: {abstract[:1500]}"
+            prompt = (
+                "Return a JSON array of 6-8 short search keywords (2-4 words each) "
+                "that best describe the research topic of this paper. "
+                "Focus on methods, domains, and concepts — not author names or venues. "
+                "Return ONLY the JSON array, no explanation.\n\n" + snippet
+            )
+            if settings.anthropic_work_api_key:
+                kwargs: dict = {"api_key": settings.anthropic_work_api_key,
+                                "http_client": _httpx.Client(verify=False)}
+                if settings.anthropic_work_base_url:
+                    kwargs["base_url"] = settings.anthropic_work_base_url
+                client = anthropic.Anthropic(**kwargs)
+                model = "claude-sonnet-4-6"
+            elif settings.anthropic_api_key:
+                client = anthropic.Anthropic(api_key=settings.anthropic_api_key,
+                                             base_url="https://api.anthropic.com")
+                model = "claude-haiku-4-5-20251001"
+            else:
+                client = None
+
+            if client:
+                resp = client.messages.create(
+                    model=model, max_tokens=256,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                import json, re
+                raw = resp.content[0].text.strip()
+                raw = re.sub(r"^```(?:json)?\s*", "", raw)
+                raw = re.sub(r"\s*```$", "", raw)
+                kws = json.loads(raw)
+                if isinstance(kws, list) and kws:
+                    combined = topics + [str(k) for k in kws if k]
+                    seen: set[str] = set()
+                    deduped = []
+                    for k in combined:
+                        lo = k.lower()
+                        if lo not in seen:
+                            seen.add(lo)
+                            deduped.append(k)
+                    return deduped[:8]
+        except Exception as exc:
+            log.debug("Keyword generation via Claude failed: %s", exc)
+
+    # 3. Fallback: significant words from the title
+    import re as _re
+    stopwords = {"a", "an", "the", "of", "in", "on", "for", "with", "and", "or",
+                 "to", "is", "are", "via", "using", "based", "from", "by", "its"}
+    words = [w for w in _re.findall(r"[A-Za-z]{4,}", title) if w.lower() not in stopwords]
+    return (topics + words)[:8]
+
+
 @router.get("/{paper_id}/related")
 def get_related(paper_id: str, limit: int = 10):
     """Get related papers from Semantic Scholar recommendations."""
@@ -1531,4 +1615,9 @@ def get_related(paper_id: str, limit: int = 10):
                     r["in_library"] = True
                     r["library_paper_id"] = doi_map[r["doi"]]
 
-    return {"related": related, "source_paper_id": paper_id}
+    if related:
+        return {"related": related, "source_paper_id": paper_id}
+
+    # S2 returned nothing (paper too new or not indexed) — generate search keywords
+    keywords = _generate_search_keywords(driver, paper)
+    return {"related": [], "source_paper_id": paper_id, "search_keywords": keywords}

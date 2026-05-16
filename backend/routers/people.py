@@ -205,8 +205,8 @@ def list_involves(paper_id: str):
 
 @papers_router.post("/{paper_id}/involves", status_code=status.HTTP_201_CREATED)
 def add_involves(paper_id: str, body: InvolvesLink):
-    link_involves(get_driver(), paper_id, body.person_id, body.role)
-    return {"paper_id": paper_id, "person_id": body.person_id, "role": body.role}
+    link_involves(get_driver(), paper_id, body.person_id, body.role, body.years_known)
+    return {"paper_id": paper_id, "person_id": body.person_id, "role": body.role, "years_known": body.years_known}
 
 
 @papers_router.post("/{paper_id}/ai-extract-authors")

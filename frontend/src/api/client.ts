@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, PaperTable, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim } from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -103,6 +103,19 @@ export async function deleteDebugPapers(): Promise<{ deleted: number; figures_de
 export async function countDebugPapers(): Promise<number> {
   const res = await apiFetch<unknown[]>("/search?tag=debug&limit=500");
   return Array.isArray(res) ? res.length : 0;
+}
+
+export async function exportPaperMarkdown(paperId: string): Promise<void> {
+  const res = await fetch(`${BASE}/export/papers/${paperId}/markdown`, { headers: userHeader() });
+  if (!res.ok) throw new Error(`Export failed ${res.status}`);
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const match = cd.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `${paperId}.md`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function exportRdf(): Promise<void> {
@@ -297,11 +310,11 @@ export async function getOrCreatePerson(name: string, affiliation?: string, emai
   });
 }
 
-export async function linkPersonInvolves(paperId: string, personId: string, role: string): Promise<void> {
+export async function linkPersonInvolves(paperId: string, personId: string, role: string, yearsKnown?: string): Promise<void> {
   await apiFetch(`/papers/${paperId}/involves`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ person_id: personId, role }),
+    body: JSON.stringify({ person_id: personId, role, years_known: yearsKnown ?? null }),
   });
 }
 
@@ -624,10 +637,14 @@ export async function fetchFigures(paperId: string): Promise<Figure[]> {
   return apiFetch(`/papers/${paperId}/figures`);
 }
 
+export async function fetchTables(paperId: string): Promise<PaperTable[]> {
+  return apiFetch(`/papers/${paperId}/tables`);
+}
+
 export async function extractFiguresForPaper(
   paperId: string,
   captionMethod = "ollama",
-): Promise<{ extracted: number }> {
+): Promise<{ extracted: number; tables_extracted: number }> {
   return apiFetch(`/papers/${paperId}/figures/extract`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -994,7 +1011,7 @@ export async function discoverAdd(url: string, projectId?: string): Promise<T_In
 export async function getRelatedPapers(
   paperId: string,
   limit: number = 10,
-): Promise<{ related: import("../types").RelatedPaper[]; reason?: string }> {
+): Promise<{ related: import("../types").RelatedPaper[]; reason?: string; search_keywords?: string[] }> {
   return apiFetch(`/papers/${paperId}/related?limit=${limit}`);
 }
 
@@ -1067,4 +1084,40 @@ export async function enrichPerson(personId: string): Promise<{
 
 export async function enrichAllPeople(): Promise<{ status: string; total_people: number }> {
   return apiFetch("/people/enrich-all", { method: "POST" });
+}
+
+// ── Merge Manager ──────────────────────────────────────────────────────────
+
+export interface MergePaperSlim {
+  id: string;
+  title: string;
+  year?: number | null;
+  doi?: string | null;
+  abstract?: string | null;
+  metadata_source?: string | null;
+  drive_file_id?: string | null;
+}
+
+export interface DuplicatePair {
+  paper_a: MergePaperSlim;
+  paper_b: MergePaperSlim;
+  similarity: number;
+  reason: string;
+}
+
+export interface ScanResult {
+  pairs: DuplicatePair[];
+  total_papers: number;
+}
+
+export async function scanDuplicates(model: string = "ollama"): Promise<ScanResult> {
+  return apiFetch(`/merge/scan?model=${encodeURIComponent(model)}`, { method: "POST" });
+}
+
+export async function executeMerge(keepId: string, removeId: string): Promise<{ kept_id: string; removed_id: string; relationships_moved: number }> {
+  return apiFetch("/merge/execute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keep_id: keepId, remove_id: removeId }),
+  });
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   listPaperConversations, getPaperConversationMessages,
   renamePaperConversation, compactPaperConversation,
@@ -222,21 +223,31 @@ export default function ChatPanel({ paperId }: Props) {
         )}
 
         {/* Input for new conversation */}
-        <div className="flex gap-2 shrink-0">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-            disabled={loading}
-            placeholder="Ask a new question…"
-            className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50"
-          />
-          <button onClick={send} disabled={loading || !input.trim()}
-            className="px-3 py-1.5 bg-violet-600 text-white text-sm rounded hover:bg-violet-700 disabled:opacity-50">
-            Ask
-          </button>
+        <div className="flex flex-col gap-1.5 shrink-0">
+          <div className="flex rounded border border-gray-200 overflow-hidden text-[10px] self-start">
+            {(["claude", "claude-work", "ollama"] as Model[]).map((m) => (
+              <button key={m} onClick={() => setModel(m)}
+                className={`px-1.5 py-0.5 transition-colors ${model === m ? "bg-violet-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
+                {MODEL_LABELS[m]}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              disabled={loading}
+              placeholder="Ask a new question…"
+              className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50"
+            />
+            <button onClick={send} disabled={loading || !input.trim()}
+              className="px-3 py-1.5 bg-violet-600 text-white text-sm rounded hover:bg-violet-700 disabled:opacity-50">
+              Ask
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -340,8 +351,8 @@ export default function ChatPanel({ paperId }: Props) {
               {msg.role === "system" ? (
                 <div className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                   <span className="font-semibold text-amber-800">Compacted summary</span>
-                  <div className="mt-1 prose prose-xs max-w-none">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <div className="mt-1 prose prose-xs max-w-none overflow-x-auto">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   </div>
                 </div>
               ) : (
@@ -352,8 +363,8 @@ export default function ChatPanel({ paperId }: Props) {
                 }`}>
                   {msg.role === "assistant" ? (
                     <>
-                      <div className="prose prose-sm max-w-none">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <div className="prose prose-sm max-w-none overflow-x-auto">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                       </div>
                       <div className="flex items-center gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => navigator.clipboard.writeText(msg.content)}

@@ -1,0 +1,11 @@
+You are a research librarian checking for duplicate entries in an academic paper library.
+
+Below are {n_pairs} pairs of paper titles that scored high on string similarity.
+For each pair, decide whether they refer to the same paper — consider typos, abbreviations,
+subtitle variations, and minor word-order differences.
+
+Return ONLY a JSON array — no explanation, no markdown, just JSON.
+Each element: {{"idx": <original index>, "same": true|false, "reason": "<one concise sentence>"}}
+
+Pairs:
+{pairs_block}

@@ -42,6 +42,16 @@ def untag_paper(driver: Driver, paper_id: str, tag_name: str):
         )
 
 
+def delete_tag(driver: Driver, name: str) -> int:
+    """Delete a tag node and all its relationships. Returns number of nodes deleted."""
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (t:Tag {name: $name}) DETACH DELETE t RETURN count(t) AS n",
+            name=name,
+        )
+        return result.single()["n"]
+
+
 def list_tags(driver: Driver) -> list[dict]:
     with driver.session() as session:
         result = session.run(

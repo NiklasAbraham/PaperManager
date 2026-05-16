@@ -1,10 +1,13 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
-import { parsePdf, previewUrl, uploadPdf, deletePaper, checkDuplicate } from "../api/client";
+import { parsePdf, previewUrl, deletePaper, checkDuplicate } from "../api/client";
 import UploadConfirmModal from "./UploadConfirmModal";
-import { useAppSettings } from "../contexts/SettingsContext";
 import type { ParsedMeta, T_IngestOut } from "../types";
+import {
+  persistItem, removePersistedItem, loadPersistedQueue,
+  fileToBuffer, bufferToFile,
+} from "../lib/queueStorage";
 
 interface Props {
   onUploaded: (paper: T_IngestOut) => void;
@@ -20,22 +23,20 @@ type QueuedPdf = {
   meta: ParsedMeta | null;
   status: PdfStatus;
   error: string | null;
-  uploadPromise?: Promise<T_IngestOut>; // live promise while uploading
-  uploadResult?: T_IngestOut;           // resolved result
+  uploadResult?: T_IngestOut;
   duplicateId?: string;
   duplicateTitle?: string;
 };
 
 export default function PaperDrop({ onUploaded, debug }: Props) {
   const navigate = useNavigate();
-  const { settings } = useAppSettings();
   const [open, setOpen]   = useState(false);
   const [tab, setTab]     = useState<Tab>("pdf");
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // PDF queue
-  const [queue, setQueue]       = useState<QueuedPdf[]>([]);
+  const [queue, setQueue]         = useState<QueuedPdf[]>([]);
   const [activeIdx, setActiveIdx] = useState(-1);
 
   // URL state
@@ -44,16 +45,61 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   const [urlMeta, setUrlMeta]       = useState<ParsedMeta | null>(null);
 
+  // ── Restore queue from IndexedDB on mount ──────────────────────────────────
+  useEffect(() => {
+    loadPersistedQueue().then((stored) => {
+      if (!stored.length) return;
+      const restored: QueuedPdf[] = stored.map((s) => ({
+        id: s.id,
+        file: bufferToFile(s.fileBytes, s.fileName, s.fileType),
+        meta: s.meta,
+        status: s.status,
+        error: s.error,
+        duplicateId: s.duplicateId,
+        duplicateTitle: s.duplicateTitle,
+        uploadResult: s.uploadResult,
+      }));
+      setQueue(restored);
+      setTab("queue");
+    }).catch(() => { /* IndexedDB unavailable — silent fail */ });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Persist queue changes to IndexedDB ────────────────────────────────────
+  useEffect(() => {
+    queue.forEach((item) => {
+      if (item.status === "done" || item.status === "uploading" || item.status === "parsing") {
+        // Transient states — remove from store if previously saved
+        removePersistedItem(item.id).catch(() => {});
+        return;
+      }
+      fileToBuffer(item.file).then((bytes) => {
+        persistItem({
+          id: item.id,
+          fileName: item.file.name,
+          fileType: item.file.type,
+          fileBytes: bytes,
+          meta: item.meta,
+          status: item.status as "ready" | "error",
+          error: item.error,
+          duplicateId: item.duplicateId,
+          duplicateTitle: item.duplicateTitle,
+          uploadResult: item.uploadResult,
+        }).catch(() => {});
+      }).catch(() => {});
+    });
+  }, [queue]);
+
   // Auto-switch to queue tab when items arrive
   useEffect(() => {
     if (queue.length > 0 && tab !== "queue") setTab("queue");
   }, [queue.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-remove done rows after 3 s
+  // Auto-remove done rows after 3 s (also cleans IndexedDB)
   useEffect(() => {
     const done = queue.filter((q) => q.status === "done");
     if (!done.length) return;
     const timer = setTimeout(() => {
+      done.forEach((q) => removePersistedItem(q.id).catch(() => {}));
       setQueue((prev) => prev.filter((q) => q.status !== "done"));
     }, 3000);
     return () => clearTimeout(timer);
@@ -74,47 +120,22 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
   const updateItem = (id: string, patch: Partial<QueuedPdf>) =>
     setQueue((prev) => prev.map((q) => q.id === id ? { ...q, ...patch } : q));
 
-  const startUpload = async (item: QueuedPdf, meta: ParsedMeta) => {
-    updateItem(item.id, { meta, status: "uploading" });
-
-    // Check for duplicate BEFORE uploading (saves AI summary cost)
+  const prepareItem = async (item: QueuedPdf, meta: ParsedMeta) => {
+    // Check for duplicates before showing the modal
     try {
       const dup = await checkDuplicate(meta.doi || undefined, meta.title || undefined);
       if (dup) {
         updateItem(item.id, {
+          meta,
           status: "duplicate",
           duplicateId: dup.id,
           duplicateTitle: dup.title,
         });
         return;
       }
-    } catch { /* best-effort — proceed to upload if check fails */ }
+    } catch { /* best-effort — proceed if check fails */ }
 
-    const uploadPromise = uploadPdf(
-      item.file, meta.title || "Untitled",
-      undefined, undefined, undefined, undefined, undefined,
-      settings.autoExtractClaims ? settings.claimsModel : "",
-      settings.generateEmbeddingsOnUpload,
-    );
-    updateItem(item.id, { uploadPromise });
-    uploadPromise
-      .then((result) => updateItem(item.id, { status: "ready", uploadResult: result, uploadPromise: undefined }))
-      .catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : "";
-        if (msg.includes("409")) {
-          try {
-            const json = JSON.parse(msg.replace(/^Upload failed 409: /, ""));
-            updateItem(item.id, {
-              status: "duplicate",
-              duplicateId: json.existing_id,
-              duplicateTitle: json.existing_title,
-              uploadPromise: undefined,
-            });
-            return;
-          } catch { /* fall through */ }
-        }
-        updateItem(item.id, { status: "error", error: msg || "Upload failed", uploadPromise: undefined });
-      });
+    updateItem(item.id, { meta, status: "ready" });
   };
 
   const onDrop = useCallback((files: File[]) => {
@@ -133,7 +154,7 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
 
     newItems.forEach((item) => {
       parsePdf(item.file)
-        .then((meta) => startUpload(item, meta))
+        .then((meta) => prepareItem(item, meta))
         .catch((e) =>
           updateItem(item.id, {
             status: "error",
@@ -153,13 +174,14 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
     if (item.uploadResult) {
       try { await deletePaper(item.uploadResult.id); } catch { /* best-effort */ }
     }
+    removePersistedItem(item.id).catch(() => {});
     setQueue((prev) => prev.filter((q) => q.id !== item.id));
     if (queue[activeIdx]?.id === item.id) setActiveIdx(-1);
   };
 
   const handleClickRow = (idx: number) => {
     const item = queue[idx];
-    if (item.status === "ready" || (item.status === "uploading" && item.uploadPromise)) setActiveIdx(idx);
+    if (item.status === "ready") setActiveIdx(idx);
   };
 
   const handleUrlSubmit = async () => {
@@ -350,23 +372,19 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
         )}
       </div>
 
-      {/* Onboarding modal — shown when user clicks a ready or uploading row */}
-      {activeIdx >= 0 && queue[activeIdx]?.meta &&
-       (queue[activeIdx].status === "ready" || (queue[activeIdx].status === "uploading" && queue[activeIdx].uploadPromise)) && (() => {
+      {/* Onboarding modal — shown when user clicks a ready row */}
+      {activeIdx >= 0 && queue[activeIdx]?.meta && queue[activeIdx].status === "ready" && (() => {
         const reviewable = queue.filter((q) => !["error", "duplicate"].includes(q.status));
         const pos = reviewable.findIndex((q) => q.id === queue[activeIdx].id) + 1;
         return (
           <UploadConfirmModal
             file={queue[activeIdx].file}
             meta={queue[activeIdx].meta!}
-            backgroundUpload={queue[activeIdx].uploadResult
-              ? Promise.resolve(queue[activeIdx].uploadResult!)
-              : queue[activeIdx].uploadPromise}
             skipSummaryStep={true}
             queuePosition={reviewable.length > 1 ? pos : undefined}
             queueTotal={reviewable.length > 1 ? reviewable.length : undefined}
             onConfirmed={(paper) => {
-              updateItem(queue[activeIdx].id, { status: "done" });
+              updateItem(queue[activeIdx].id, { status: "done", uploadResult: paper });
               setActiveIdx(-1);
               onUploaded(paper);
             }}
@@ -404,7 +422,7 @@ function QueueRow({
   onClick: () => void;
   onDelete: () => void;
 }) {
-  const isClickable = item.status === "ready" || (item.status === "uploading" && !!item.uploadPromise);
+  const isClickable = item.status === "ready";
   const title = item.meta?.title || item.uploadResult?.title || item.duplicateTitle || item.file.name;
 
   const statusIcon = {
@@ -418,7 +436,7 @@ function QueueRow({
 
   const statusText = {
     parsing:   "Extracting metadata…",
-    uploading: "Summarising — click to fill in details while you wait",
+    uploading: "Uploading…",
     ready:     "Ready — click to review",
     duplicate: "Already in your library",
     error:     item.error ?? "Something went wrong",

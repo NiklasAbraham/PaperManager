@@ -118,6 +118,7 @@ class AuthorLink(BaseModel):
 class InvolvesLink(BaseModel):
     person_id: str
     role: str
+    years_known: str | None = None  # e.g. "1", "2", "3", "5+"
 
 
 class SpecialtyLink(BaseModel):
@@ -261,6 +262,16 @@ class FigureOut(BaseModel):
     caption: str | None = None
     drive_file_id: str
     drive_url: str | None = None
+    page_number: int
+    created_at: str
+
+
+class TableOut(BaseModel):
+    id: str
+    paper_id: str
+    table_number: int | None = None
+    caption: str | None = None
+    markdown_content: str
     page_number: int
     created_at: str
 

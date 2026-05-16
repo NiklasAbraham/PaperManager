@@ -18,11 +18,11 @@ const TAG_GROUPS = [
   },
   {
     question: "Where did you meet?",
-    tags: ["met-at-conference", "colleague", "collaborator", "contact"],
+    tags: ["met-at-conference", "colleague", "collaborator", "contact", "friend"],
   },
   {
     question: "What is their role?",
-    tags: ["professor", "phd-student", "postdoc", "tech-lead", "co-founder", "advisor", "mentor", "recruiter", "investor", "hiring-manager", "industry", "academia"],
+    tags: ["professor", "phd-student", "postdoc", "student", "tech-lead", "co-founder", "advisor", "mentor", "recruiter", "investor", "hiring-manager", "industry", "academia"],
   },
   {
     question: "What is your relationship / next action?",
@@ -143,24 +143,34 @@ interface PersonDetail extends Person {
 
 // Role options — maps UI label → rel type + role string used in Neo4j
 const ROLES = [
-  { label: "Author",      rel: "authored",    display: "Authored" },
-  { label: "Recommended", rel: "recommended",  display: "Recommended" },
-  { label: "Has read",    rel: "read",         display: "Has Read" },
-  { label: "Working on",  rel: "working_on",   display: "Working On" },
+  { label: "Author",           rel: "authored",         display: "Authored" },
+  { label: "Shared by",        rel: "shared_by",        display: "Shared By" },
+  { label: "Recommended",      rel: "recommended",      display: "Recommended" },
+  { label: "Has read",         rel: "read",             display: "Has Read" },
+  { label: "Working on",       rel: "working_on",       display: "Working On" },
+  { label: "Collaborating",    rel: "collaborating",    display: "Collaborating" },
+  { label: "Supervisor",       rel: "supervisor",       display: "Supervisor" },
+  { label: "Feedback needed",  rel: "feedback_needed",  display: "Feedback Needed" },
 ] as const;
 
 type RoleKey = typeof ROLES[number]["rel"];
 
 const ROLE_COLORS: Record<string, string> = {
-  authored:    "bg-violet-100 text-violet-700",
-  recommended: "bg-amber-100 text-amber-700",
-  read:        "bg-green-100 text-green-700",
-  working_on:  "bg-blue-100 text-blue-700",
+  authored:        "bg-violet-100 text-violet-700",
+  shared_by:       "bg-orange-100 text-orange-700",
+  recommended:     "bg-amber-100 text-amber-700",
+  read:            "bg-green-100 text-green-700",
+  working_on:      "bg-blue-100 text-blue-700",
+  collaborating:   "bg-teal-100 text-teal-700",
+  supervisor:      "bg-purple-100 text-purple-700",
+  feedback_needed: "bg-red-100 text-red-600",
 };
 
 function relKey(link: PaperLink): RoleKey {
   if (link._rel_type === "AUTHORED_BY") return "authored";
-  return (link._role ?? "working_on") as RoleKey;
+  // Fall back to "working_on" only if role is not a known key
+  const role = link._role ?? "working_on";
+  return ROLES.some((r) => r.rel === role) ? (role as RoleKey) : "working_on";
 }
 
 // ── Main page ────────────────────────────────────────────────────────────────
@@ -790,8 +800,11 @@ function PersonDetailPanel({ person, onChanged }: {
             {/* Add connection */}
             <AddPaperLink personId={person.id} existingPapers={person.papers} onAdded={onChanged} />
 
-            {/* Papers by role */}
-            {grouped.map(({ rel, display, papers }) => (
+            {/* Papers by role — only show groups that have papers */}
+            {grouped.filter((g) => g.papers.length > 0).length === 0 && (
+              <p className="text-xs text-gray-400 italic pl-1">No papers linked yet.</p>
+            )}
+            {grouped.filter((g) => g.papers.length > 0).map(({ rel, display, papers }) => (
               <section key={rel}>
                 <div className="flex items-center gap-2 mb-3">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ROLE_COLORS[rel]}`}>
@@ -800,10 +813,7 @@ function PersonDetailPanel({ person, onChanged }: {
                   <span className="text-xs text-gray-400">{papers.length} paper{papers.length !== 1 ? "s" : ""}</span>
                 </div>
 
-                {papers.length === 0 ? (
-                  <p className="text-xs text-gray-300 pl-1">None yet.</p>
-                ) : (
-                  <ul className="space-y-2">
+                <ul className="space-y-2">
                     {papers.map((paper) => (
                       <li key={`${paper.id}-${rel}`}
                         className="flex items-start justify-between gap-3 bg-white border border-gray-100 rounded-lg px-4 py-3 group"
@@ -829,7 +839,6 @@ function PersonDetailPanel({ person, onChanged }: {
                       </li>
                     ))}
                   </ul>
-                )}
               </section>
             ))}
           </div>

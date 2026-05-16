@@ -61,21 +61,48 @@ def summarize_paper(text: str, title: str = "", custom_instructions: str | None 
         prompt = (
             f"{custom_instructions.strip()}\n\n"
             f"Paper title: {title or '(unknown)'}\n\n"
-            f"Paper text (first 8000 words):\n{text[:40000]}"
+            f"Paper text:\n{text[:600000]}"
         )
     else:
         prompt = _load_prompt("summary.txt").format(
             title=title or "(unknown)",
-            text=text[:40000],
+            text=text[:600000],
         )
 
-    client = _personal_client()
-    message = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    def _call(client: anthropic.Anthropic, prompt_text: str) -> str | None:
+        msg = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt_text}],
+        )
+        if msg.content and msg.stop_reason != "refusal":
+            return msg.content[0].text
+        log.warning("summarize_paper: stop_reason=%s content=%s", msg.stop_reason, bool(msg.content))
+        return None
+
+    # Strategy A: personal API with full text
+    result = _call(_personal_client(), prompt)
+
+    # Strategy B: personal API with truncated text (avoids refusals from garbled PDF content)
+    if result is None:
+        short_prompt = prompt[:20000]
+        log.info("summarize_paper: retrying personal API with truncated prompt (%d chars)", len(short_prompt))
+        result = _call(_personal_client(), short_prompt)
+
+    # Strategy C: Work API (Palantir gateway) — may have different content policy
+    if result is None and settings.anthropic_work_api_key:
+        log.info("summarize_paper: trying Work API")
+        work_kwargs: dict[str, Any] = {
+            "api_key": settings.anthropic_work_api_key,
+            "http_client": httpx.Client(verify=_ssl_verify()),
+        }
+        if settings.anthropic_work_base_url:
+            work_kwargs["base_url"] = settings.anthropic_work_base_url
+        result = _call(anthropic.Anthropic(**work_kwargs), prompt)
+
+    if result is None:
+        return "_Summary could not be generated (Claude refused the content). The extracted PDF text may contain garbled or problematic characters._"
+    return result
 
 
 def suggest_topics(title: str, abstract: str = "", summary: str = "") -> list[str]:
@@ -320,6 +347,33 @@ SEMANTIC_SEARCH_TOOL: dict[str, Any] = {
     },
 }
 
+# Tool definition for loading full paper text on demand
+LOAD_FULL_TEXT_TOOL: dict[str, Any] = {
+    "name": "load_full_text",
+    "description": (
+        "Load the complete extracted text of a specific paper from the database. "
+        "Use this when the abstract and summary are insufficient to answer the question — "
+        "for example, when the user asks about specific methods, equations, experimental "
+        "details, pseudocode, or hyperparameters that are only in the full paper body. "
+        "paper_id must be a UUID from the pre-loaded paper context. "
+        "Call this at most 3 times per query."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "paper_id": {
+                "type": "string",
+                "description": "The UUID id of the paper to load (from the pre-loaded context).",
+            },
+            "reason": {
+                "type": "string",
+                "description": "One sentence explaining why the full text is needed.",
+            },
+        },
+        "required": ["paper_id", "reason"],
+    },
+}
+
 # Regex to block write operations
 _CYPHER_WRITE_RE = re.compile(
     r"\b(CREATE|MERGE|SET\s+\w|DELETE|DETACH\s+DELETE|REMOVE|DROP)\b",
@@ -368,6 +422,30 @@ def _run_cypher_safe(driver: Any, query: str) -> list[dict[str, Any]]:
             return rows[:50]
     except Exception as exc:
         return [{"error": str(exc)}]
+
+
+def _condense_paper_for_budget(title: str, raw_text: str, target_tokens: int) -> str:
+    """Use Claude Haiku to condense *raw_text* to approximately *target_tokens* tokens.
+
+    Preserves equations, numerical results, and method details while dropping
+    boilerplate sections (intro motivation, related work, conclusion restatements).
+    """
+    target_words = max(300, target_tokens * 3)
+    prompt = (
+        f"Create a dense technical summary of the following paper in approximately {target_words} words.\n"
+        "Preserve: all mathematical formulas (in LaTeX notation), specific numerical results and "
+        "metrics (AUC, RMSE, accuracy, etc.), method names, architecture details, training "
+        "procedures, dataset names and sizes, hyperparameters.\n"
+        "Omit: introduction motivation, related work discussion, conclusion restatements, "
+        "acknowledgements, references list.\n\n"
+        f"Title: {title}\n\nText:\n{raw_text[:80000]}"
+    )
+    msg = _personal_client().messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=min(4096, target_tokens + 200),
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
 
 
 def estimate_tokens(text: str) -> int:
@@ -419,7 +497,7 @@ def knowledge_chat_stream(
 
     # ── Build system prompt ───────────────────────────────────────────────────
     papers_block = "\n\n".join(_paper_block(p) for p in papers)
-    system = _load_prompt("knowledge_chat_system.txt").format(papers_block=papers_block)
+    system = _load_prompt("knowledge_chat_system.txt").replace("{papers_block}", papers_block)
     if web_context:
         system += f"\n\n## Recent Web Context\n{web_context}"
 
@@ -448,7 +526,7 @@ def knowledge_chat_stream(
     else:
         claude_model = "claude-sonnet-4-6"
 
-    tools = [CYPHER_TOOL, SEMANTIC_SEARCH_TOOL] if driver is not None else []
+    tools = [CYPHER_TOOL, SEMANTIC_SEARCH_TOOL, LOAD_FULL_TEXT_TOOL] if driver is not None else []
 
     # ── Agentic tool-use loop (non-streaming) ─────────────────────────────────
     # Phase 1: let Claude call run_cypher / semantic_search as many times as
@@ -463,7 +541,7 @@ def knowledge_chat_stream(
     while True:
         response = client.messages.create(
             model=claude_model,
-            max_tokens=4096,
+            max_tokens=16000,
             system=system,
             messages=messages,
             tools=tools if tools else anthropic.NOT_GIVEN,
@@ -475,7 +553,7 @@ def knowledge_chat_stream(
                 # No tool calls at all → stream for better responsiveness
                 with client.messages.stream(
                     model=claude_model,
-                    max_tokens=4096,
+                    max_tokens=16000,
                     system=system,
                     messages=messages,
                 ) as stream:
@@ -558,6 +636,51 @@ def knowledge_chat_stream(
                     "content": json.dumps(sem_rows),
                 })
 
+            elif block.name == "load_full_text":
+                lft_paper_id: str = block.input.get("paper_id", "")
+                lft_title = lft_paper_id  # fallback label
+
+                if driver and lft_paper_id:
+                    try:
+                        with driver.session() as _sess:
+                            row = _sess.run(
+                                "MATCH (p:Paper {id: $id}) RETURN p.raw_text AS raw_text, p.title AS title",
+                                id=lft_paper_id,
+                            ).single()
+                        if row and row["raw_text"]:
+                            raw = row["raw_text"]
+                            lft_title = row["title"] or lft_paper_id
+                            raw_tokens = estimate_tokens(raw)
+                            budget_tokens = 15_000
+                            if raw_tokens <= budget_tokens:
+                                lft_content = raw
+                                tok_label = f"{raw_tokens:,} tokens"
+                            else:
+                                lft_content = _condense_paper_for_budget(lft_title, raw, budget_tokens)
+                                tok_label = f"condensed to ~{estimate_tokens(lft_content):,} tokens"
+                        else:
+                            lft_content = "[Full text not available for this paper]"
+                            tok_label = "no text stored"
+                    except Exception as exc:
+                        log.warning("load_full_text tool failed | %s", exc)
+                        lft_content = f"[Error loading full text: {exc}]"
+                        tok_label = "error"
+                else:
+                    lft_content = "[Full text unavailable — no database connection]"
+                    tok_label = "unavailable"
+
+                yield {
+                    "type": "step",
+                    "description": f"Loading full text: {lft_title[:60]} ({tok_label})",
+                    "cypher": None,
+                    "count": None,
+                }
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": lft_content,
+                })
+
         if not tool_results:
             # No recognised tools in this response — break to avoid infinite loop
             break
@@ -571,18 +694,36 @@ def knowledge_chat_stream(
 def summarize_chapter(title: str, text: str, model: str | None = None) -> str:
     """Return a markdown summary of a book/lecture chapter.
 
-    Routes to Anthropic when model starts with 'claude-', otherwise Ollama.
+    Routes to work gateway when model=='claude-work', personal Anthropic when
+    model starts with 'claude-', otherwise Ollama.
     """
     if not text or not text.strip():
         return "_No text available for this chapter._"
 
     effective_model = model or settings.ollama_model
+    use_claude = effective_model == "claude-work" or effective_model.startswith("claude-")
     prompt = _load_prompt("chapter_summary.txt").format(
         title=title or "(untitled chapter)",
-        text=text[:20000] if effective_model.startswith("claude-") else text[:8000],
+        text=text[:20000] if use_claude else text[:8000],
     )
 
-    if effective_model.startswith("claude-"):
+    if effective_model == "claude-work":
+        if not settings.anthropic_work_api_key:
+            raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
+        kwargs: dict[str, Any] = {
+            "api_key": settings.anthropic_work_api_key,
+            "http_client": httpx.Client(verify=_ssl_verify()),
+        }
+        if settings.anthropic_work_base_url:
+            kwargs["base_url"] = settings.anthropic_work_base_url
+        work_client = anthropic.Anthropic(**kwargs)
+        message = work_client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text
+    elif effective_model.startswith("claude-"):
         client = _personal_client()
         message = client.messages.create(
             model=effective_model,

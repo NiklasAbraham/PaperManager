@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
 import Library from "./pages/Library";
 import PaperDetail from "./pages/PaperDetail";
 import People from "./pages/People";
@@ -12,6 +12,7 @@ import Blogs from "./pages/Blogs";
 import BlogPostDetail from "./pages/BlogPostDetail";
 import Teammates from "./pages/Teammates"; // page kept for direct navigation; no navbar link
 import Venues from "./pages/Venues";
+import MergeManager from "./pages/MergeManager";
 import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 import { UserProvider } from "./contexts/UserContext";
 import UserPicker from "./components/UserPicker";
@@ -63,14 +64,25 @@ function NavBar() {
   );
 }
 
-export default function App() {
+function AppLayout() {
+  const { pathname } = useLocation();
+  const isKnowledge = pathname === "/knowledge";
+
   return (
-    <BrowserRouter>
-      <SettingsProvider>
-        <UserProvider>
-        <div className="flex flex-col h-screen bg-gray-50">
-          <NavBar />
-          <div className="flex-1 min-h-0 overflow-auto">
+    <div className="flex flex-col h-screen bg-gray-50">
+      {isKnowledge ? (
+        /* On /knowledge: navbar is fixed, hidden above viewport, slides down on hover */
+        <div className="group fixed top-0 left-0 right-0 z-50">
+          {/* Invisible trigger strip — always at y=0, captures hover */}
+          <div className="h-1.5 w-full bg-violet-400/30 group-hover:opacity-0 transition-opacity" />
+          <div className="-translate-y-full group-hover:translate-y-0 transition-transform duration-200 shadow-lg">
+            <NavBar />
+          </div>
+        </div>
+      ) : (
+        <NavBar />
+      )}
+      <div className={isKnowledge ? "h-screen" : "flex-1 min-h-0 overflow-auto"}>
             <Routes>
               <Route path="/" element={<Library />} />
               <Route path="/paper/:id" element={<PaperDetail />} />
@@ -87,9 +99,19 @@ export default function App() {
               <Route path="/teammates" element={<Teammates />} />
               <Route path="/blogs/posts/:postId" element={<BlogPostDetail />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/merge" element={<MergeManager />} />
             </Routes>
           </div>
         </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <SettingsProvider>
+        <UserProvider>
+          <AppLayout />
         </UserProvider>
       </SettingsProvider>
     </BrowserRouter>

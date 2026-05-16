@@ -4,7 +4,7 @@ so precision, structure, and quantitative specificity are more valuable than rea
 
 Write the summary in the following fixed sections. Use markdown headers exactly as shown.
 Omit a section only if the paper genuinely contains no relevant information for it.
-Target 500–600 words total. Do not exceed 700.
+Target 500–700 words total. Do not exceed 800.
 
 ## Contribution
 State the core claim, novelty, and intended contribution in 2–4 sentences.
@@ -13,6 +13,10 @@ Be specific about what is new relative to prior work — avoid vague phrases lik
 ## Methods
 Describe the technical approach: architecture, algorithm, experimental design, or theoretical framework.
 Include key design choices and why they were made if stated. For ML papers, specify model family, training objective, and inference procedure.
+
+## Input and output
+
+What exactly get inputed into the developed method, which kind of data, with what dimensions and what is the exact output.
 
 ## Key Results
 Report the main quantitative findings. Include benchmark names, metric names, and numbers (e.g. "85.3% accuracy on SQuAD 2.0, +2.1 points over the previous SOTA").
