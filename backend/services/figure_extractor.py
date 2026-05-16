@@ -17,13 +17,19 @@ _MIN_WIDTH = 80
 _MIN_HEIGHT = 80
 _MIN_BYTES = 5_000  # skip very small image data (icons, bullets)
 
-# ── Docling singleton ──────────────────────────────────────────────────────────
+# ── Docling singletons ─────────────────────────────────────────────────────────
+# Full converter: generates page + picture images — great quality, high memory.
+# Lite converter: no page images — tables only, much cheaper for large docs.
+_MAX_PAGES_FULL = 80   # PDFs with more pages use lite converter + pypdf for figures
+
 _converter = None
 _converter_error: str | None = None
+_lite_converter = None
+_lite_converter_error: str | None = None
 
 
 def _get_converter():
-    """Lazy-load the Docling DocumentConverter (expensive, done once)."""
+    """Full converter: page images enabled. Use for PDFs ≤ _MAX_PAGES_FULL pages."""
     global _converter, _converter_error
     if _converter is not None:
         return _converter
@@ -38,19 +44,57 @@ def _get_converter():
         pipeline_options = PdfPipelineOptions()
         pipeline_options.generate_page_images = True      # needed for item.get_image()
         pipeline_options.generate_picture_images = True   # crop figure regions from page images
-        pipeline_options.images_scale = 4.0               # ~288 DPI — crisp figure crops
+        pipeline_options.images_scale = 2.0               # ~144 DPI — good quality, half the memory of 4.0
 
         _converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
             }
         )
-        log.info("Docling DocumentConverter loaded (page+picture images enabled)")
+        log.info("Docling DocumentConverter loaded (page+picture images, 2x scale)")
         return _converter
     except Exception as exc:
         _converter_error = f"Docling unavailable: {exc}"
         log.warning("Docling load failed (will use pypdf fallback): %s", exc)
         raise RuntimeError(_converter_error)
+
+
+def _get_lite_converter():
+    """Lite converter: no page images. Use for large PDFs (tables only, no figure images)."""
+    global _lite_converter, _lite_converter_error
+    if _lite_converter is not None:
+        return _lite_converter
+    if _lite_converter_error is not None:
+        raise RuntimeError(_lite_converter_error)
+    try:
+        from docling.document_converter import DocumentConverter
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import PdfFormatOption
+
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_page_images = False
+        pipeline_options.generate_picture_images = False
+
+        _lite_converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+        )
+        log.info("Docling lite DocumentConverter loaded (no page images)")
+        return _lite_converter
+    except Exception as exc:
+        _lite_converter_error = f"Docling unavailable: {exc}"
+        raise RuntimeError(_lite_converter_error)
+
+
+def _count_pdf_pages(pdf_bytes: bytes) -> int:
+    """Return page count without rendering any pages. Returns 0 on error."""
+    try:
+        from pypdf import PdfReader
+        return len(PdfReader(io.BytesIO(pdf_bytes)).pages)
+    except Exception:
+        return 0
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -175,16 +219,22 @@ def _parse_captions_vision(image_bytes: bytes) -> dict | None:
 
 # ── Docling extraction ─────────────────────────────────────────────────────────
 
-def _extract_figures_docling(converter, pdf_bytes: bytes, caption_method: str) -> list[dict]:
+def _extract_figures_docling(converter, pdf_bytes: bytes, caption_method: str) -> dict:
     """
-    Extract figures using Docling's layout model (RT-DETRv2).
-    caption_method controls how missing captions are supplemented:
+    Extract figures AND tables using Docling's layout model (RT-DETRv2).
+    caption_method controls how missing figure captions are supplemented:
       - "docling": use only Docling's built-in caption matching (text proximity)
       - "ollama":  supplement missing captions with Ollama
       - "claude-vision": supplement missing captions with Claude Haiku vision
+
+    Returns:
+        {
+            "figures": [{page_number, figure_number, caption, image_bytes}, ...],
+            "tables":  [{page_number, table_number, caption, markdown_content}, ...],
+        }
     """
     from docling.datamodel.base_models import InputFormat  # noqa: F401 (ensure docling importable)
-    from docling.datamodel.document import PictureItem
+    from docling.datamodel.document import PictureItem, TableItem
 
     tmp_path = None
     try:
@@ -196,7 +246,7 @@ def _extract_figures_docling(converter, pdf_bytes: bytes, caption_method: str) -
         log.info("Docling: converting PDF (%d bytes)...", len(pdf_bytes))
         result = converter.convert(tmp_path)
         doc = result.document
-        log.info("Docling: conversion done, scanning for figures...")
+        log.info("Docling: conversion done, scanning for figures and tables...")
 
         # Count all item types for diagnostics
         all_items = list(doc.iterate_items())
@@ -207,74 +257,111 @@ def _extract_figures_docling(converter, pdf_bytes: bytes, caption_method: str) -
         log.info("Docling: found %d total items: %s", len(all_items), type_counts)
 
         figures = []
+        tables = []
+
         for item, _level in all_items:
-            if not isinstance(item, PictureItem):
-                continue
 
-            # Get rendered image crop from Docling
-            try:
-                pil_image = item.get_image(doc)
-            except Exception as exc:
-                log.warning("Docling get_image failed: %s", exc)
-                continue
+            # ── Figures ──────────────────────────────────────────────────────
+            if isinstance(item, PictureItem):
+                try:
+                    pil_image = item.get_image(doc)
+                except Exception as exc:
+                    log.warning("Docling get_image failed: %s", exc)
+                    continue
 
-            if pil_image is None:
-                log.warning("Docling: get_image returned None — page images may not have been generated")
-                continue
+                if pil_image is None:
+                    log.warning("Docling: get_image returned None — page images may not have been generated")
+                    continue
 
-            log.info("Docling: PictureItem size=%dx%d", pil_image.width, pil_image.height)
-            png = _pil_to_png(pil_image)
-            if png is None:
-                log.info("Docling: skipped (too small or conversion failed)")
-                continue
+                log.info("Docling: PictureItem size=%dx%d", pil_image.width, pil_image.height)
+                png = _pil_to_png(pil_image)
+                if png is None:
+                    log.info("Docling: skipped (too small or conversion failed)")
+                    continue
 
-            # Page number (1-indexed)
-            try:
-                page_no = item.prov[0].page_no
-            except Exception:
-                page_no = 0
+                try:
+                    page_no = item.prov[0].page_no
+                except Exception:
+                    page_no = 0
 
-            # Caption from Docling's proximity analysis
-            try:
-                caption = item.caption_text(doc) or None
-            except Exception:
-                caption = None
+                try:
+                    caption = item.caption_text(doc) or None
+                except Exception:
+                    caption = None
 
-            # Figure number: parse from caption text
-            figure_number = None
-            if caption:
-                m = re.search(r"(?:Figure|Fig\.?|FIGURE)\s+(\d+)", caption, re.IGNORECASE)
-                if m:
-                    figure_number = int(m.group(1))
+                figure_number = None
+                if caption:
+                    m = re.search(r"(?:Figure|Fig\.?|FIGURE)\s+(\d+)", caption, re.IGNORECASE)
+                    if m:
+                        figure_number = int(m.group(1))
 
-            # Supplement missing caption based on method
-            if not caption:
-                if caption_method == "claude-vision":
-                    info = _parse_captions_vision(png)
-                    if info is None:
-                        continue  # vision says it's not a figure
-                    figure_number = info.get("number")
-                    caption = info.get("caption")
-                elif caption_method == "ollama":
-                    # We don't have page text here; skip Ollama supplement
-                    # (Ollama path works on page text, not individual images)
-                    pass
+                if not caption:
+                    if caption_method == "claude-vision":
+                        info = _parse_captions_vision(png)
+                        if info is None:
+                            continue
+                        figure_number = info.get("number")
+                        caption = info.get("caption")
+                    elif caption_method == "ollama":
+                        pass
 
-            log.info(
-                "Docling: figure found | page=%d fig=%s caption=%.60s",
-                page_no,
-                figure_number or "?",
-                (caption or "—"),
-            )
-            figures.append({
-                "page_number": page_no,
-                "figure_number": figure_number,
-                "caption": caption,
-                "image_bytes": png,
-            })
+                log.info(
+                    "Docling: figure found | page=%d fig=%s caption=%.60s",
+                    page_no, figure_number or "?", (caption or "—"),
+                )
+                figures.append({
+                    "page_number": page_no,
+                    "figure_number": figure_number,
+                    "caption": caption,
+                    "image_bytes": png,
+                })
 
-        log.info("Docling: extraction complete | %d figure(s) found", len(figures))
-        return figures
+            # ── Tables ───────────────────────────────────────────────────────
+            elif isinstance(item, TableItem):
+                try:
+                    page_no = item.prov[0].page_no
+                except Exception:
+                    page_no = 0
+
+                try:
+                    caption = item.caption_text(doc) or None
+                except Exception:
+                    caption = None
+
+                # Parse table number from caption (e.g. "Table 3: ...")
+                table_number = None
+                if caption:
+                    m = re.search(r"(?:Table|TABLE)\s+(\d+)", caption, re.IGNORECASE)
+                    if m:
+                        table_number = int(m.group(1))
+
+                # Export as GitHub-Flavored Markdown table
+                try:
+                    markdown_content = item.export_to_markdown(doc)
+                except Exception as exc:
+                    log.warning("Docling table export_to_markdown failed: %s", exc)
+                    continue
+
+                if not markdown_content or not markdown_content.strip():
+                    continue
+
+                log.info(
+                    "Docling: table found | page=%d tbl=%s caption=%.60s rows=%d",
+                    page_no, table_number or "?", (caption or "—"),
+                    markdown_content.count("\n"),
+                )
+                tables.append({
+                    "page_number": page_no,
+                    "table_number": table_number,
+                    "caption": caption,
+                    "markdown_content": markdown_content,
+                })
+
+        log.info(
+            "Docling: extraction complete | %d figure(s) | %d table(s) found",
+            len(figures), len(tables),
+        )
+        return {"figures": figures, "tables": tables}
 
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -343,7 +430,7 @@ def _extract_figures_pypdf(pdf_bytes: bytes, caption_method: str) -> list[dict]:
                 })
 
     log.info("pypdf extracted %d figures (method=%s)", len(results), caption_method)
-    return results
+    return {"figures": results, "tables": []}
 
 
 # ── Public entry point ─────────────────────────────────────────────────────────
@@ -351,25 +438,45 @@ def _extract_figures_pypdf(pdf_bytes: bytes, caption_method: str) -> list[dict]:
 def extract_figures(
     pdf_bytes: bytes,
     caption_method: str = "docling",
-) -> list[dict]:
+) -> dict:
     """
-    Extract figures from a PDF.
+    Extract figures AND tables from a PDF.
 
-    Returns a list of dicts:
-        {page_number, figure_number, caption, image_bytes (PNG)}
+    Returns:
+        {
+            "figures": [{page_number, figure_number, caption, image_bytes (PNG)}, ...],
+            "tables":  [{page_number, table_number, caption, markdown_content}, ...],
+        }
 
     caption_method:
         "docling"      — Docling layout model (best quality); falls back to pypdf if unavailable
         "ollama"       — Docling + Ollama to supplement missing captions
         "claude-vision"— Docling + Claude Haiku vision to supplement missing captions
     """
-    # Try Docling first (all caption methods use Docling for layout detection)
-    try:
-        converter = _get_converter()
-        return _extract_figures_docling(converter, pdf_bytes, caption_method)
-    except RuntimeError:
-        log.warning("Falling back to pypdf for figure extraction")
-    except Exception as exc:
-        log.warning("Docling extraction failed, falling back to pypdf: %s", exc)
+    n_pages = _count_pdf_pages(pdf_bytes)
+    log.info("extract_figures: PDF has %d pages (threshold=%d)", n_pages, _MAX_PAGES_FULL)
 
-    return _extract_figures_pypdf(pdf_bytes, caption_method)
+    if n_pages <= _MAX_PAGES_FULL:
+        # Short document — use full converter (page images, high quality)
+        try:
+            converter = _get_converter()
+            return _extract_figures_docling(converter, pdf_bytes, caption_method)
+        except RuntimeError:
+            log.warning("Docling unavailable, falling back to pypdf")
+        except Exception as exc:
+            log.warning("Docling extraction failed, falling back to pypdf: %s", exc)
+        return _extract_figures_pypdf(pdf_bytes, caption_method)
+    else:
+        # Large document — use lite converter (no page images) for tables,
+        # then pypdf for figure image streams to avoid OOM.
+        log.info("extract_figures: large PDF (%d pages) — using lite converter + pypdf for figures", n_pages)
+        tables: list[dict] = []
+        try:
+            lite = _get_lite_converter()
+            result = _extract_figures_docling(lite, pdf_bytes, caption_method)
+            tables = result.get("tables", [])
+        except Exception as exc:
+            log.warning("Docling lite extraction failed: %s", exc)
+
+        figures = _extract_figures_pypdf(pdf_bytes, caption_method)
+        return {"figures": figures, "tables": tables}

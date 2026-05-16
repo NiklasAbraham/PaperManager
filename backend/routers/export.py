@@ -9,6 +9,13 @@ from fastapi.responses import Response
 from neo4j import Driver
 
 from db.connection import get_driver
+from db.queries.papers import get_paper
+from db.queries.notes import get_paper_note
+from db.queries.annotations import list_annotations
+from db.queries.claims import get_paper_claims
+from db.queries.references import get_references, get_cited_by
+from db.queries.figures import list_figures
+from db.queries.tables import list_tables
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/export", tags=["export"])
@@ -492,6 +499,235 @@ async def import_rdf(file: UploadFile = File(...)):
 
     log.info("RDF import complete | %s", counts)
     return {"imported": counts}
+
+
+# ── Per-paper Markdown export ─────────────────────────────────────────────────
+
+@router.get("/papers/{paper_id}/markdown")
+def export_paper_markdown(paper_id: str, driver: Driver = Depends(get_driver)):
+    """Export a single paper and all its extracted data as a Markdown file."""
+    paper = get_paper(driver, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # ── Fetch related data ────────────────────────────────────────────────────
+    with driver.session() as session:
+        authors = [
+            r["name"] for r in session.run(
+                "MATCH (p:Paper {id:$id})-[:AUTHORED_BY]->(a:Person) RETURN a.name AS name ORDER BY a.name",
+                id=paper_id,
+            )
+        ]
+        tags = [
+            r["name"] for r in session.run(
+                "MATCH (p:Paper {id:$id})-[:TAGGED]->(t:Tag) RETURN t.name AS name ORDER BY t.name",
+                id=paper_id,
+            )
+        ]
+        topics = [
+            r["name"] for r in session.run(
+                "MATCH (p:Paper {id:$id})-[:ABOUT]->(t:Topic) RETURN t.name AS name ORDER BY t.name",
+                id=paper_id,
+            )
+        ]
+        projects = [
+            {"name": r["name"], "description": r.get("description") or ""}
+            for r in session.run(
+                "MATCH (proj:Project)-[:CONTAINS]->(p:Paper {id:$id}) RETURN proj.name AS name, proj.description AS description ORDER BY proj.name",
+                id=paper_id,
+            )
+        ]
+        involves = [
+            {"name": r["name"], "role": r["role"]}
+            for r in session.run(
+                "MATCH (p:Paper {id:$id})-[rel:INVOLVES]->(a:Person) RETURN a.name AS name, rel.role AS role ORDER BY a.name",
+                id=paper_id,
+            )
+        ]
+
+    note_obj = get_paper_note(driver, paper_id)
+    note_content: str = (note_obj or {}).get("content", "") or ""
+
+    claims = get_paper_claims(driver, paper_id)
+    annotations = list_annotations(driver, paper_id)
+    figures = list_figures(driver, paper_id)
+    tables = list_tables(driver, paper_id)
+    references = get_references(driver, paper_id)
+    cited_by = get_cited_by(driver, paper_id)
+
+    # ── Build Markdown ─────────────────────────────────────────────────────────
+    def _s(v) -> str:
+        return str(v) if v is not None else ""
+
+    lines: list[str] = []
+
+    title = _s(paper.get("title") or "Untitled")
+    lines += [f"# {title}", ""]
+
+    # Metadata table
+    lines.append("## Metadata")
+    lines.append("")
+    meta_rows = [
+        ("Year",            _s(paper.get("year"))),
+        ("DOI",             _s(paper.get("doi"))),
+        ("Venue",           _s(paper.get("venue"))),
+        ("Document type",   _s(paper.get("document_type"))),
+        ("Metadata source", _s(paper.get("metadata_source"))),
+        ("Reading status",  _s(paper.get("reading_status"))),
+        ("Rating",          _s(paper.get("rating"))),
+        ("Bookmarked",      "Yes" if paper.get("bookmarked") else "No"),
+        ("Added",           _s(paper.get("created_at", ""))[:10]),
+    ]
+    for label, val in meta_rows:
+        if val and val not in ("None", "0", "null"):
+            lines.append(f"- **{label}:** {val}")
+    lines.append("")
+
+    # Authors
+    if authors:
+        lines += ["## Authors", ""]
+        for a in authors:
+            lines.append(f"- {a}")
+        lines.append("")
+
+    # Involved people
+    if involves:
+        lines += ["## Involved People", ""]
+        for iv in involves:
+            lines.append(f"- **{iv['name']}** ({iv['role']})")
+        lines.append("")
+
+    # Tags
+    if tags:
+        lines += ["## Tags", ""]
+        lines.append(", ".join(f"`{t}`" for t in tags))
+        lines.append("")
+
+    # Topics
+    if topics:
+        lines += ["## Topics", ""]
+        for t in topics:
+            lines.append(f"- {t}")
+        lines.append("")
+
+    # Projects
+    if projects:
+        lines += ["## Projects", ""]
+        for proj in projects:
+            desc = f" — {proj['description']}" if proj["description"] else ""
+            lines.append(f"- **{proj['name']}**{desc}")
+        lines.append("")
+
+    # Abstract
+    abstract = _s(paper.get("abstract"))
+    if abstract:
+        lines += ["## Abstract", "", abstract, ""]
+
+    # Summary
+    summary = _s(paper.get("summary"))
+    if summary:
+        lines += ["## AI Summary", "", summary, ""]
+
+    # Claims
+    if claims:
+        lines += ["## Extracted Claims", ""]
+        by_type: dict[str, list[str]] = {}
+        for c in claims:
+            by_type.setdefault(c.get("type", "claim"), []).append(c["text"])
+        for ctype, ctexts in sorted(by_type.items()):
+            lines.append(f"### {ctype.capitalize()}s")
+            lines.append("")
+            for text in ctexts:
+                lines.append(f"- {text}")
+            lines.append("")
+
+    # Notes
+    if note_content.strip():
+        lines += ["## Notes", "", note_content, ""]
+
+    # Highlights / Annotations
+    if annotations:
+        lines += ["## Highlights & Annotations", ""]
+        color_label = {
+            "yellow": "Key insight",
+            "green":  "Evidence",
+            "blue":   "Context",
+            "red":    "Question",
+            "purple": "Follow-up",
+        }
+        for ann in annotations:
+            color = ann.get("color", "yellow")
+            label = color_label.get(color, color.capitalize())
+            page = ann.get("page_number")
+            text = ann.get("highlighted_text", "").strip()
+            note = ann.get("note", "").strip()
+            page_str = f" *(p. {page})*" if page else ""
+            lines.append(f"**[{label}]{page_str}** {text}")
+            if note:
+                lines.append(f"  > {note}")
+            lines.append("")
+
+    # Figures
+    if figures:
+        lines += ["## Figures", ""]
+        for fig in figures:
+            fig_num = fig.get("figure_number")
+            page = fig.get("page_number")
+            caption = (fig.get("caption") or "").strip()
+            label = f"Figure {fig_num}" if fig_num else "Figure"
+            page_str = f" *(p. {page})*" if page else ""
+            cap_str = f" — {caption}" if caption else ""
+            lines.append(f"**{label}**{page_str}{cap_str}")
+        lines.append("")
+
+    # Tables
+    if tables:
+        lines += ["## Tables", ""]
+        for tbl in tables:
+            tbl_num = tbl.get("table_number")
+            page = tbl.get("page_number")
+            caption = (tbl.get("caption") or "").strip()
+            md = (tbl.get("markdown_content") or "").strip()
+            label = f"Table {tbl_num}" if tbl_num else "Table"
+            page_str = f" *(p. {page})*" if page else ""
+            cap_str = f": {caption}" if caption else ""
+            lines.append(f"### {label}{page_str}{cap_str}")
+            lines.append("")
+            lines.append(md)
+            lines.append("")
+
+    # References
+    if references:
+        lines += ["## References", ""]
+        for ref in references:
+            ref_title = ref.get("title") or "Untitled"
+            ref_year  = ref.get("year")
+            ref_doi   = ref.get("doi")
+            yr = f" ({ref_year})" if ref_year else ""
+            doi_str = f" — DOI: {ref_doi}" if ref_doi else ""
+            lines.append(f"- {ref_title}{yr}{doi_str}")
+        lines.append("")
+
+    # Cited by
+    if cited_by:
+        lines += ["## Cited By", ""]
+        for ref in cited_by:
+            ref_title = ref.get("title") or "Untitled"
+            ref_year  = ref.get("year")
+            yr = f" ({ref_year})" if ref_year else ""
+            lines.append(f"- {ref_title}{yr}")
+        lines.append("")
+
+    content = "\n".join(lines)
+
+    safe_title = re.sub(r"[^\w\s-]", "", title)[:60].strip().replace(" ", "_")
+    filename = f"{safe_title or paper_id}.md"
+
+    return Response(
+        content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

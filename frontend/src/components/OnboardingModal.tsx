@@ -16,8 +16,9 @@ const STEP_META: Record<Step, { title: string; subtitle: string }> = {
 };
 
 const INVOLVE_ROLES = [
-  "shared_by", "supervisor", "collaborating", "reviewer", "colleague",
+  "shared_by", "supervisor", "collaborating", "reviewer", "colleague", "student", "friend",
 ] as const;
+const YEARS_KNOWN_OPTIONS = ["< 1 year", "1 year", "2 years", "3 years", "5+ years"] as const;
 
 interface Props {
   paper: T_IngestOut;
@@ -275,8 +276,9 @@ function ProjectStep({ paper, onNext }: { paper: T_IngestOut; onNext: () => void
 function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState<string>(INVOLVE_ROLES[0]);
+  const [years, setYears] = useState("");
   const [adding, setAdding] = useState(false);
-  const [linked, setLinked] = useState<{ name: string; role: string }[]>([]);
+  const [linked, setLinked] = useState<{ name: string; role: string; years_known?: string }[]>([]);
   const [allPeople, setAllPeople] = useState<{ id: string; name: string; affiliation?: string }[]>([]);
   const [suggestions, setSuggestions] = useState<{ id: string; name: string; affiliation?: string }[]>([]);
 
@@ -288,10 +290,9 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
   const linkPerson = async (personId: string, personName: string) => {
     setAdding(true);
     try {
-      await linkPersonInvolves(paper.id, personId, role);
-      setLinked((prev) => [...prev, { name: personName, role }]);
-      setName("");
-      setSuggestions([]);
+      await linkPersonInvolves(paper.id, personId, role, years || undefined);
+      setLinked((prev) => [...prev, { name: personName, role, years_known: years || undefined }]);
+      setName(""); setYears(""); setSuggestions([]);
     } catch { /* ignore */ }
     finally { setAdding(false); }
   };
@@ -302,10 +303,9 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
     setAdding(true);
     try {
       const person = await getOrCreatePerson(n);
-      await linkPersonInvolves(paper.id, person.id, role);
-      setLinked((prev) => [...prev, { name: n, role }]);
-      setName("");
-      setSuggestions([]);
+      await linkPersonInvolves(paper.id, person.id, role, years || undefined);
+      setLinked((prev) => [...prev, { name: n, role, years_known: years || undefined }]);
+      setName(""); setYears(""); setSuggestions([]);
     } catch { /* ignore */ }
     finally { setAdding(false); }
   };
@@ -331,6 +331,7 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
             {linked.map((p, i) => (
               <span key={i} className="px-2.5 py-1 text-xs bg-accent-lo text-accent border border-accent-border rounded-full">
                 {p.name} · <span className="text-violet-400">{p.role.replace("_", " ")}</span>
+                {p.years_known && <span className="text-gray-400"> · {p.years_known}</span>}
               </span>
             ))}
           </div>
@@ -388,6 +389,16 @@ function PeopleStep({ paper, onDone }: { paper: T_IngestOut; onDone: () => void 
           >
             {INVOLVE_ROLES.map((r) => (
               <option key={r} value={r}>{r.replace("_", " ")}</option>
+            ))}
+          </select>
+          <select
+            value={years}
+            onChange={(e) => setYears(e.target.value)}
+            className="border border-line rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-raised text-ink-2"
+          >
+            <option value="">Years known…</option>
+            {YEARS_KNOWN_OPTIONS.map((y) => (
+              <option key={y} value={y}>{y}</option>
             ))}
           </select>
           <button

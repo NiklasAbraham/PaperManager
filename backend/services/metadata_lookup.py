@@ -92,6 +92,25 @@ _S2_PAPER_BASE = "https://api.semanticscholar.org/graph/v1/paper"
 _REC_FIELDS = "title,authors,year,abstract,externalIds,venue,citationCount"
 
 
+def _normalise_doi_for_s2(doi: str) -> str:
+    """Convert any DOI/arXiv string to a form S2 accepts as a typed identifier.
+
+    10.48550/arXiv.2604.05181 → ArXiv:2604.05181 (avoids unencoded '/' in path)
+    arXiv:2604.05181          → ArXiv:2604.05181
+    10.1234/something         → DOI:10.1234/something
+    everything else           → returned as-is
+    """
+    # arXiv deposit DOI: 10.48550/arXiv.XXXX.XXXXX
+    m = re.match(r"10\.48550/arXiv\.(\d{4}\.\d{4,5})", doi, re.I)
+    if m:
+        return f"ArXiv:{m.group(1)}"
+    if doi.lower().startswith("arxiv:"):
+        return f"ArXiv:{doi[6:]}"
+    if doi.startswith("10."):
+        return f"DOI:{doi}"
+    return doi
+
+
 def _get_s2_paper_id(doi: str) -> str | None:
     """
     Resolve a DOI or arXiv ID to a Semantic Scholar internal paperId.
@@ -100,13 +119,7 @@ def _get_s2_paper_id(doi: str) -> str | None:
     if not doi:
         return None
 
-    # S2 requires a typed identifier prefix
-    if doi.startswith("10."):
-        s2_id = f"DOI:{doi}"
-    elif doi.lower().startswith("arxiv:"):
-        s2_id = doi
-    else:
-        s2_id = doi
+    s2_id = _normalise_doi_for_s2(doi)
 
     try:
         r = httpx.get(

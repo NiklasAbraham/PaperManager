@@ -102,11 +102,22 @@ Paper text:
 
 # ── Abstract extraction from raw text ─────────────────────────────────────────
 
+_ABSTRACT_HEADER_RE = re.compile(
+    r"^(?:abstract|summary|description|overview)\s*[:\-–]?\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_abstract(text: str) -> str:
+    """Strip any leading 'Abstract' / 'Abstract:' heading from an abstract string."""
+    return _ABSTRACT_HEADER_RE.sub("", text.strip()).strip()
+
+
 def extract_abstract_from_text(text: str) -> str | None:
     m = ABSTRACT_RE.search(text)
     if not m:
         return None
-    abstract = m.group(1).strip()
+    abstract = _clean_abstract(m.group(1))
     # Collapse excessive whitespace / newlines
     abstract = re.sub(r"\s*\n\s*", " ", abstract).strip()
     return abstract if len(abstract) > 50 else None
@@ -154,9 +165,7 @@ def extract_abstract_with_ai(text: str, document_type: str | None = None) -> str
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )
-        result = response.content[0].text.strip()
-        # Strip accidental prefixes the model might still include
-        result = re.sub(r"^(?:abstract|summary|description|overview)\s*[:\-–]\s*", "", result, flags=re.IGNORECASE).strip()
+        result = _clean_abstract(response.content[0].text)
         return result if len(result) > 50 else None
     except Exception:
         log.debug("AI abstract extraction failed", exc_info=True)

@@ -9,8 +9,9 @@ from fastapi.responses import Response
 
 from db.connection import get_driver
 from db.queries.figures import create_figure, list_figures, get_figure, delete_figures_for_paper
+from db.queries.tables import create_table, list_tables, delete_tables_for_paper
 from db.queries.papers import get_paper
-from models.schemas import FigureOut, FigureChatRequest, FigureExtractRequest
+from models.schemas import FigureOut, FigureChatRequest, FigureExtractRequest, TableOut
 from services.drive import upload_image, get_file_url, download_pdf, delete_file
 from services.figure_extractor import extract_figures
 
@@ -51,11 +52,16 @@ def get_figure_image(paper_id: str, figure_id: str):
     return Response(content=image_bytes, media_type="image/png", headers={"Content-Disposition": "inline"})
 
 
+@router.get("/{paper_id}/tables", response_model=list[TableOut])
+def list_paper_tables(paper_id: str):
+    return list_tables(get_driver(), paper_id)
+
+
 @router.post("/{paper_id}/figures/extract")
 def extract_paper_figures(paper_id: str, body: FigureExtractRequest):
     """
-    Download the paper PDF from Drive, extract figures, save to Drive + Neo4j.
-    Deletes any previously extracted figures first.
+    Download the paper PDF from Drive, extract figures AND tables, save to Neo4j.
+    Deletes any previously extracted figures/tables first.
     """
     driver = get_driver()
     paper = get_paper(driver, paper_id)
@@ -69,7 +75,7 @@ def extract_paper_figures(paper_id: str, body: FigureExtractRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Could not download PDF: {e}")
 
-    # Delete old figure files from Drive, then clear Neo4j nodes
+    # Delete old figures from Drive + Neo4j, and old tables from Neo4j
     old_figs = list_figures(driver, paper_id)
     for old_fig in old_figs:
         if old_fig.get("drive_file_id"):
@@ -78,14 +84,18 @@ def extract_paper_figures(paper_id: str, body: FigureExtractRequest):
             except Exception as exc:
                 log.warning("Could not delete old figure from Drive: %s", exc)
     delete_figures_for_paper(driver, paper_id)
+    delete_tables_for_paper(driver, paper_id)
 
     try:
-        figures = extract_figures(pdf_bytes, caption_method=body.caption_method)
+        result = extract_figures(pdf_bytes, caption_method=body.caption_method)
     except Exception as e:
-        log.error("Figure extraction failed for %s: %s", paper_id, e)
+        log.error("Figure/table extraction failed for %s: %s", paper_id, e)
         raise HTTPException(status_code=500, detail=f"Extraction failed: {e}")
 
-    saved = 0
+    figures = result.get("figures", [])
+    tables = result.get("tables", [])
+
+    saved_figures = 0
     for i, fig in enumerate(figures):
         try:
             filename = f"{paper_id}_p{fig['page_number']}_{i+1}.png"
@@ -97,11 +107,26 @@ def extract_paper_figures(paper_id: str, body: FigureExtractRequest):
                 "drive_file_id": drive_file_id,
                 "page_number": fig["page_number"],
             })
-            saved += 1
+            saved_figures += 1
         except Exception as e:
             log.warning("Could not save figure %d for paper %s: %s", i, paper_id, e)
 
-    return {"extracted": saved}
+    saved_tables = 0
+    for i, tbl in enumerate(tables):
+        try:
+            create_table(driver, {
+                "paper_id": paper_id,
+                "table_number": tbl["table_number"],
+                "caption": tbl["caption"],
+                "markdown_content": tbl["markdown_content"],
+                "page_number": tbl["page_number"],
+            })
+            saved_tables += 1
+        except Exception as e:
+            log.warning("Could not save table %d for paper %s: %s", i, paper_id, e)
+
+    log.info("Extraction complete | paper=%s | figures=%d | tables=%d", paper_id, saved_figures, saved_tables)
+    return {"extracted": saved_figures, "tables_extracted": saved_tables}
 
 
 @router.post("/{paper_id}/figures/{figure_id}/chat")

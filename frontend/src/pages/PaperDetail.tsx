@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { apiFetch, extractReferences, aiExtractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, addAuthorByName, aiExtractAuthors, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, aiExtractMetadata, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd, listAnnotations } from "../api/client";
+import remarkGfm from "remark-gfm";
+import { apiFetch, extractReferences, aiExtractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, fetchTables, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, addAuthorByName, aiExtractAuthors, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, aiExtractMetadata, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd, listAnnotations, exportPaperMarkdown, getOrCreatePerson, linkPersonInvolves } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
@@ -12,7 +13,7 @@ import { SpecialZoomLevel } from "@react-pdf-viewer/core";
 import UploadConfirmModal from "../components/UploadConfirmModal";
 import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
-import type { Paper, Person, Topic, Tag, Reference, Figure, GraphData, ParsedMeta, T_IngestOut, Claim, RelatedPaper, Annotation, AnnotationColor } from "../types";
+import type { Paper, Person, Topic, Tag, Reference, Figure, PaperTable, GraphData, ParsedMeta, T_IngestOut, Claim, RelatedPaper, Annotation, AnnotationColor } from "../types";
 
 const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
   paper: "#7c3aed", person: "#2563eb", topic: "#16a34a",
@@ -36,10 +37,12 @@ export default function PaperDetail() {
   const [newTag, setNewTag]   = useState("");
   const [newTopic, setNewTopic] = useState("");
   const [tab, setTab]           = useState<RightTab>("notes");
-  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "chapters" | "summary" | "references" | "graph" | "related" | "people" | "meta" | "claims">("abstract");
+  const [leftTab, setLeftTab]   = useState<"abstract" | "pdf" | "figures" | "tables" | "chapters" | "summary" | "references" | "graph" | "related" | "people" | "meta" | "claims">("abstract");
   // Figures
   const [figures, setFigures]         = useState<Figure[]>([]);
   const [figuresLoaded, setFiguresLoaded] = useState(false);
+  const [tables, setTables]           = useState<PaperTable[]>([]);
+  const [tablesLoaded, setTablesLoaded] = useState(false);
   const [figuresExtracting, setFiguresExtracting] = useState(false);
   const [figuresExtractStep, setFiguresExtractStep] = useState(0);
   const [selectedFigure, setSelectedFigure] = useState<Figure | null>(null);
@@ -54,11 +57,12 @@ export default function PaperDetail() {
   const graphInstanceRef  = useRef<unknown>(null);
 
   // People tab
-  const [involves, setInvolves] = useState<{id: string; name: string; affiliation?: string; role: string}[]>([]);
+  const [involves, setInvolves] = useState<{id: string; name: string; affiliation?: string; role: string; years_known?: string | null}[]>([]);
   const [involvesLoaded, setInvolvesLoaded] = useState(false);
 
   // Related papers tab
   const [relatedPapers, setRelatedPapers] = useState<RelatedPaper[]>([]);
+  const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
   const [relatedLoaded, setRelatedLoaded] = useState(false);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [addingRelatedIds, setAddingRelatedIds] = useState<Set<string>>(new Set());
@@ -172,6 +176,13 @@ export default function PaperDetail() {
     }
   }, [leftTab, id, figuresLoaded]);
 
+  // Load tables lazily
+  useEffect(() => {
+    if (leftTab === "tables" && id && !tablesLoaded) {
+      fetchTables(id).then((tbls) => { setTables(tbls); setTablesLoaded(true); }).catch(() => setTablesLoaded(true));
+    }
+  }, [leftTab, id, tablesLoaded]);
+
   // Load projects lazily when meta tab is first opened
   useEffect(() => {
     if (leftTab === "meta" && id && !projectsLoaded) {
@@ -209,6 +220,7 @@ export default function PaperDetail() {
       getRelatedPapers(id)
         .then((data) => {
           setRelatedPapers(data.related || []);
+          setRelatedKeywords(data.search_keywords || []);
           setRelatedLoaded(true);
         })
         .catch(() => setRelatedLoaded(true))
@@ -297,6 +309,13 @@ export default function PaperDetail() {
     };
   }, [graphData, graphLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [copiedTableId, setCopiedTableId] = useState<string | null>(null);
+  const copyTable = (tbl: PaperTable) => {
+    navigator.clipboard.writeText(tbl.markdown_content).then(() => {
+      setCopiedTableId(tbl.id);
+      setTimeout(() => setCopiedTableId(null), 1500);
+    });
+  };
   const [figuresExtractMsg, setFiguresExtractMsg] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -330,10 +349,14 @@ export default function PaperDetail() {
     setFiguresExtractMsg(null);
     try {
       const res = await extractFiguresForPaper(id, settings.figureCaptionMethod);
-      const figs = await fetchFigures(id);
+      const [figs, tbls] = await Promise.all([fetchFigures(id), fetchTables(id)]);
       setFigures(figs);
       setFiguresLoaded(true);
-      setFiguresExtractMsg(`${res.extracted} figure${res.extracted !== 1 ? "s" : ""} extracted`);
+      setTables(tbls);
+      setTablesLoaded(true);
+      const tblMsg = (res as { tables_extracted?: number }).tables_extracted
+        ? ` + ${(res as { tables_extracted: number }).tables_extracted} table(s)` : "";
+      setFiguresExtractMsg(`${res.extracted} figure${res.extracted !== 1 ? "s" : ""}${tblMsg} extracted`);
     } catch (e) {
       setFiguresExtractMsg(e instanceof Error ? e.message : "Extraction failed");
     } finally {
@@ -685,6 +708,8 @@ export default function PaperDetail() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadMarkdown = () => exportPaperMarkdown(id!);
+
   const handleAddRelated = async (related: RelatedPaper) => {
     const key = related.url;
     setAddingRelatedIds((prev) => new Set(prev).add(key));
@@ -773,6 +798,15 @@ export default function PaperDetail() {
             .bib
           </button>
 
+          {/* Markdown export */}
+          <button
+            onClick={downloadMarkdown}
+            title="Export all paper data as Markdown"
+            className="text-xs text-gray-400 hover:text-violet-600 transition-colors px-2 py-1 border border-gray-200 rounded-lg"
+          >
+            .md
+          </button>
+
         </div>
       </div>
 
@@ -814,6 +848,16 @@ export default function PaperDetail() {
               }`}
             >
               {figuresLoaded && figures.length > 0 ? `Figures (${figures.length})` : "Figures"}
+            </button>
+            <button
+              onClick={() => setLeftTab("tables")}
+              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                leftTab === "tables"
+                  ? "border-violet-600 text-violet-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {tablesLoaded && tables.length > 0 ? `Tables (${tables.length})` : "Tables"}
             </button>
             {(paper.document_type === "book" || paper.document_type === "lecture_deck") && (
               <button
@@ -1369,13 +1413,25 @@ export default function PaperDetail() {
                               <p className="text-xs text-gray-400 mt-0.5">{p.affiliation}</p>
                             )}
                           </div>
-                          <span className="text-[10px] font-medium bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
-                            {p.role}
-                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] font-medium bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
+                              {p.role.replace("_", " ")}
+                            </span>
+                            {p.years_known && (
+                              <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+                                {p.years_known}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
+                )}
+
+                {/* Add involves form */}
+                {involvesLoaded && (
+                  <AddInvolvesForm paperId={id!} onAdded={(p) => setInvolves((prev) => [...prev, p])} />
                 )}
 
                 {!involvesLoaded && <p className="text-xs text-gray-400">Loading…</p>}
@@ -1939,8 +1995,25 @@ export default function PaperDetail() {
                 )}
 
                 {!relatedLoading && relatedLoaded && relatedPapers.length === 0 && (
-                  <div className="text-center py-12 text-gray-400 text-sm">
-                    {paper.doi ? "No related papers found" : "No DOI — recommendations unavailable"}
+                  <div className="py-6">
+                    <p className="text-sm text-gray-400 text-center mb-4">
+                      {paper.doi
+                        ? "Not yet indexed by Semantic Scholar — try searching with these keywords:"
+                        : "No DOI — recommendations unavailable"}
+                    </p>
+                    {relatedKeywords.length > 0 && (
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {relatedKeywords.map((kw, i) => (
+                          <button
+                            key={i}
+                            onClick={() => navigate(`/?q=${encodeURIComponent(kw)}`)}
+                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm rounded-full border border-blue-200 transition-colors"
+                          >
+                            {kw}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2157,6 +2230,76 @@ export default function PaperDetail() {
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Tables tab */}
+          {leftTab === "tables" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-5 space-y-5">
+
+                {/* Toolbar hint */}
+                <p className="text-xs text-gray-400">
+                  Tables are extracted automatically when you run "Extract figures" on the Figures tab.
+                  Click <strong>Copy</strong> to copy a table as Markdown for use elsewhere.
+                </p>
+
+                {/* Empty state */}
+                {tablesLoaded && tables.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-12">
+                    No tables extracted yet.<br />
+                    <span className="text-xs">Go to the Figures tab and click "Extract figures".</span>
+                  </p>
+                )}
+
+                {/* Tables list */}
+                {tables.map((tbl) => (
+                  <div key={tbl.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                      <span className="text-xs font-semibold text-gray-600">
+                        {tbl.table_number ? `Table ${tbl.table_number}` : `Page ${tbl.page_number}`}
+                        {tbl.caption && <span className="font-normal text-gray-500"> — {tbl.caption}</span>}
+                      </span>
+                      <button
+                        onClick={() => copyTable(tbl)}
+                        className="text-xs px-2.5 py-1 rounded border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 transition-colors"
+                      >
+                        {copiedTableId === tbl.id ? "Copied!" : "Copy MD"}
+                      </button>
+                    </div>
+                    {/* Markdown table rendered */}
+                    <div className="overflow-x-auto px-4 py-3">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          table: ({ children }) => (
+                            <table className="w-full text-xs border-collapse">{children}</table>
+                          ),
+                          thead: ({ children }) => (
+                            <thead className="bg-gray-50">{children}</thead>
+                          ),
+                          th: ({ children }) => (
+                            <th className="border border-gray-200 px-3 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">
+                              {children}
+                            </th>
+                          ),
+                          td: ({ children }) => (
+                            <td className="border border-gray-200 px-3 py-2 text-gray-700 align-top">
+                              {children}
+                            </td>
+                          ),
+                          tr: ({ children }) => (
+                            <tr className="even:bg-gray-50/60">{children}</tr>
+                          ),
+                        }}
+                      >
+                        {tbl.markdown_content}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -2415,6 +2558,76 @@ function MetaSection({ title, children }: { title: string; children: React.React
     <div>
       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{title}</p>
       <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+const INVOLVE_ROLES = ["shared_by", "supervisor", "collaborating", "reviewer", "colleague", "student", "friend"] as const;
+const YEARS_KNOWN_OPTIONS = ["< 1 year", "1 year", "2 years", "3 years", "5+ years"] as const;
+
+function AddInvolvesForm({
+  paperId,
+  onAdded,
+}: {
+  paperId: string;
+  onAdded: (p: { id: string; name: string; affiliation?: string; role: string; years_known?: string }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [role, setRole] = useState<string>(INVOLVE_ROLES[0]);
+  const [years, setYears] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const handleAdd = async () => {
+    const n = name.trim();
+    if (!n) return;
+    setAdding(true);
+    try {
+      const person = await getOrCreatePerson(n);
+      await linkPersonInvolves(paperId, person.id, role, years || undefined);
+      onAdded({ id: person.id, name: person.name, affiliation: person.affiliation, role, years_known: years || undefined });
+      setName(""); setYears("");
+    } catch { /* ignore */ }
+    finally { setAdding(false); }
+  };
+
+  return (
+    <div className="pt-2 border-t border-gray-100">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Link person</p>
+      <div className="flex flex-wrap gap-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="Name…"
+          className="flex-1 min-w-28 text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+        />
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          className="text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white"
+        >
+          {INVOLVE_ROLES.map((r) => (
+            <option key={r} value={r}>{r.replace("_", " ")}</option>
+          ))}
+        </select>
+        <select
+          value={years}
+          onChange={(e) => setYears(e.target.value)}
+          className="text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white"
+        >
+          <option value="">Years known…</option>
+          {YEARS_KNOWN_OPTIONS.map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+        <button
+          onClick={handleAdd}
+          disabled={adding || !name.trim()}
+          className="text-xs px-3 py-1.5 bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50"
+        >
+          {adding ? "…" : "Link"}
+        </button>
+      </div>
     </div>
   );
 }

@@ -8,7 +8,7 @@ from logger import setup_logging
 setup_logging()
 
 from config import settings
-from db.connection import get_driver, close_driver
+from db.connection import get_driver, close_driver, reset_driver
 from db.schema import run_schema_setup
 from models.schemas import HealthResponse
 
@@ -40,6 +40,7 @@ from routers.claims import router as claims_router
 from routers.synthesis import router as synthesis_router
 from routers.discover import router as discover_router
 from routers.author_tracker import router as author_tracker_router
+from routers.merge import router as merge_router
 
 
 @asynccontextmanager
@@ -66,6 +67,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from neo4j.exceptions import ServiceUnavailable, SessionExpired
+
+
+class Neo4jReconnectMiddleware(BaseHTTPMiddleware):
+    """Catch dead-connection errors from Neo4j Aura, reset the driver, and return 503."""
+    async def dispatch(self, request: Request, call_next):
+        try:
+            return await call_next(request)
+        except (ServiceUnavailable, SessionExpired) as exc:
+            log.warning("Neo4j connection lost — resetting driver: %s", exc)
+            try:
+                reset_driver()
+            except Exception as e:
+                log.error("Neo4j reconnect failed: %s", e)
+            return JSONResponse(
+                {"detail": "Database connection was reset. Please retry your request."},
+                status_code=503,
+            )
+
+
+app.add_middleware(Neo4jReconnectMiddleware)
 
 
 app.include_router(papers.router)
@@ -97,6 +124,7 @@ app.include_router(claims_router)
 app.include_router(synthesis_router)
 app.include_router(discover_router)
 app.include_router(author_tracker_router)
+app.include_router(merge_router)
 
 
 @app.get("/ollama/models", response_model=list[str])

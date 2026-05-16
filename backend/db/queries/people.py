@@ -111,16 +111,18 @@ def link_author(driver: Driver, paper_id: str, person_id: str):
         )
 
 
-def link_involves(driver: Driver, paper_id: str, person_id: str, role: str):
+def link_involves(driver: Driver, paper_id: str, person_id: str, role: str, years_known: str | None = None):
     with driver.session() as session:
         session.run(
             """
             MATCH (paper:Paper {id: $pid}), (person:Person {id: $peid})
             MERGE (paper)-[r:INVOLVES {role: $role}]->(person)
+            SET r.years_known = $years_known
             """,
             pid=paper_id,
             peid=person_id,
             role=role,
+            years_known=years_known,
         )
 
 
@@ -145,13 +147,14 @@ def get_involves_for_paper(driver: Driver, paper_id: str) -> list[dict]:
     with driver.session() as session:
         result = session.run(
             "MATCH (paper:Paper {id: $id})-[r:INVOLVES]->(person:Person) "
-            "RETURN person, r.role AS role",
+            "RETURN person, r.role AS role, r.years_known AS years_known",
             id=paper_id,
         )
         rows = []
         for record in result:
             d = dict(record["person"])
             d["role"] = record["role"]
+            d["years_known"] = record["years_known"]
             rows.append(d)
         return rows
 

@@ -21,11 +21,27 @@ _SECTION_RE = re.compile(
 )
 
 
+def _s2_paper_id(doi: str) -> str:
+    """Normalise a DOI/arXiv string into a form the S2 API accepts in a URL path.
+
+    10.48550/arXiv.2604.05181 → ArXiv:2604.05181 (avoids unencoded '/' in path)
+    arXiv:2604.05181          → ArXiv:2604.05181 (capitalise prefix for clarity)
+    everything else            → returned as-is
+    """
+    m = re.match(r"10\.48550/arXiv\.(\d{4}\.\d{4,5})", doi, re.I)
+    if m:
+        return f"ArXiv:{m.group(1)}"
+    if doi.lower().startswith("arxiv:"):
+        return f"ArXiv:{doi[6:]}"
+    return doi
+
+
 def _fetch_s2_references(doi: str) -> list[dict] | None:
     """Fetch structured references from Semantic Scholar. Returns None on failure."""
     try:
+        paper_id = _s2_paper_id(doi)
         r = httpx.get(
-            f"{_SS_BASE}/{doi}/references",
+            f"{_SS_BASE}/{paper_id}/references",
             params={"fields": _REF_FIELDS, "limit": 100},
             timeout=15,
         )
@@ -158,7 +174,7 @@ def _parse_ref_json(raw: str) -> list[dict]:
 def extract_references_ai_full(raw_text: str) -> list[dict]:
     """Extract references using Claude Work → Claude personal → Ollama (no S2)."""
     ref_section = _get_ref_section_text(raw_text)
-    ref_text = (ref_section or raw_text)[:14000]
+    ref_text = (ref_section or raw_text)[:80000]
     prompt = _REF_AI_PROMPT.format(ref_text=ref_text)
 
     # Claude Work
@@ -254,7 +270,7 @@ def _extract_references_with_ai(ref_text: str) -> list[dict]:
                     "    doi (string or null — only if explicitly present in the text),\n"
                     "    arxiv_id (string or null — e.g. '2301.07041', only if explicitly present)\n"
                     "- Return ONLY valid JSON array — no markdown fences, no explanation.\n\n"
-                    f"Text:\n{ref_text[:14000]}"
+                    f"Text:\n{ref_text[:80000]}"
                 ),
             }],
         )
@@ -283,19 +299,24 @@ def _extract_references_with_ai(ref_text: str) -> list[dict]:
 
 
 def _get_ref_section_text(raw_text: str) -> str | None:
-    """Return the text of the references section, or None if not found."""
-    match = _SECTION_RE.search(raw_text)
-    if match:
-        return raw_text[match.end():]
+    """Return the text of the references section, or None if not found.
+
+    Uses the LAST match so that books with per-chapter references sections
+    return the final bibliography rather than an early chapter's reference list.
+    """
+    # Find all matches and use the last one (handles books with per-chapter refs)
+    matches = list(_SECTION_RE.finditer(raw_text))
+    if matches:
+        return raw_text[matches[-1].end():]
     # Broader fallback: look for any line that reads like a references header
-    broad = re.search(
-        r"\n\s*(?:references|bibliography|works\s+cited|literature)\s*\n",
+    broad_matches = list(re.finditer(
+        r"\n\s*(?:references|bibliography|works\s+cited|literature|further\s+reading)\s*\n",
         raw_text, re.IGNORECASE
-    )
-    if broad:
-        return raw_text[broad.end():]
-    # Last-resort: use the final 30% of the document text
-    cutoff = max(0, int(len(raw_text) * 0.7))
+    ))
+    if broad_matches:
+        return raw_text[broad_matches[-1].end():]
+    # Last-resort: use the final 20% of the document text
+    cutoff = max(0, int(len(raw_text) * 0.8))
     tail = raw_text[cutoff:]
     return tail if tail.strip() else None
 

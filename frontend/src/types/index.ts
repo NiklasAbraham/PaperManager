@@ -168,6 +168,16 @@ export interface Figure {
   created_at: string;
 }
 
+export interface PaperTable {
+  id: string;
+  paper_id: string;
+  table_number: number | null;
+  caption: string | null;
+  markdown_content: string;
+  page_number: number;
+  created_at: string;
+}
+
 // ── Knowledge Chat ────────────────────────────────────────────────────────────
 
 export interface Conversation {

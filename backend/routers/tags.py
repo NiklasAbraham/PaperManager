@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from db.connection import get_driver
-from db.queries.tags import get_or_create_tag, tag_paper, untag_paper, list_tags, papers_by_tag, get_tags_for_paper
+from db.queries.tags import get_or_create_tag, tag_paper, untag_paper, list_tags, delete_tag, papers_by_tag, get_tags_for_paper
 from models.schemas import TagBody, PaperOut
 
 log = logging.getLogger(__name__)
@@ -14,6 +14,7 @@ DEFAULT_TAGS = [
     "pdf-upload", "from-url", "from-references", "bulk-import", "debug",
     "from-linkedin", "from-twitter", "from-email",
     "from-conference", "from-newsletter", "from-google-scholar",
+    "from-google", "from-ai-chat", "from-arxiv",
 
     # ── Workflow & personal status ─────────────────────────────────────────────
     "to-read", "reading", "read", "important", "revisit",
@@ -179,6 +180,12 @@ def create_tag(body: TagBody):
     return get_or_create_tag(get_driver(), body.name)
 
 
+@tags_router.delete("/{name}", status_code=204)
+def remove_tag(name: str):
+    """Delete a tag and detach it from all papers/people."""
+    delete_tag(get_driver(), name)
+
+
 @tags_router.get("/{name}/papers", response_model=list[PaperOut])
 def papers(name: str):
     return papers_by_tag(get_driver(), name)
@@ -200,7 +207,7 @@ def suggest_tags(body: SuggestBody):
     # Exclude system/source tags from the suggestion list — not useful to suggest these
     _SKIP = {"pdf-upload", "from-url", "from-references", "bulk-import", "debug",
              "from-linkedin", "from-twitter", "from-email", "from-conference",
-             "from-newsletter", "from-google-scholar", "from-colleague"}
+             "from-newsletter", "from-google-scholar", "from-google", "from-ai-chat", "from-arxiv", "from-colleague"}
     candidate_tags = [t for t in existing_tags if t not in _SKIP]
     tag_list = ", ".join(candidate_tags) if candidate_tags else "(none yet)"
 
@@ -211,7 +218,7 @@ def suggest_tags(body: SuggestBody):
         "Task:\n"
         "1. From the available tags above, pick the most relevant ones for this paper (ideally 3–6).\n"
         "2. If fewer than 4 existing tags fit well, suggest additional NEW tag names (total ≥ 4).\n"
-        "   New tags: lowercase, hyphen-separated, max 20 chars each.\n\n"
+        "   New tags: lowercase, hyphen-separated, max 60 chars each.\n\n"
         'Return ONLY valid JSON with exactly two keys:\n'
         '  "existing": [list of chosen tags from the available list]\n'
         '  "new": [list of brand-new tag names, or empty list]\n\n'
@@ -230,9 +237,9 @@ def suggest_tags(body: SuggestBody):
         existing_set = set(existing_tags)
         valid_existing = [t for t in (raw.get("existing") or []) if t in existing_set]
         new_tags = [
-            t.lower().replace(" ", "-")[:20]
+            t.lower().replace(" ", "-")[:60]
             for t in (raw.get("new") or [])
-            if t and t.lower().replace(" ", "-")[:20] not in existing_set
+            if t and t.lower().replace(" ", "-")[:60] not in existing_set
         ]
         return valid_existing, new_tags
 

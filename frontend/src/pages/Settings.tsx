@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
 import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults, listOllamaModels, deleteUser, renameUser } from "../api/client";
 
@@ -8,6 +9,7 @@ type BackfillState = { status: "idle" | "running" | "done" | "error"; result?: B
 
 export default function Settings() {
   const { settings, update, reset } = useAppSettings();
+  const navigate = useNavigate();
   const [confirmReset, setConfirmReset] = useState(false);
   const [exporting, setExporting] = useState<"bibtex" | "json" | "rdf" | "csv" | null>(null);
   const [importing, setImporting] = useState(false);
@@ -179,11 +181,12 @@ export default function Settings() {
 
       {/* ── Books & Chapters ── */}
       <Section title="Books & Chapters" description="Settings for chapter detection and AI summarisation.">
-        <Row label="Summary model" description="Model used to generate per-chapter summaries. Claude models use the personal API key; Ollama models run locally.">
+        <Row label="Summary model" description="Model used to generate per-chapter summaries. 'Claude Work' uses your enterprise gateway; 'Claude' uses the personal API key; Ollama models run locally.">
           {(() => {
             const CLAUDE_OPTIONS = [
-              { value: "claude-opus-4-6",         label: "Claude Opus 4.6" },
-              { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+              { value: "claude-work",              label: "Claude Work (Opus)" },
+              { value: "claude-opus-4-6",          label: "Claude (Opus)" },
+              { value: "claude-haiku-4-5-20251001", label: "Claude (Haiku)" },
             ];
             const localOptions = ollamaModels.map((m) => ({ value: m, label: m }));
             const allOptions = [
@@ -610,6 +613,18 @@ export default function Settings() {
               Delete all debug papers
             </button>
           )}
+        </Row>
+      </Section>
+
+      {/* ── Merge Manager ── */}
+      <Section title="Merge Manager" description="Find near-duplicate papers caused by typos or slight title variations and merge them — moving all connections to the one you keep.">
+        <Row label="Open Merge Manager" description="Run a duplicate scan and resolve conflicts in a side-by-side editor.">
+          <button
+            onClick={() => navigate("/merge")}
+            className="px-4 py-2 text-sm font-medium bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors"
+          >
+            Open →
+          </button>
         </Row>
       </Section>
 

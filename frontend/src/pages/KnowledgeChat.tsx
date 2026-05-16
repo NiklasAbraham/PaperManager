@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import {
   listConversations, getConversationMessages,
   compactConversation, deleteConversation, streamKnowledgeChat,
@@ -545,7 +548,7 @@ export default function KnowledgeChat() {
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-sm prose-invert max-w-none prose-headings:text-gray-100 prose-a:text-violet-400 prose-code:text-green-300">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
                         {(msg as Extract<DisplayMessage, { kind: "chat" }> & { streaming?: boolean }).streaming && (
                           <span className="inline-block w-1.5 h-4 bg-violet-400 animate-pulse ml-0.5 align-middle" />
                         )}
