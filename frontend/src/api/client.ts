@@ -138,10 +138,35 @@ export async function exportCsv(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+export async function exportSnapshot(): Promise<void> {
+  const res = await fetch(`${BASE}/export/snapshot`);
+  if (!res.ok) throw new Error(`Export failed ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const match = cd.match(/filename="?([^\"]+)"?/);
+  a.href = url;
+  a.download = match ? match[1] : "papermanager_snapshot.json";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function importRdf(file: File): Promise<{ imported: Record<string, number> }> {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${BASE}/export/import/rdf`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Import failed ${res.status}: ${detail}`);
+  }
+  return res.json();
+}
+
+export async function importSnapshot(file: File, replace = true): Promise<{ imported: Record<string, number>; replaced: boolean }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/export/import/snapshot?replace=${replace ? "true" : "false"}`, { method: "POST", body: form });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Import failed ${res.status}: ${detail}`);

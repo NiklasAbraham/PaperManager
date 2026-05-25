@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, importRdf, clearPapers, seedDefaults, listOllamaModels, deleteUser, renameUser } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, clearPapers, seedDefaults, listOllamaModels, deleteUser, renameUser } from "../api/client";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures" | "claims" | "embeddings";
@@ -11,11 +11,13 @@ export default function Settings() {
   const { settings, update, reset } = useAppSettings();
   const navigate = useNavigate();
   const [confirmReset, setConfirmReset] = useState(false);
-  const [exporting, setExporting] = useState<"bibtex" | "json" | "rdf" | "csv" | null>(null);
-  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState<"bibtex" | "json" | "rdf" | "csv" | "snapshot" | null>(null);
+  const [importing, setImporting] = useState<"rdf" | "snapshot" | null>(null);
+  const [importKind, setImportKind] = useState<"rdf" | "snapshot" | null>(null);
   const [importResult, setImportResult] = useState<Record<string, number> | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const rdfInputRef = useRef<HTMLInputElement>(null);
+  const snapshotInputRef = useRef<HTMLInputElement>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearResult, setClearResult] = useState<Record<string, number> | null>(null);
@@ -88,10 +90,26 @@ export default function Settings() {
     try { await exportCsv(); } finally { setExporting(null); }
   };
 
+  const handleExportSnapshot = async () => {
+    setExporting("snapshot");
+    try {
+      await exportSnapshot();
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? `Snapshot export failed: ${err.message}`
+          : "Snapshot export failed."
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const handleImportRdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setImporting(true);
+    setImporting("rdf");
+    setImportKind("rdf");
     setImportResult(null);
     setImportError(null);
     try {
@@ -100,8 +118,26 @@ export default function Settings() {
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Import failed");
     } finally {
-      setImporting(false);
+      setImporting(null);
       if (rdfInputRef.current) rdfInputRef.current.value = "";
+    }
+  };
+
+  const handleImportSnapshot = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting("snapshot");
+    setImportKind("snapshot");
+    setImportResult(null);
+    setImportError(null);
+    try {
+      const result = await importSnapshot(file, true);
+      setImportResult(result.imported);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(null);
+      if (snapshotInputRef.current) snapshotInputRef.current.value = "";
     }
   };
 
@@ -411,6 +447,15 @@ export default function Settings() {
             {exporting === "json" ? "Exporting…" : "Download .json"}
           </button>
         </Row>
+        <Row label="Graph snapshot" description="Complete backup of all nodes, labels, relationships, and properties as a JSON snapshot. Use this for full restore.">
+          <button
+            onClick={handleExportSnapshot}
+            disabled={exporting === "snapshot"}
+            className="px-4 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+          >
+            {exporting === "snapshot" ? "Exporting…" : "Download snapshot"}
+          </button>
+        </Row>
         <Row label="RDF / Turtle" description="Full graph export (nodes + relationships) as a .ttl file. Can be re-imported without creating duplicates.">
           <button
             onClick={handleExportRdf}
@@ -429,6 +474,29 @@ export default function Settings() {
             {exporting === "csv" ? "Exporting…" : "Download .zip"}
           </button>
         </Row>
+        <div className="px-5 py-4 space-y-2 border-t border-gray-100">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Import graph snapshot</p>
+            <p className="text-xs text-gray-400 mt-0.5">Upload a snapshot exported from this app to fully restore the graph. This replaces the current database contents.</p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              ref={snapshotInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImportSnapshot}
+              disabled={Boolean(importing)}
+              className="text-sm text-gray-600 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 disabled:opacity-50"
+            />
+            {importing === "snapshot" && <span className="text-xs text-gray-500">Importing snapshot…</span>}
+            {importKind === "snapshot" && importResult && (
+              <span className="text-xs text-green-700 font-medium">
+                Imported: {Object.entries(importResult).map(([k, v]) => `${v} ${k}`).join(", ")}
+              </span>
+            )}
+            {importKind === "snapshot" && importError && <span className="text-xs text-red-600">{importError}</span>}
+          </div>
+        </div>
         <div className="px-5 py-4 space-y-2">
           <div>
             <p className="text-sm font-medium text-gray-800">Import RDF / Turtle</p>
@@ -440,16 +508,16 @@ export default function Settings() {
               type="file"
               accept=".ttl"
               onChange={handleImportRdf}
-              disabled={importing}
+              disabled={Boolean(importing)}
               className="text-sm text-gray-600 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 disabled:opacity-50"
             />
-            {importing && <span className="text-xs text-gray-500">Importing…</span>}
-            {importResult && (
+            {importing === "rdf" && <span className="text-xs text-gray-500">Importing…</span>}
+            {importKind === "rdf" && importResult && (
               <span className="text-xs text-green-700 font-medium">
                 Imported: {Object.entries(importResult).map(([k, v]) => `${v} ${k}`).join(", ")}
               </span>
             )}
-            {importError && <span className="text-xs text-red-600">{importError}</span>}
+            {importKind === "rdf" && importError && <span className="text-xs text-red-600">{importError}</span>}
           </div>
         </div>
       </Section>
