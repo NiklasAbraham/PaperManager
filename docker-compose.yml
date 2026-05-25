@@ -1,0 +1,78 @@
+services:
+  neo4j:
+    image: neo4j:5.15
+    restart: always
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    networks:
+      - papermanager
+
+  backend:
+    build: ./backend
+    restart: always
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_WORK_API_KEY=${ANTHROPIC_WORK_API_KEY:-}
+      - ANTHROPIC_WORK_BASE_URL=${ANTHROPIC_WORK_BASE_URL:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID:-}
+      - GOOGLE_CREDENTIALS_FILE=${GOOGLE_CREDENTIALS_FILE:-}
+      - GOOGLE_TOKEN_FILE=${GOOGLE_TOKEN_FILE:-}
+      - BACKEND_PORT=8000
+      - FRONTEND_URL=https://niklas-abraham.de
+      - SSL_VERIFY=${SSL_VERIFY:-true}
+      - SSL_CA_BUNDLE=${SSL_CA_BUNDLE:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+    depends_on:
+      - neo4j
+    networks:
+      - papermanager
+    volumes:
+      - ./backend:/app
+      - backend_data:/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - backend
+    networks:
+      - papermanager
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.papermanager.rule=Host(`niklas-abraham.de`)"
+      - "traefik.http.routers.papermanager.entrypoints=websecure"
+      - "traefik.http.routers.papermanager.tls=true"
+      - "traefik.http.routers.papermanager.tls.certresolver=letsencrypt"
+      - "traefik.http.services.papermanager.loadbalancer.server.port=80"
+      - "traefik.docker.network=proxy"
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  neo4j_plugins:
+  backend_data:
+
+networks:
+  papermanager:
+    internal: true
+  proxy:
+    external: true
