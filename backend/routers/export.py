@@ -1,4 +1,7 @@
+import sys
+import os
 import csv
+from datetime import datetime, timezone
 import io
 import json
 import logging
@@ -19,6 +22,11 @@ from db.queries.tables import list_tables
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/export", tags=["export"])
+
+SNAPSHOT_FORMAT = "papermanager-graph-snapshot"
+SNAPSHOT_VERSION = 1
+IMPORT_TMP_LABEL = "__PMImport"
+IMPORT_TMP_PROP = "__pm_export_id"
 
 # ── Turtle helpers ────────────────────────────────────────────────────────────
 
@@ -69,6 +77,143 @@ def _node_turtle(uri: str, type_name: str, props: dict, skip: set | None = None)
     else:
         lines[-1] = lines[-1].rstrip(" ;") + " ."
     return lines
+
+
+def _cypher_ident(value: str) -> str:
+    if not value:
+        raise HTTPException(status_code=400, detail="Snapshot contains an empty identifier")
+    return "`" + value.replace("`", "``") + "`"
+
+
+def _snapshot_filename() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"papermanager_snapshot_{stamp}.json"
+
+
+def _build_snapshot(driver: Driver) -> dict:
+    snapshot = {
+        "format": SNAPSHOT_FORMAT,
+        "version": SNAPSHOT_VERSION,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "nodes": [],
+        "relationships": [],
+    }
+
+    with driver.session() as session:
+        snapshot["nodes"] = [
+            {
+                "export_id": record["export_id"],
+                "labels": record["labels"],
+                "properties": dict(record["props"]),
+            }
+            for record in session.run(
+                """
+                MATCH (n)
+                RETURN elementId(n) AS export_id, labels(n) AS labels, properties(n) AS props
+                ORDER BY export_id
+                """
+            )
+        ]
+
+        snapshot["relationships"] = [
+            {
+                "export_id": record["export_id"],
+                "start_export_id": record["start_export_id"],
+                "end_export_id": record["end_export_id"],
+                "type": record["type"],
+                "properties": dict(record["props"]),
+            }
+            for record in session.run(
+                """
+                MATCH (a)-[r]->(b)
+                RETURN elementId(r) AS export_id,
+                       elementId(a) AS start_export_id,
+                       elementId(b) AS end_export_id,
+                       type(r) AS type,
+                       properties(r) AS props
+                ORDER BY export_id
+                """
+            )
+        ]
+
+    return snapshot
+
+
+def _restore_snapshot(driver: Driver, payload: dict, replace: bool) -> dict:
+    if payload.get("format") != SNAPSHOT_FORMAT:
+        raise HTTPException(status_code=400, detail="Unsupported snapshot format")
+    if payload.get("version") != SNAPSHOT_VERSION:
+        raise HTTPException(status_code=400, detail="Unsupported snapshot version")
+
+    nodes = payload.get("nodes")
+    relationships = payload.get("relationships")
+    if not isinstance(nodes, list) or not isinstance(relationships, list):
+        raise HTTPException(status_code=400, detail="Snapshot is missing nodes or relationships")
+
+    counts = {"nodes": 0, "relationships": 0}
+    tmp_label = _cypher_ident(IMPORT_TMP_LABEL)
+
+    def _tx_write(tx):
+        if replace:
+            tx.run("MATCH (n) DETACH DELETE n").consume()
+
+        for node in nodes:
+            export_id = node.get("export_id")
+            labels = node.get("labels")
+            properties = node.get("properties")
+            if not isinstance(export_id, str) or not isinstance(labels, list) or not isinstance(properties, dict):
+                raise HTTPException(status_code=400, detail="Snapshot contains an invalid node entry")
+
+            label_clause = "".join(f":{_cypher_ident(label)}" for label in labels)
+            tx.run(
+                f"""
+                CREATE (n{label_clause}:{tmp_label})
+                SET n = $properties
+                SET n.{IMPORT_TMP_PROP} = $export_id
+                """,
+                properties=properties,
+                export_id=export_id,
+            ).consume()
+            counts["nodes"] += 1
+
+        for rel in relationships:
+            start_export_id = rel.get("start_export_id")
+            end_export_id = rel.get("end_export_id")
+            rel_type = rel.get("type")
+            properties = rel.get("properties")
+            if (
+                not isinstance(start_export_id, str)
+                or not isinstance(end_export_id, str)
+                or not isinstance(rel_type, str)
+                or not isinstance(properties, dict)
+            ):
+                raise HTTPException(status_code=400, detail="Snapshot contains an invalid relationship entry")
+
+            tx.run(
+                f"""
+                MATCH (a:{tmp_label} {{{IMPORT_TMP_PROP}: $start_export_id}})
+                MATCH (b:{tmp_label} {{{IMPORT_TMP_PROP}: $end_export_id}})
+                CREATE (a)-[r:{_cypher_ident(rel_type)}]->(b)
+                SET r = $properties
+                """,
+                start_export_id=start_export_id,
+                end_export_id=end_export_id,
+                properties=properties,
+            ).consume()
+            counts["relationships"] += 1
+
+        tx.run(
+            f"""
+            MATCH (n:{tmp_label})
+            REMOVE n:{tmp_label}
+            REMOVE n.{IMPORT_TMP_PROP}
+            """
+        ).consume()
+
+    with driver.session() as session:
+        session.execute_write(_tx_write)
+
+    return counts
 
 
 # ── BibTeX (existing) ─────────────────────────────────────────────────────────
@@ -285,6 +430,82 @@ def export_csv(driver: Driver = Depends(get_driver)):
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=papermanager_export.zip"},
     )
+
+
+def _json_safe(obj):
+    import datetime
+    import sys
+    try:
+        if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+            return obj.isoformat()
+        # Neo4j DateTime, Date, Time, Duration types
+        if hasattr(obj, 'iso_format'):
+            return obj.iso_format()
+        # Neo4j Point
+        if hasattr(obj, 'x') and hasattr(obj, 'y'):
+            return {'x': obj.x, 'y': obj.y, 'z': getattr(obj, 'z', None)}
+        return str(obj)
+    except Exception as e:
+        # Log the type and value of the unserializable object
+        debug_path = "/tmp/pm_snapshot_debug.log"
+        with open(debug_path, "a") as f:
+            f.write(f"[UNSERIALIZABLE] type={type(obj).__name__} value={repr(obj)} error={e}\n")
+        print(f"[UNSERIALIZABLE] type={type(obj).__name__} value={repr(obj)} error={e}", file=sys.stderr)
+        sys.stderr.flush()
+        raise
+
+@router.get("/snapshot")
+def export_snapshot(driver: Driver = Depends(get_driver)):
+    """Export the full graph as a restorable JSON snapshot."""
+    snapshot = _build_snapshot(driver)
+    debug_path = "/tmp/pm_snapshot_debug.log"
+    def log(msg):
+        with open(debug_path, "a") as f:
+            f.write(msg + "\n")
+        print(msg, file=sys.stderr)
+        sys.stderr.flush()
+    log("[DEBUG] export_snapshot called, using _json_safe:")
+    try:
+        for i, node in enumerate(snapshot.get("nodes", [])):
+            try:
+                json.dumps(node, default=_json_safe)
+            except Exception as e:
+                log(f"[ERROR] Node {i} failed: {e} | {repr(node)}")
+                raise
+        for i, rel in enumerate(snapshot.get("relationships", [])):
+            try:
+                json.dumps(rel, default=_json_safe)
+            except Exception as e:
+                log(f"[ERROR] Relationship {i} failed: {e} | {repr(rel)}")
+                raise
+        data = json.dumps(snapshot, ensure_ascii=False, indent=2, default=_json_safe)
+    except TypeError as exc:
+        import traceback
+        log(f"[ERROR] JSON serialization failed: {exc}")
+        traceback.print_exc(file=sys.stderr)
+        raise
+    log("[DEBUG] export_snapshot completed successfully.")
+    return Response(
+        data,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={_snapshot_filename()}"},
+    )
+
+
+@router.post("/import/snapshot")
+async def import_snapshot(file: UploadFile = File(...), replace: bool = True, driver: Driver = Depends(get_driver)):
+    """Import a full graph snapshot previously exported by this app."""
+    if not file.filename or not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json snapshot files are accepted")
+
+    try:
+        payload = json.loads((await file.read()).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Snapshot file is not valid JSON") from exc
+
+    counts = _restore_snapshot(driver, payload, replace=replace)
+    log.info("Snapshot import complete | replace=%s | %s", replace, counts)
+    return {"imported": counts, "replaced": replace}
 
 
 # ── RDF / Turtle import ───────────────────────────────────────────────────────
