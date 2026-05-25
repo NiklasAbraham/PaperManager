@@ -46,30 +46,30 @@ export default function UserPicker() {
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded border text-sm font-medium transition-colors border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
+        className="flex max-w-56 items-center gap-2 px-3 py-1.5 rounded border text-sm font-medium transition-colors border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
       >
         <span className="w-5 h-5 rounded-full bg-violet-200 text-violet-800 flex items-center justify-center text-xs font-bold select-none">
           {currentUser ? currentUser[0].toUpperCase() : "?"}
         </span>
-        <span>{currentUser ?? "Set name"}</span>
+        <span className="truncate">{currentUser ?? "Set name"}</span>
         <svg className="w-3 h-3 opacity-50" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3 flex flex-col gap-2">
+        <div className="absolute right-0 top-full mt-1 w-64 max-w-[calc(100vw-1rem)] box-border bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3 flex flex-col gap-2">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Who are you?</p>
           {users.length > 0 && (
-            <div className="flex flex-col gap-1">
+            <div className="flex max-h-56 flex-col gap-1 overflow-auto">
               {users.map((u) => (
                 <button
                   key={u}
                   onClick={() => select(u)}
-                  className={`text-left px-3 py-1.5 rounded text-sm transition-colors ${
+                  className={`text-left px-3 py-1.5 rounded text-sm transition-colors truncate ${
                     u === currentUser
                       ? "bg-violet-100 text-violet-700 font-semibold"
                       : "hover:bg-gray-100 text-gray-700"
@@ -80,19 +80,19 @@ export default function UserPicker() {
               ))}
             </div>
           )}
-          <div className="flex gap-1 mt-1">
+          <div className="mt-1 flex items-stretch gap-1 min-w-0">
             <input
               autoFocus
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()}
               placeholder="New name…"
-              className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-400"
+              className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-400"
             />
             <button
               onClick={submit}
               disabled={!input.trim()}
-              className="px-2 py-1 rounded bg-violet-600 text-white text-sm disabled:opacity-40 hover:bg-violet-700"
+              className="shrink-0 px-2 py-1 rounded bg-violet-600 text-white text-sm disabled:opacity-40 hover:bg-violet-700"
             >
               Go
             </button>

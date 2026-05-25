@@ -155,11 +155,13 @@ def extract_abstract_with_ai(text: str, document_type: str | None = None) -> str
     )
     try:
         import anthropic
-        from config import settings
-        if not settings.anthropic_api_key:
+        from services.user_ai_config import get_effective_ai_config
+        ai_cfg = get_effective_ai_config()
+        personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
+        if not personal_key:
             return None
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.Anthropic(api_key=personal_key)
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,

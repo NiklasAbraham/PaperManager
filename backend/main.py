@@ -11,9 +11,11 @@ from config import settings
 from db.connection import get_driver, close_driver, reset_driver
 from db.schema import run_schema_setup
 from models.schemas import HealthResponse
+from services.auth import extract_user_from_auth_header, reset_request_user, set_request_user
 
 log = logging.getLogger(__name__)
 from routers import papers
+from routers.auth import router as auth_router
 from routers.people import people_router, papers_router as people_papers_router
 from routers.tags import tags_router, papers_router as tags_papers_router, seed_default_tags
 from routers.people import seed_people_tags
@@ -78,6 +80,8 @@ from neo4j.exceptions import ServiceUnavailable, SessionExpired
 class Neo4jReconnectMiddleware(BaseHTTPMiddleware):
     """Catch dead-connection errors from Neo4j Aura, reset the driver, and return 503."""
     async def dispatch(self, request: Request, call_next):
+        request_user = extract_user_from_auth_header(request.headers.get("Authorization"))
+        ctx_token = set_request_user(request_user)
         try:
             return await call_next(request)
         except (ServiceUnavailable, SessionExpired) as exc:
@@ -90,11 +94,14 @@ class Neo4jReconnectMiddleware(BaseHTTPMiddleware):
                 {"detail": "Database connection was reset. Please retry your request."},
                 status_code=503,
             )
+        finally:
+            reset_request_user(ctx_token)
 
 
 app.add_middleware(Neo4jReconnectMiddleware)
 
 
+app.include_router(auth_router)
 app.include_router(papers.router)
 app.include_router(people_router)
 app.include_router(people_papers_router)

@@ -150,12 +150,19 @@ def _restore_snapshot(driver: Driver, payload: dict, replace: bool) -> dict:
     if not isinstance(nodes, list) or not isinstance(relationships, list):
         raise HTTPException(status_code=400, detail="Snapshot is missing nodes or relationships")
 
-    counts = {"nodes": 0, "relationships": 0}
+    counts = {"nodes": 0, "relationships": 0, "notes": 0, "figures": 0, "note_rels": 0, "figure_rels": 0}
     tmp_label = _cypher_ident(IMPORT_TMP_LABEL)
 
     def _tx_write(tx):
         if replace:
+            log.info("Clearing existing graph before snapshot restore")
             tx.run("MATCH (n) DETACH DELETE n").consume()
+
+        # Track special node types for validation
+        note_count = 0
+        figure_count = 0
+        notes_with_content = 0
+        figures_with_drive = 0
 
         for node in nodes:
             export_id = node.get("export_id")
@@ -163,6 +170,22 @@ def _restore_snapshot(driver: Driver, payload: dict, replace: bool) -> dict:
             properties = node.get("properties")
             if not isinstance(export_id, str) or not isinstance(labels, list) or not isinstance(properties, dict):
                 raise HTTPException(status_code=400, detail="Snapshot contains an invalid node entry")
+
+            # Validate and log special node types
+            if "Note" in labels:
+                note_count += 1
+                if properties.get("content"):
+                    notes_with_content += 1
+                else:
+                    log.warning("Note node without content: id=%s", properties.get("id"))
+            
+            if "Figure" in labels:
+                figure_count += 1
+                if properties.get("drive_file_id"):
+                    figures_with_drive += 1
+                else:
+                    log.warning("Figure node without drive_file_id: id=%s, paper_id=%s", 
+                              properties.get("id"), properties.get("paper_id"))
 
             label_clause = "".join(f":{_cypher_ident(label)}" for label in labels)
             tx.run(
@@ -175,6 +198,16 @@ def _restore_snapshot(driver: Driver, payload: dict, replace: bool) -> dict:
                 export_id=export_id,
             ).consume()
             counts["nodes"] += 1
+
+        log.info("Imported %d nodes | Notes: %d (%d with content) | Figures: %d (%d with drive_file_id)",
+                counts["nodes"], note_count, notes_with_content, figure_count, figures_with_drive)
+        
+        counts["notes"] = note_count
+        counts["figures"] = figure_count
+
+        # Track relationship types
+        note_rel_count = 0
+        figure_rel_count = 0
 
         for rel in relationships:
             start_export_id = rel.get("start_export_id")
@@ -189,6 +222,12 @@ def _restore_snapshot(driver: Driver, payload: dict, replace: bool) -> dict:
             ):
                 raise HTTPException(status_code=400, detail="Snapshot contains an invalid relationship entry")
 
+            # Track note and figure relationships
+            if rel_type == "HAS_NOTE":
+                note_rel_count += 1
+            elif rel_type == "HAS_FIGURE":
+                figure_rel_count += 1
+
             tx.run(
                 f"""
                 MATCH (a:{tmp_label} {{{IMPORT_TMP_PROP}: $start_export_id}})
@@ -201,6 +240,12 @@ def _restore_snapshot(driver: Driver, payload: dict, replace: bool) -> dict:
                 properties=properties,
             ).consume()
             counts["relationships"] += 1
+
+        log.info("Imported %d relationships | HAS_NOTE: %d | HAS_FIGURE: %d",
+                counts["relationships"], note_rel_count, figure_rel_count)
+        
+        counts["note_rels"] = note_rel_count
+        counts["figure_rels"] = figure_rel_count
 
         tx.run(
             f"""
@@ -506,6 +551,90 @@ async def import_snapshot(file: UploadFile = File(...), replace: bool = True, dr
     counts = _restore_snapshot(driver, payload, replace=replace)
     log.info("Snapshot import complete | replace=%s | %s", replace, counts)
     return {"imported": counts, "replaced": replace}
+
+
+@router.post("/import/snapshot/validate")
+async def validate_snapshot(file: UploadFile = File(...)):
+    """Validate and inspect a snapshot file without importing it."""
+    if not file.filename or not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json snapshot files are accepted")
+
+    try:
+        payload = json.loads((await file.read()).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Snapshot file is not valid JSON") from exc
+
+    # Validate format and version
+    if payload.get("format") != SNAPSHOT_FORMAT:
+        return {"valid": False, "error": "Unsupported snapshot format"}
+    if payload.get("version") != SNAPSHOT_VERSION:
+        return {"valid": False, "error": "Unsupported snapshot version"}
+
+    nodes = payload.get("nodes", [])
+    relationships = payload.get("relationships", [])
+    
+    # Analyze node types
+    node_types = {}
+    notes_with_content = 0
+    notes_without_content = []
+    figures_with_drive = 0
+    figures_without_drive = []
+    
+    for node in nodes:
+        labels = node.get("labels", [])
+        properties = node.get("properties", {})
+        
+        for label in labels:
+            node_types[label] = node_types.get(label, 0) + 1
+        
+        if "Note" in labels:
+            if properties.get("content"):
+                notes_with_content += 1
+            else:
+                notes_without_content.append({
+                    "id": properties.get("id"),
+                    "created_at": properties.get("created_at")
+                })
+        
+        if "Figure" in labels:
+            if properties.get("drive_file_id"):
+                figures_with_drive += 1
+            else:
+                figures_without_drive.append({
+                    "id": properties.get("id"),
+                    "paper_id": properties.get("paper_id"),
+                    "figure_number": properties.get("figure_number")
+                })
+    
+    # Analyze relationship types
+    rel_types = {}
+    for rel in relationships:
+        rel_type = rel.get("type")
+        if rel_type:
+            rel_types[rel_type] = rel_types.get(rel_type, 0) + 1
+    
+    return {
+        "valid": True,
+        "format": payload.get("format"),
+        "version": payload.get("version"),
+        "exported_at": payload.get("exported_at"),
+        "total_nodes": len(nodes),
+        "total_relationships": len(relationships),
+        "node_types": node_types,
+        "relationship_types": rel_types,
+        "notes": {
+            "total": node_types.get("Note", 0),
+            "with_content": notes_with_content,
+            "without_content": len(notes_without_content),
+            "missing_content_details": notes_without_content[:10]  # Show first 10
+        },
+        "figures": {
+            "total": node_types.get("Figure", 0),
+            "with_drive_file_id": figures_with_drive,
+            "without_drive_file_id": len(figures_without_drive),
+            "missing_drive_details": figures_without_drive[:10]  # Show first 10
+        }
+    }
 
 
 # ── RDF / Turtle import ───────────────────────────────────────────────────────

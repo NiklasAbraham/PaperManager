@@ -968,6 +968,7 @@ def ai_extract_metadata(paper_id: str):
     import anthropic as _anthropic
     import httpx as _httpx
     from config import settings as _settings
+    from services.user_ai_config import get_effective_ai_config
     from services.pdf_parser import find_doi, YEAR_RE, _PUBLISHED_YEAR_RE
 
     driver = get_driver()
@@ -999,17 +1000,21 @@ def ai_extract_metadata(paper_id: str):
         return _json.loads(raw.strip())
 
     result: dict | None = None
+    _ai_cfg = get_effective_ai_config()
+    _work_key = (_ai_cfg.get("anthropic_work_api_key") or "").strip()
+    _work_base = (_ai_cfg.get("anthropic_work_base_url") or "").strip()
+    _personal_key = (_ai_cfg.get("anthropic_api_key") or "").strip()
 
     # Try Claude Work first
-    if _settings.anthropic_work_api_key:
+    if _work_key:
         try:
             import ssl
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            kwargs: dict = {"api_key": _settings.anthropic_work_api_key, "http_client": _httpx.Client(verify=False)}
-            if _settings.anthropic_work_base_url:
-                kwargs["base_url"] = _settings.anthropic_work_base_url
+            kwargs: dict = {"api_key": _work_key, "http_client": _httpx.Client(verify=False)}
+            if _work_base:
+                kwargs["base_url"] = _work_base
             client = _anthropic.Anthropic(**kwargs)
             resp = client.messages.create(
                 model="claude-sonnet-4-6",
@@ -1021,9 +1026,9 @@ def ai_extract_metadata(paper_id: str):
             log.debug("Claude Work ai-extract failed: %s", exc)
 
     # Fallback: Claude personal
-    if result is None and _settings.anthropic_api_key:
+    if result is None and _personal_key:
         try:
-            client = _anthropic.Anthropic(api_key=_settings.anthropic_api_key)
+            client = _anthropic.Anthropic(api_key=_personal_key)
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=512,
@@ -1526,7 +1531,7 @@ def _generate_search_keywords(driver, paper: dict) -> list[str]:
         try:
             import httpx as _httpx
             import anthropic
-            from config import settings
+            from services.user_ai_config import get_effective_ai_config
             snippet = f"Title: {title}\n\nAbstract: {abstract[:1500]}"
             prompt = (
                 "Return a JSON array of 6-8 short search keywords (2-4 words each) "
@@ -1534,15 +1539,19 @@ def _generate_search_keywords(driver, paper: dict) -> list[str]:
                 "Focus on methods, domains, and concepts — not author names or venues. "
                 "Return ONLY the JSON array, no explanation.\n\n" + snippet
             )
-            if settings.anthropic_work_api_key:
-                kwargs: dict = {"api_key": settings.anthropic_work_api_key,
+            ai_cfg = get_effective_ai_config()
+            work_key = (ai_cfg.get("anthropic_work_api_key") or "").strip()
+            work_base = (ai_cfg.get("anthropic_work_base_url") or "").strip()
+            personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
+            if work_key:
+                kwargs: dict = {"api_key": work_key,
                                 "http_client": _httpx.Client(verify=False)}
-                if settings.anthropic_work_base_url:
-                    kwargs["base_url"] = settings.anthropic_work_base_url
+                if work_base:
+                    kwargs["base_url"] = work_base
                 client = anthropic.Anthropic(**kwargs)
                 model = "claude-sonnet-4-6"
-            elif settings.anthropic_api_key:
-                client = anthropic.Anthropic(api_key=settings.anthropic_api_key,
+            elif personal_key:
+                client = anthropic.Anthropic(api_key=personal_key,
                                              base_url="https://api.anthropic.com")
                 model = "claude-haiku-4-5-20251001"
             else:

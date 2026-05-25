@@ -217,6 +217,7 @@ def ai_extract_authors(paper_id: str):
     import httpx as _httpx
     import logging as _logging
     from config import settings as _settings
+    from services.user_ai_config import get_effective_ai_config
     from db.queries.papers import get_paper
     from db.queries.people import get_or_create_person_with_affiliation, update_person_props
 
@@ -251,13 +252,17 @@ def ai_extract_authors(paper_id: str):
         return _json.loads(raw.strip())
 
     result: dict | None = None
+    _ai_cfg = get_effective_ai_config()
+    _work_key = (_ai_cfg.get("anthropic_work_api_key") or "").strip()
+    _work_base = (_ai_cfg.get("anthropic_work_base_url") or "").strip()
+    _personal_key = (_ai_cfg.get("anthropic_api_key") or "").strip()
 
     # 1. Claude Work (primary)
-    if _settings.anthropic_work_api_key:
+    if _work_key:
         try:
-            kwargs: dict = {"api_key": _settings.anthropic_work_api_key, "http_client": _httpx.Client(verify=False)}
-            if _settings.anthropic_work_base_url:
-                kwargs["base_url"] = _settings.anthropic_work_base_url
+            kwargs: dict = {"api_key": _work_key, "http_client": _httpx.Client(verify=False)}
+            if _work_base:
+                kwargs["base_url"] = _work_base
             client = _anthropic.Anthropic(**kwargs)
             resp = client.messages.create(
                 model="claude-sonnet-4-6", max_tokens=1024,
@@ -268,9 +273,9 @@ def ai_extract_authors(paper_id: str):
             _log.debug("Claude Work ai-extract-authors failed: %s", exc)
 
     # 2. Claude personal
-    if result is None and _settings.anthropic_api_key:
+    if result is None and _personal_key:
         try:
-            client = _anthropic.Anthropic(api_key=_settings.anthropic_api_key)
+            client = _anthropic.Anthropic(api_key=_personal_key)
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001", max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],

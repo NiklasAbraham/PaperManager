@@ -10,6 +10,7 @@ from typing import Any, Generator
 import httpx
 import anthropic
 from config import settings
+from services.user_ai_config import get_effective_ai_config
 from services.web_search import WEB_SEARCH_TOOL, WEB_SEARCH_TOOL_OLLAMA, search_web
 
 log = logging.getLogger(__name__)
@@ -26,11 +27,31 @@ _ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 
 def _personal_client() -> anthropic.Anthropic:
     """Return an Anthropic client for the personal API key with SSL settings applied."""
+    cfg = get_effective_ai_config()
+    api_key = (cfg.get("anthropic_api_key") or "").strip()
+    if not api_key:
+        raise ValueError("Personal Anthropic key is not configured for this user.")
     return anthropic.Anthropic(
-        api_key=settings.anthropic_api_key,
+        api_key=api_key,
         base_url=_ANTHROPIC_BASE_URL,
         http_client=httpx.Client(verify=_ssl_verify()),
     )
+
+
+def _work_client() -> anthropic.Anthropic:
+    """Return Anthropic work client for the effective user config."""
+    cfg = get_effective_ai_config()
+    work_key = (cfg.get("anthropic_work_api_key") or "").strip()
+    if not work_key:
+        raise ValueError("Work Anthropic key is not configured for this user.")
+    work_kwargs: dict[str, Any] = {
+        "api_key": work_key,
+        "http_client": httpx.Client(verify=_ssl_verify()),
+    }
+    work_base = (cfg.get("anthropic_work_base_url") or "").strip()
+    if work_base:
+        work_kwargs["base_url"] = work_base
+    return anthropic.Anthropic(**work_kwargs)
 
 
 def _load_prompt(filename: str) -> str:
@@ -90,15 +111,10 @@ def summarize_paper(text: str, title: str = "", custom_instructions: str | None 
         result = _call(_personal_client(), short_prompt)
 
     # Strategy C: Work API (Palantir gateway) — may have different content policy
-    if result is None and settings.anthropic_work_api_key:
+    cfg = get_effective_ai_config()
+    if result is None and (cfg.get("anthropic_work_api_key") or "").strip():
         log.info("summarize_paper: trying Work API")
-        work_kwargs: dict[str, Any] = {
-            "api_key": settings.anthropic_work_api_key,
-            "http_client": httpx.Client(verify=_ssl_verify()),
-        }
-        if settings.anthropic_work_base_url:
-            work_kwargs["base_url"] = settings.anthropic_work_base_url
-        result = _call(anthropic.Anthropic(**work_kwargs), prompt)
+        result = _call(_work_client(), prompt)
 
     if result is None:
         return "_Summary could not be generated (Claude refused the content). The extracted PDF text may contain garbled or problematic characters._"
@@ -206,17 +222,7 @@ def chat_with_paper_work(
 ) -> str:
     """Answer *question* using the work/Foundry Anthropic gateway.
     Claude can also search the web for related information."""
-    if not settings.anthropic_work_api_key:
-        raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
-
-    kwargs: dict[str, Any] = {
-        "api_key": settings.anthropic_work_api_key,
-        "http_client": httpx.Client(verify=_ssl_verify()),
-    }
-    if settings.anthropic_work_base_url:
-        kwargs["base_url"] = settings.anthropic_work_base_url
-
-    client = anthropic.Anthropic(**kwargs)
+    client = _work_client()
     system = _load_prompt("chat_system.txt").format(
         title=paper_title or "(unknown)",
         text=paper_text[:60000],
@@ -503,12 +509,15 @@ def knowledge_chat_stream(
 
     # ── Select client ─────────────────────────────────────────────────────────
     if model == "claude-work":
-        if not settings.anthropic_work_api_key:
-            raise ValueError("Work API key not configured.")
+        cfg = get_effective_ai_config()
+        work_key = (cfg.get("anthropic_work_api_key") or "").strip()
+        if not work_key:
+            raise ValueError("Work API key not configured for this user.")
+        work_base = (cfg.get("anthropic_work_base_url") or "").strip()
         client = anthropic.Anthropic(
-            api_key=settings.anthropic_work_api_key,
-            base_url=settings.anthropic_work_base_url or None,
-            default_headers={"Authorization": f"Bearer {settings.anthropic_work_api_key}"},
+            api_key=work_key,
+            base_url=work_base or None,
+            default_headers={"Authorization": f"Bearer {work_key}"},
             http_client=httpx.Client(verify=_ssl_verify()),
         )
     else:
@@ -708,15 +717,7 @@ def summarize_chapter(title: str, text: str, model: str | None = None) -> str:
     )
 
     if effective_model == "claude-work":
-        if not settings.anthropic_work_api_key:
-            raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
-        kwargs: dict[str, Any] = {
-            "api_key": settings.anthropic_work_api_key,
-            "http_client": httpx.Client(verify=_ssl_verify()),
-        }
-        if settings.anthropic_work_base_url:
-            kwargs["base_url"] = settings.anthropic_work_base_url
-        work_client = anthropic.Anthropic(**kwargs)
+        work_client = _work_client()
         message = work_client.messages.create(
             model="claude-opus-4-6",
             max_tokens=512,
@@ -922,15 +923,7 @@ def find_research_gaps(
     
     # Route to appropriate model
     if model == "claude-work":
-        if not settings.anthropic_work_api_key:
-            raise ValueError("Work Anthropic key (ANTHROPIC_WORK_API_KEY) is not configured.")
-        kwargs: dict[str, Any] = {
-            "api_key": settings.anthropic_work_api_key,
-            "http_client": httpx.Client(verify=_ssl_verify()),
-        }
-        if settings.anthropic_work_base_url:
-            kwargs["base_url"] = settings.anthropic_work_base_url
-        client = anthropic.Anthropic(**kwargs)
+        client = _work_client()
         return _run_claude_with_tools(
             client,
             "claude-opus-4-6",

@@ -2,25 +2,78 @@ import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, Knowl
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-function userHeader(): Record<string, string> {
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  
+  // Add JWT token if available
+  const token = localStorage.getItem("pm_auth_token");
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  
+  // Keep username header for backward compatibility
   const name = localStorage.getItem("pm_current_user");
-  return name ? { "X-User-Name": name } : {};
+  if (name) {
+    headers["X-User-Name"] = name;
+  }
+  
+  return headers;
 }
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const merged: RequestInit = {
     ...options,
     headers: {
-      ...userHeader(),
+      ...authHeaders(),
       ...(options?.headers ?? {}),
     },
   };
   const res = await fetch(`${BASE}${path}`, merged);
+  
+  // Handle 401 Unauthorized - redirect to login
+  if (res.status === 401) {
+    localStorage.removeItem("pm_auth_token");
+    localStorage.removeItem("pm_username");
+    window.location.href = "/login";
+    throw new Error("Session expired. Please login again.");
+  }
+  
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`API ${res.status}: ${detail}`);
   }
   return res.json();
+}
+
+export interface MyAiKeyStatus {
+  username: string;
+  uses_env_fallback: boolean;
+  has_user_anthropic_api_key: boolean;
+  has_user_anthropic_work_api_key: boolean;
+  user_anthropic_work_base_url: string;
+  effective_has_anthropic_api_key: boolean;
+  effective_has_anthropic_work_api_key: boolean;
+  effective_anthropic_work_base_url: string;
+  source_personal: "user" | "env" | "none";
+  source_work: "user" | "env" | "none";
+}
+
+export interface UpdateMyAiKeysBody {
+  anthropic_api_key: string;
+  anthropic_work_api_key: string;
+  anthropic_work_base_url: string;
+}
+
+export async function getMyAiKeyStatus(): Promise<MyAiKeyStatus> {
+  return apiFetch("/auth/me/api-keys");
+}
+
+export async function updateMyAiKeys(body: UpdateMyAiKeysBody): Promise<MyAiKeyStatus> {
+  return apiFetch("/auth/me/api-keys", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function parsePdf(file: File): Promise<ParsedMeta> {
@@ -56,7 +109,7 @@ export async function uploadPdf(
   // Pass empty string to skip claims extraction; omit to use backend default
   if (claimsModel !== undefined) form.append("claims_model", claimsModel);
   if (generateEmbedding === false) form.append("skip_embedding", "true");
-  const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form, headers: userHeader() });
+  const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form, headers: authHeaders() });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Upload failed ${res.status}: ${detail}`);
@@ -170,6 +223,41 @@ export async function importSnapshot(file: File, replace = true): Promise<{ impo
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Import failed ${res.status}: ${detail}`);
+  }
+  return res.json();
+}
+
+export interface SnapshotValidation {
+  valid: boolean;
+  error?: string;
+  format?: string;
+  version?: number;
+  exported_at?: string;
+  total_nodes: number;
+  total_relationships: number;
+  node_types: Record<string, number>;
+  relationship_types: Record<string, number>;
+  notes: {
+    total: number;
+    with_content: number;
+    without_content: number;
+    missing_content_details: Array<{ id: string; created_at?: string }>;
+  };
+  figures: {
+    total: number;
+    with_drive_file_id: number;
+    without_drive_file_id: number;
+    missing_drive_details: Array<{ id: string; paper_id?: string; figure_number?: number }>;
+  };
+}
+
+export async function validateSnapshot(file: File): Promise<SnapshotValidation> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/export/import/snapshot/validate`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Validation failed ${res.status}: ${detail}`);
   }
   return res.json();
 }

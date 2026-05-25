@@ -18,3 +18,5 @@ lxml
 ddgs
 pytest
 pytest-asyncio
+bcrypt
+python-jose[cryptography]

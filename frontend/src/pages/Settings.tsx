@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, clearPapers, seedDefaults, listOllamaModels, deleteUser, renameUser } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, validateSnapshot, clearPapers, seedDefaults, listOllamaModels, getMyAiKeyStatus, updateMyAiKeys, type MyAiKeyStatus, type SnapshotValidation } from "../api/client";
+import UserManagement from "../components/UserManagement";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures" | "claims" | "embeddings";
@@ -16,6 +17,8 @@ export default function Settings() {
   const [importKind, setImportKind] = useState<"rdf" | "snapshot" | null>(null);
   const [importResult, setImportResult] = useState<Record<string, number> | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [snapshotValidation, setSnapshotValidation] = useState<SnapshotValidation | null>(null);
+  const [snapshotFile, setSnapshotFile] = useState<File | null>(null);
   const rdfInputRef = useRef<HTMLInputElement>(null);
   const snapshotInputRef = useRef<HTMLInputElement>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -28,18 +31,23 @@ export default function Settings() {
   const [debugDeleting, setDebugDeleting] = useState(false);
   const [debugDeleteResult, setDebugDeleteResult] = useState<{ deleted: number; figures_deleted: number } | null>(null);
   const [confirmDebugDelete, setConfirmDebugDelete] = useState(false);
-
-  // Teammates
-  interface UserInfo { name: string; paper_count: number; conversation_count: number }
-  const [users, setUsers] = useState<UserInfo[]>([]);
-  const [renamingUser, setRenamingUser] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [confirmDeleteUser, setConfirmDeleteUser] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<MyAiKeyStatus | null>(null);
+  const [aiStatusError, setAiStatusError] = useState<string | null>(null);
+  const [savingAiKeys, setSavingAiKeys] = useState(false);
+  const [personalApiKeyInput, setPersonalApiKeyInput] = useState("");
+  const [workApiKeyInput, setWorkApiKeyInput] = useState("");
+  const [workBaseUrlInput, setWorkBaseUrlInput] = useState("");
+  const [aiSaveMessage, setAiSaveMessage] = useState<string | null>(null);
 
   useEffect(() => {
     countDebugPapers().then(setDebugCount).catch(() => setDebugCount(null));
     listOllamaModels().then(setOllamaModels).catch(() => setOllamaModels([]));
-    apiFetch<UserInfo[]>("/users").then(setUsers).catch(() => {});
+    getMyAiKeyStatus().then((s) => {
+      setAiStatus(s);
+      setWorkBaseUrlInput(s.user_anthropic_work_base_url || "");
+    }).catch((err) => {
+      setAiStatusError(err instanceof Error ? err.message : "Could not load AI key status");
+    });
   }, []);
   const [backfill, setBackfill] = useState<Record<BackfillOp, BackfillState>>({
     topics:     { status: "idle" },
@@ -126,19 +134,56 @@ export default function Settings() {
   const handleImportSnapshot = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    
+    // First validate the snapshot
     setImporting("snapshot");
     setImportKind("snapshot");
     setImportResult(null);
     setImportError(null);
+    setSnapshotValidation(null);
+    
     try {
-      const result = await importSnapshot(file, true);
+      const validation = await validateSnapshot(file);
+      if (!validation.valid) {
+        setImportError(validation.error || "Invalid snapshot file");
+        setImporting(null);
+        if (snapshotInputRef.current) snapshotInputRef.current.value = "";
+        return;
+      }
+      
+      // Show validation results and wait for confirmation
+      setSnapshotValidation(validation);
+      setSnapshotFile(file);
+      setImporting(null);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Validation failed");
+      setImporting(null);
+      if (snapshotInputRef.current) snapshotInputRef.current.value = "";
+    }
+  };
+
+  const handleConfirmSnapshotImport = async () => {
+    if (!snapshotFile) return;
+    
+    setImporting("snapshot");
+    setSnapshotValidation(null);
+    
+    try {
+      const result = await importSnapshot(snapshotFile, true);
       setImportResult(result.imported);
+      setSnapshotFile(null);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Import failed");
     } finally {
       setImporting(null);
       if (snapshotInputRef.current) snapshotInputRef.current.value = "";
     }
+  };
+
+  const handleCancelSnapshotImport = () => {
+    setSnapshotValidation(null);
+    setSnapshotFile(null);
+    if (snapshotInputRef.current) snapshotInputRef.current.value = "";
   };
 
   const handleClearPapers = async () => {
@@ -158,6 +203,28 @@ export default function Settings() {
       setSeedResult(result);
     } catch { /* best-effort */ }
     setSeeding(false);
+  };
+
+  const handleSaveAiKeys = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAiSaveMessage(null);
+    setAiStatusError(null);
+    setSavingAiKeys(true);
+    try {
+      const next = await updateMyAiKeys({
+        anthropic_api_key: personalApiKeyInput,
+        anthropic_work_api_key: workApiKeyInput,
+        anthropic_work_base_url: workBaseUrlInput,
+      });
+      setAiStatus(next);
+      setPersonalApiKeyInput("");
+      setWorkApiKeyInput("");
+      setAiSaveMessage("AI key settings saved.");
+    } catch (err) {
+      setAiStatusError(err instanceof Error ? err.message : "Failed to save AI keys");
+    } finally {
+      setSavingAiKeys(false);
+    }
   };
 
   return (
@@ -390,6 +457,66 @@ export default function Settings() {
         </Row>
       </Section>
 
+      {/* ── AI Credentials ── */}
+      <Section title="AI Credentials" description="Each user can provide their own Claude credentials. For user Niklas, environment keys are used as fallback.">
+        <div className="px-5 py-4 space-y-3">
+          {aiStatusError && (
+            <p className="text-xs text-red-600">{aiStatusError}</p>
+          )}
+          {aiSaveMessage && (
+            <p className="text-xs text-green-700 font-medium">{aiSaveMessage}</p>
+          )}
+          {aiStatus && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              <p>Effective Personal Claude key: <span className="font-semibold">{aiStatus.effective_has_anthropic_api_key ? `configured (${aiStatus.source_personal})` : "missing"}</span></p>
+              <p>Effective Work Claude key: <span className="font-semibold">{aiStatus.effective_has_anthropic_work_api_key ? `configured (${aiStatus.source_work})` : "missing"}</span></p>
+              {aiStatus.uses_env_fallback && (
+                <p className="mt-1 text-gray-500">Niklas can use environment keys if user-specific keys are empty.</p>
+              )}
+            </div>
+          )}
+          <form onSubmit={handleSaveAiKeys} className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Personal Claude API Key</label>
+              <input
+                type="password"
+                value={personalApiKeyInput}
+                onChange={(e) => setPersonalApiKeyInput(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                placeholder="Enter key or leave empty to clear"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Work Claude API Key</label>
+              <input
+                type="password"
+                value={workApiKeyInput}
+                onChange={(e) => setWorkApiKeyInput(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                placeholder="Enter key or leave empty to clear"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Work Base URL (optional)</label>
+              <input
+                type="text"
+                value={workBaseUrlInput}
+                onChange={(e) => setWorkBaseUrlInput(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                placeholder="https://..."
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={savingAiKeys}
+              className="px-4 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              {savingAiKeys ? "Saving…" : "Save AI Credentials"}
+            </button>
+          </form>
+        </div>
+      </Section>
+
       {/* ── Graph ── */}
       <Section title="Graph" description="Default state when the graph view is opened.">
         <Row label="Default mode" description="Which nodes to show by default.">
@@ -496,6 +623,88 @@ export default function Settings() {
             )}
             {importKind === "snapshot" && importError && <span className="text-xs text-red-600">{importError}</span>}
           </div>
+          
+          {/* Snapshot validation dialog */}
+          {snapshotValidation && (
+            <div className="mt-4 p-4 bg-violet-50 border border-violet-200 rounded-lg space-y-3">
+              <div className="flex items-start justify-between">
+                <h3 className="text-sm font-semibold text-gray-900">Snapshot Preview</h3>
+                <span className="text-xs text-gray-500">{snapshotValidation.exported_at ? new Date(snapshotValidation.exported_at).toLocaleDateString() : 'Unknown date'}</span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-white px-3 py-2 rounded border border-violet-100">
+                  <div className="text-gray-500">Total Nodes</div>
+                  <div className="text-lg font-semibold text-gray-900">{snapshotValidation.total_nodes.toLocaleString()}</div>
+                </div>
+                <div className="bg-white px-3 py-2 rounded border border-violet-100">
+                  <div className="text-gray-500">Total Relationships</div>
+                  <div className="text-lg font-semibold text-gray-900">{snapshotValidation.total_relationships.toLocaleString()}</div>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-gray-700">Node Types:</div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {Object.entries(snapshotValidation.node_types).map(([type, count]) => (
+                    <span key={type} className="px-2 py-1 bg-white rounded border border-violet-100">
+                      {type}: <span className="font-semibold">{count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              
+              {(snapshotValidation.notes.total > 0 || snapshotValidation.figures.total > 0) && (
+                <div className="space-y-2 pt-2 border-t border-violet-200">
+                  {snapshotValidation.notes.total > 0 && (
+                    <div className="text-xs">
+                      <span className="font-medium text-gray-700">Notes:</span>{" "}
+                      <span className="text-green-700 font-semibold">{snapshotValidation.notes.with_content}</span> with content, 
+                      {snapshotValidation.notes.without_content > 0 ? (
+                        <span className="text-amber-600 font-semibold"> {snapshotValidation.notes.without_content} empty</span>
+                      ) : (
+                        <span className="text-gray-500"> none empty</span>
+                      )}
+                    </div>
+                  )}
+                  {snapshotValidation.figures.total > 0 && (
+                    <div className="text-xs">
+                      <span className="font-medium text-gray-700">Figures:</span>{" "}
+                      <span className="text-green-700 font-semibold">{snapshotValidation.figures.with_drive_file_id}</span> with Drive file, 
+                      {snapshotValidation.figures.without_drive_file_id > 0 ? (
+                        <span className="text-amber-600 font-semibold"> {snapshotValidation.figures.without_drive_file_id} without</span>
+                      ) : (
+                        <span className="text-gray-500"> none without</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={handleConfirmSnapshotImport}
+                  disabled={importing === "snapshot"}
+                  className="flex-1 px-4 py-2 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50"
+                >
+                  {importing === "snapshot" ? "Importing..." : "Import Now"}
+                </button>
+                <button
+                  onClick={handleCancelSnapshotImport}
+                  disabled={importing === "snapshot"}
+                  className="px-4 py-2 text-sm font-medium bg-white text-gray-700 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+              
+              {(snapshotValidation.notes.without_content > 0 || snapshotValidation.figures.without_drive_file_id > 0) && (
+                <div className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+                  ⚠️ Some data may not display as expected after import. Check the logs for details.
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="px-5 py-4 space-y-2">
           <div>
@@ -554,85 +763,6 @@ export default function Settings() {
           state={backfill.embeddings}
           onRun={() => runBackfill("embeddings")}
         />
-      </Section>
-
-      {/* ── Teammates ── */}
-      <Section title="Teammates" description="People who use this library. New members can join by entering their name in the top-right corner.">
-        {users.length === 0 ? (
-          <div className="px-5 py-4 text-sm text-gray-400">No teammates yet.</div>
-        ) : (
-          users.map((u) => (
-            <div key={u.name} className="flex items-center justify-between gap-4 px-5 py-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="w-7 h-7 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-bold shrink-0">
-                  {u.name[0].toUpperCase()}
-                </span>
-                {renamingUser === u.name ? (
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      const newName = renameValue.trim();
-                      if (!newName || newName === u.name) { setRenamingUser(null); return; }
-                      try {
-                        await renameUser(u.name, newName);
-                        setUsers((prev) => prev.map((x) => x.name === u.name ? { ...x, name: newName } : x));
-                      } catch { /* best-effort */ }
-                      setRenamingUser(null);
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <input
-                      autoFocus
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      className="border border-violet-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-400"
-                    />
-                    <button type="submit" className="text-xs text-violet-600 font-medium hover:text-violet-800">Save</button>
-                    <button type="button" onClick={() => setRenamingUser(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                  </form>
-                ) : (
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{u.name}</p>
-                    <p className="text-xs text-gray-400">{u.conversation_count} conversations · {u.paper_count} papers added</p>
-                  </div>
-                )}
-              </div>
-              {renamingUser !== u.name && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => { setRenamingUser(u.name); setRenameValue(u.name); setConfirmDeleteUser(null); }}
-                    className="text-xs text-gray-400 hover:text-violet-600 transition-colors"
-                  >
-                    Rename
-                  </button>
-                  {confirmDeleteUser === u.name ? (
-                    <>
-                      <span className="text-xs text-red-500">Delete?</span>
-                      <button
-                        onClick={async () => {
-                          try {
-                            await deleteUser(u.name);
-                            setUsers((prev) => prev.filter((x) => x.name !== u.name));
-                          } catch { /* best-effort */ }
-                          setConfirmDeleteUser(null);
-                        }}
-                        className="text-xs text-red-600 font-medium hover:text-red-800"
-                      >Yes</button>
-                      <button onClick={() => setConfirmDeleteUser(null)} className="text-xs text-gray-400 hover:text-gray-600">No</button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => { setConfirmDeleteUser(u.name); setRenamingUser(null); }}
-                      className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))
-        )}
       </Section>
 
       {/* ── Debug Mode ── */}
@@ -775,6 +905,9 @@ export default function Settings() {
           )}
         </Row>
       </Section>
+
+      {/* ── User Management (Admin Only) ── */}
+      <UserManagement />
     </div>
   );
 }
