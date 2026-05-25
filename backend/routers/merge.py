@@ -136,9 +136,14 @@ def _verify_with_claude(pairs: list[tuple[dict, dict, float]]) -> list[Duplicate
     """Batch-verify candidate pairs with Claude Haiku (chunked to _BATCH_SIZE)."""
     import anthropic
     from config import settings as cfg
+    from services.user_ai_config import get_effective_ai_config
 
     try:
-        client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+        ai_cfg = get_effective_ai_config()
+        personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
+        if not personal_key:
+            return _verify_with_ollama(pairs, cfg.ollama_model)
+        client = anthropic.Anthropic(api_key=personal_key)
     except Exception:
         return _verify_with_ollama(pairs, cfg.ollama_model)
 

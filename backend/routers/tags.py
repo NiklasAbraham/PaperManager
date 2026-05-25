@@ -244,6 +244,7 @@ def suggest_tags(body: SuggestBody):
         return valid_existing, new_tags
 
     import anthropic, httpx
+    from services.user_ai_config import get_effective_ai_config
     _ssl = False if not _settings.ssl_verify else (_settings.ssl_ca_bundle or True)
 
     def _call_claude(client: "anthropic.Anthropic", model: str) -> tuple[list, list]:
@@ -255,14 +256,17 @@ def suggest_tags(body: SuggestBody):
         return _parse(resp.content[0].text)
 
     # ── Strategy A: Claude Work (Palantir gateway) ────────────────────────────
-    if _settings.anthropic_work_api_key:
+    ai_cfg = get_effective_ai_config()
+    work_key = (ai_cfg.get("anthropic_work_api_key") or "").strip()
+    work_base = (ai_cfg.get("anthropic_work_base_url") or "").strip()
+    if work_key:
         try:
             kwargs: dict = {
-                "api_key": _settings.anthropic_work_api_key,
+                "api_key": work_key,
                 "http_client": httpx.Client(verify=_ssl),
             }
-            if _settings.anthropic_work_base_url:
-                kwargs["base_url"] = _settings.anthropic_work_base_url
+            if work_base:
+                kwargs["base_url"] = work_base
             client = anthropic.Anthropic(**kwargs)
             valid_existing, new_tags = _call_claude(client, "claude-haiku-4-5-20251001")
             log.debug("Tag suggestion via Claude Work | existing=%d new=%d", len(valid_existing), len(new_tags))

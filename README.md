@@ -1,6 +1,6 @@
 # PaperManager
 
-A personal academic paper manager. Upload PDFs, ingest papers from URLs, chat with papers using AI, explore a knowledge graph of authors and topics, and track references — all in a local web app backed by Neo4j and Google Drive.
+A personal academic paper manager. Upload PDFs, ingest papers from URLs, chat with papers using AI, explore a knowledge graph of authors and topics, track references, and use built-in login with admin-managed users.
 
 > 📚 **Full documentation:** [https://niklasabraham.github.io/PaperManager/](https://niklasabraham.github.io/PaperManager/)
 
@@ -38,30 +38,31 @@ Browse the docs by section:
 1. [Quick Start](#quick-start)
 2. [Architecture Overview](#architecture-overview)
 3. [Configuration](#configuration)
-4. [Ingestion — Getting Papers In](#ingestion)
+4. [Authentication & Users](#authentication--users)
+5. [Ingestion — Getting Papers In](#ingestion)
    - [PDF Upload](#pdf-upload)
    - [URL / DOI / arXiv Ingest](#url-ingest)
    - [Bulk Import from JSON](#bulk-import)
-5. [Library — Browsing & Searching](#library)
-6. [Paper Detail](#paper-detail)
+6. [Library — Browsing & Searching](#library)
+7. [Paper Detail](#paper-detail)
    - [Metadata & Abstract](#metadata--abstract)
    - [PDF Viewer](#pdf-viewer)
    - [Figures](#figures)
    - [Notes](#notes)
    - [Chat with Paper](#chat-with-paper)
    - [References & Citations](#references--citations)
-7. [People](#people)
-8. [Projects](#projects)
-9. [Tags & Topics](#tags--topics)
-10. [Knowledge Graph](#knowledge-graph)
-11. [Knowledge Chat](#knowledge-chat)
-12. [Cypher Editor](#cypher-editor)
-13. [Settings](#settings)
-14. [Export & Backfill](#export--backfill)
-15. [MCP Server (Claude Desktop)](#mcp-server)
-16. [API Reference](#api-reference)
-17. [Data Model](#data-model)
-18. [AI Models & Pipelines](#ai-models--pipelines)
+8. [People](#people)
+9. [Projects](#projects)
+10. [Tags & Topics](#tags--topics)
+11. [Knowledge Graph](#knowledge-graph)
+12. [Knowledge Chat](#knowledge-chat)
+13. [Cypher Editor](#cypher-editor)
+14. [Settings](#settings)
+15. [Export & Backfill](#export--backfill)
+16. [MCP Server (Claude Desktop)](#mcp-server)
+17. [API Reference](#api-reference)
+18. [Data Model](#data-model)
+19. [AI Models & Pipelines](#ai-models--pipelines)
 
 ---
 
@@ -86,6 +87,14 @@ cp .env.example .env
 # 5. Start everything
 ./start.sh
 # Opens http://localhost:5173
+
+# 6. Create/update the default admin user
+cd backend
+python scripts/create_default_user.py
+cd ..
+
+# 7. Login
+# Open http://localhost:5173/login and sign in with that user
 ```
 
 `start.sh` starts the FastAPI backend (port 8000), the Vite frontend (port 5173), and optionally Ollama. Logs go to `/tmp/papermanager-backend.log` and `/tmp/papermanager-frontend.log`.
@@ -152,6 +161,35 @@ SSL_CA_BUNDLE=/path/to/corporate-ca.pem
 ```
 
 **Google Drive auth:** On first use the backend opens a browser window for OAuth. Credentials are saved to `backend/token.json` and reused on subsequent runs.
+
+---
+
+## Authentication & Users
+
+PaperManager now protects the app behind login.
+
+- Protected pages require a valid JWT bearer token.
+- The frontend stores the auth token in localStorage and validates it via `GET /auth/me` on app load.
+- Unauthorized API responses (`401`) trigger redirect to `/login`.
+
+### Default admin user
+
+Use the helper script to create (or rotate password for) the default `niklas` account:
+
+```bash
+cd backend
+python scripts/create_default_user.py
+```
+
+### Admin capabilities
+
+- List users
+- Create users
+- Update user passwords
+- Delete users
+- Merge two users into one
+
+Note: teammate creation and merge actions are restricted to admin user `niklas` in the current implementation.
 
 ---
 
@@ -603,6 +641,24 @@ PaperManager ships with an MCP (Model Context Protocol) server at `backend/mcp_s
 ## API Reference
 
 All endpoints served from `http://localhost:8000`.
+
+### Auth & Users
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/auth/login` | Login and receive bearer token |
+| `GET` | `/auth/me` | Get current authenticated user |
+| `POST` | `/auth/register` | Create user (admin only) |
+| `GET` | `/auth/admin/users` | List all users (admin only) |
+| `POST` | `/auth/admin/create-user` | Create user (admin only, restricted in UI/logic) |
+| `POST` | `/auth/admin/update-password` | Update a user's password (admin only) |
+| `DELETE` | `/auth/admin/users/{username}` | Delete a user (admin only) |
+| `POST` | `/auth/admin/merge-users` | Merge two users (admin only, restricted in UI/logic) |
+| `GET` | `/users` | List users for teammate settings |
+| `POST` | `/users/identify` | Get or create user identity by name |
+| `DELETE` | `/users/{name}` | Delete teammate by name |
+| `PATCH` | `/users/{name}` | Rename teammate |
+| `POST` | `/users/{name}/ask` | Ask questions from a user's conversation history |
 
 ### Papers
 

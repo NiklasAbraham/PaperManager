@@ -5,6 +5,7 @@ import httpx
 
 from services.pdf_parser import DOI_RE, ARXIV_RE, YEAR_RE
 from config import settings
+from services.user_ai_config import get_effective_ai_config
 
 log = logging.getLogger(__name__)
 
@@ -176,17 +177,21 @@ def extract_references_ai_full(raw_text: str) -> list[dict]:
     ref_section = _get_ref_section_text(raw_text)
     ref_text = (ref_section or raw_text)[:80000]
     prompt = _REF_AI_PROMPT.format(ref_text=ref_text)
+    ai_cfg = get_effective_ai_config()
+    work_key = (ai_cfg.get("anthropic_work_api_key") or "").strip()
+    work_base = (ai_cfg.get("anthropic_work_base_url") or "").strip()
+    personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
 
     # Claude Work
-    if settings.anthropic_work_api_key:
+    if work_key:
         try:
             import anthropic
             kwargs: dict = {
-                "api_key": settings.anthropic_work_api_key,
+                "api_key": work_key,
                 "http_client": httpx.Client(verify=False),
             }
-            if settings.anthropic_work_base_url:
-                kwargs["base_url"] = settings.anthropic_work_base_url
+            if work_base:
+                kwargs["base_url"] = work_base
             client = anthropic.Anthropic(**kwargs)
             resp = client.messages.create(
                 model="claude-sonnet-4-6",
@@ -201,11 +206,11 @@ def extract_references_ai_full(raw_text: str) -> list[dict]:
             log.debug("Claude Work references failed: %s", exc)
 
     # Claude personal
-    if settings.anthropic_api_key:
+    if personal_key:
         try:
             import anthropic
             client = anthropic.Anthropic(
-                api_key=settings.anthropic_api_key,
+                api_key=personal_key,
                 base_url="https://api.anthropic.com",
                 http_client=httpx.Client(verify=settings.ssl_verify if settings.ssl_verify is not False else False),
             )
@@ -244,12 +249,13 @@ def _extract_references_with_ai(ref_text: str) -> list[dict]:
     """Use Claude to parse references from text when regex fails or returns too few."""
     try:
         import anthropic
-        from config import settings
-        if not settings.anthropic_api_key:
+        ai_cfg = get_effective_ai_config()
+        personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
+        if not personal_key:
             return []
 
         client = anthropic.Anthropic(
-            api_key=settings.anthropic_api_key,
+            api_key=personal_key,
             base_url="https://api.anthropic.com",
             http_client=httpx.Client(verify=settings.ssl_verify if settings.ssl_verify is not False else False),
         )

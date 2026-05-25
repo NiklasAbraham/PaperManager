@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useLocation, Navigate } from "react-router-dom";
 import Library from "./pages/Library";
 import PaperDetail from "./pages/PaperDetail";
 import People from "./pages/People";
@@ -13,8 +13,11 @@ import BlogPostDetail from "./pages/BlogPostDetail";
 import Teammates from "./pages/Teammates"; // page kept for direct navigation; no navbar link
 import Venues from "./pages/Venues";
 import MergeManager from "./pages/MergeManager";
+import Login from "./pages/Login";
 import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 import { UserProvider } from "./contexts/UserContext";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import ProtectedRoute from "./components/ProtectedRoute";
 import UserPicker from "./components/UserPicker";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
@@ -24,6 +27,14 @@ const KnowledgeChat = lazy(() => import("./pages/KnowledgeChat"));
 
 function NavBar() {
   const { settings, update } = useAppSettings();
+  const { logout, username } = useAuth();
+  
+  const handleLogout = () => {
+    if (confirm("Are you sure you want to logout?")) {
+      logout();
+    }
+  };
+  
   const cls = ({ isActive }: { isActive: boolean }) =>
     `px-3 py-2 rounded text-sm font-medium transition-colors ${
       isActive
@@ -59,6 +70,18 @@ function NavBar() {
           {settings.debugMode && <span>DEBUG</span>}
         </button>
         <UserPicker />
+        <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-300">
+          <span className="text-sm text-gray-600">
+            {username}
+          </span>
+          <button
+            onClick={handleLogout}
+            className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+            title="Logout"
+          >
+            Logout
+          </button>
+        </div>
       </div>
     </nav>
   );
@@ -67,41 +90,51 @@ function NavBar() {
 function AppLayout() {
   const { pathname } = useLocation();
   const isKnowledge = pathname === "/knowledge";
+  const isLogin = pathname === "/login";
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      {isKnowledge ? (
-        /* On /knowledge: navbar is fixed, hidden above viewport, slides down on hover */
-        <div className="group fixed top-0 left-0 right-0 z-50">
-          {/* Invisible trigger strip — always at y=0, captures hover */}
-          <div className="h-1.5 w-full bg-violet-400/30 group-hover:opacity-0 transition-opacity" />
-          <div className="-translate-y-full group-hover:translate-y-0 transition-transform duration-200 shadow-lg">
-            <NavBar />
+      {!isLogin && (
+        isKnowledge ? (
+          /* On /knowledge: navbar is fixed, hidden above viewport, slides down on hover */
+          <div className="group fixed top-0 left-0 right-0 z-50">
+            {/* Invisible trigger strip — always at y=0, captures hover */}
+            <div className="h-1.5 w-full bg-violet-400/30 group-hover:opacity-0 transition-opacity" />
+            <div className="-translate-y-full group-hover:translate-y-0 transition-transform duration-200 shadow-lg">
+              <NavBar />
+            </div>
           </div>
-        </div>
-      ) : (
-        <NavBar />
+        ) : (
+          <NavBar />
+        )
       )}
       <div className={isKnowledge ? "h-screen" : "flex-1 min-h-0 overflow-auto"}>
-            <Routes>
-              <Route path="/" element={<Library />} />
-              <Route path="/paper/:id" element={<PaperDetail />} />
-              <Route path="/people" element={<People />} />
-              <Route path="/projects" element={<Projects />} />
-              <Route path="/venues" element={<Venues />} />
-              <Route path="/graph"   element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading graph…</div>}><Graph /></Suspense>} />
-              <Route path="/cypher" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Cypher /></Suspense>} />
-              <Route path="/knowledge" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><KnowledgeChat /></Suspense>} />
-              <Route path="/discover" element={<Discover />} />
-              <Route path="/literature" element={<LiteratureSearch />} />
-              <Route path="/bulk-import" element={<BulkImport />} />
-              <Route path="/blogs" element={<Blogs />} />
-              <Route path="/teammates" element={<Teammates />} />
-              <Route path="/blogs/posts/:postId" element={<BlogPostDetail />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/merge" element={<MergeManager />} />
-            </Routes>
-          </div>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/*" element={
+            <ProtectedRoute>
+              <Routes>
+                <Route path="/" element={<Library />} />
+                <Route path="/paper/:id" element={<PaperDetail />} />
+                <Route path="/people" element={<People />} />
+                <Route path="/projects" element={<Projects />} />
+                <Route path="/venues" element={<Venues />} />
+                <Route path="/graph"   element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading graph…</div>}><Graph /></Suspense>} />
+                <Route path="/cypher" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Cypher /></Suspense>} />
+                <Route path="/knowledge" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><KnowledgeChat /></Suspense>} />
+                <Route path="/discover" element={<Discover />} />
+                <Route path="/literature" element={<LiteratureSearch />} />
+                <Route path="/bulk-import" element={<BulkImport />} />
+                <Route path="/blogs" element={<Blogs />} />
+                <Route path="/teammates" element={<Teammates />} />
+                <Route path="/blogs/posts/:postId" element={<BlogPostDetail />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/merge" element={<MergeManager />} />
+              </Routes>
+            </ProtectedRoute>
+          } />
+        </Routes>
+      </div>
         </div>
   );
 }
@@ -109,11 +142,13 @@ function AppLayout() {
 export default function App() {
   return (
     <BrowserRouter>
-      <SettingsProvider>
-        <UserProvider>
-          <AppLayout />
-        </UserProvider>
-      </SettingsProvider>
+      <AuthProvider>
+        <SettingsProvider>
+          <UserProvider>
+            <AppLayout />
+          </UserProvider>
+        </SettingsProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

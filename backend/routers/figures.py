@@ -14,6 +14,7 @@ from db.queries.papers import get_paper
 from models.schemas import FigureOut, FigureChatRequest, FigureExtractRequest, TableOut
 from services.drive import upload_image, get_file_url, download_pdf, delete_file
 from services.figure_extractor import extract_figures
+from services.user_ai_config import get_effective_ai_config
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/papers", tags=["figures"])
@@ -142,6 +143,10 @@ def chat_with_figure(paper_id: str, figure_id: str, body: FigureChatRequest):
         raise HTTPException(status_code=404, detail="Figure not found")
 
     try:
+        ai_cfg = get_effective_ai_config()
+        work_key = (ai_cfg.get("anthropic_work_api_key") or "").strip()
+        work_base = (ai_cfg.get("anthropic_work_base_url") or "").strip()
+        personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
         image_bytes = download_pdf(fig["drive_file_id"])  # works for any file
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Could not load figure image: {e}")
@@ -169,19 +174,21 @@ def chat_with_figure(paper_id: str, figure_id: str, body: FigureChatRequest):
 
     try:
         if body.model == "claude-work":
-            if not settings.anthropic_work_api_key:
+            if not work_key:
                 raise ValueError("Work API key not configured.")
             def _ssl_verify():
                 if not settings.ssl_verify:
                     return False
                 return settings.ssl_ca_bundle or True
             client = anthropic.Anthropic(
-                api_key=settings.anthropic_work_api_key,
-                base_url=settings.anthropic_work_base_url or None,
+                api_key=work_key,
+                base_url=work_base or None,
                 http_client=httpx.Client(verify=_ssl_verify()),
             )
         else:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            if not personal_key:
+                raise ValueError("Personal Claude key not configured.")
+            client = anthropic.Anthropic(api_key=personal_key)
 
         response = client.messages.create(
             model="claude-opus-4-6",
