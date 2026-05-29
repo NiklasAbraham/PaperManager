@@ -101,18 +101,42 @@ See [Architecture](technical/architecture.md) for full technical detail.
 
 ## Documentation Map
 
+### User Guide
+
 | Section | What it covers |
-|---------|---------------|
+|---|---|
 | [Getting Started](user-guide/getting-started.md) | Installation, configuration, first run |
 | [Ingesting Papers](user-guide/ingestion.md) | PDF upload, URL/DOI ingest, bulk import |
 | [Library](user-guide/library.md) | Browsing, searching, filtering, sorting |
 | [Paper Detail](user-guide/paper-detail.md) | Metadata, PDF viewer, figures, notes, chat, references |
 | [Knowledge Features](user-guide/knowledge-features.md) | Graph, knowledge chat, Cypher editor |
 | [MCP Server](user-guide/mcp-server.md) | Claude Desktop integration |
+
+### Technical Reference
+
+| Section | What it covers |
+|---|---|
 | [Architecture](technical/architecture.md) | System design and module interaction diagrams |
 | [Backend](technical/backend.md) | FastAPI routers, services, DB queries |
 | [Frontend](technical/frontend.md) | React pages and components |
 | [Data Model](technical/data-model.md) | Neo4j graph schema |
-| [AI Pipelines](technical/ai-pipelines.md) | Metadata extraction, summarisation, chat |
+| [AI Pipelines](technical/ai-pipelines.md) | Metadata extraction, summarisation, chat, embeddings |
+| [Ingestion Workflow](technical/ingestion-workflow.md) | Staged PDF upload flow in detail |
 | [API Reference](technical/api-reference.md) | All REST endpoints |
 | [Decisions Log](decisions.md) | Architecture decision record |
+
+### Developer Context (`.specs/`)
+
+Detailed spec files for contributors and AI assistants working on the codebase live in [`.specs/`](../.specs/):
+
+| File | Contents |
+|---|---|
+| [000_general.md](../.specs/000_general.md) | Overview, tech stack, quick start |
+| [001_architecture.md](../.specs/001_architecture.md) | Module map, design decisions |
+| [002_data_model.md](../.specs/002_data_model.md) | Full graph schema |
+| [003_ingestion.md](../.specs/003_ingestion.md) | All ingestion workflows |
+| [004_ai_pipelines.md](../.specs/004_ai_pipelines.md) | All AI models and pipelines |
+| [005_knowledge_chat.md](../.specs/005_knowledge_chat.md) | Knowledge chat pipeline in depth |
+| [006_api.md](../.specs/006_api.md) | Complete API reference |
+| [007_deployment.md](../.specs/007_deployment.md) | Docker / production deployment |
+| [008_mcp_server.md](../.specs/008_mcp_server.md) | MCP server setup and tools |

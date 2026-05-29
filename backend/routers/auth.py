@@ -265,10 +265,11 @@ def admin_list_users(current_user: str = Depends(get_current_user)):
         )
     
     users = list_users(get_driver())
-    # Remove password hashes from response
+    _SENSITIVE = {"password_hash", "anthropic_api_key", "anthropic_work_api_key", "anthropic_work_base_url"}
     for user in users:
-        user.pop("password_hash", None)
-    
+        for field in _SENSITIVE:
+            user.pop(field, None)
+
     return users
 
 

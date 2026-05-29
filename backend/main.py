@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from logger import setup_logging
 setup_logging()
@@ -11,6 +12,7 @@ from config import settings
 from db.connection import get_driver, close_driver, reset_driver
 from db.schema import run_schema_setup
 from models.schemas import HealthResponse
+from services.rate_limit import LimitRule, RateLimitMiddleware, parse_csv_paths
 from services.auth import extract_user_from_auth_header, reset_request_user, set_request_user
 
 log = logging.getLogger(__name__)
@@ -62,6 +64,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PaperManager API", lifespan=lifespan)
 
+trusted_hosts = [host.strip() for host in settings.trusted_hosts.split(",") if host.strip()]
+if trusted_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url, "http://localhost:5173"],
@@ -99,6 +105,40 @@ class Neo4jReconnectMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(Neo4jReconnectMiddleware)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add defensive response headers for browser clients."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=()",
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+if settings.rate_limit_enabled:
+    app.add_middleware(
+        RateLimitMiddleware,
+        default_rule=LimitRule(
+            requests=settings.rate_limit_default_requests,
+            window_seconds=settings.rate_limit_default_window_seconds,
+        ),
+        auth_rule=LimitRule(
+            requests=settings.rate_limit_auth_requests,
+            window_seconds=settings.rate_limit_auth_window_seconds,
+        ),
+        exempt_paths=parse_csv_paths(settings.rate_limit_exempt_paths),
+        auth_paths=parse_csv_paths(settings.rate_limit_auth_paths),
+        trust_proxy_headers=settings.trust_proxy_headers,
+    )
 
 
 app.include_router(auth_router)

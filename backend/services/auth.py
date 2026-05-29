@@ -2,15 +2,23 @@
 from datetime import datetime, timedelta, timezone
 from contextvars import ContextVar, Token
 from typing import Optional
+import logging
 from jose import JWTError, jwt
 import bcrypt
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
+from config import settings
 
-# Secret key for JWT - in production, load from environment
-# Generate with: openssl rand -hex 32
-SECRET_KEY = secrets.token_hex(32)
+# Secret key for JWT.
+# Configure JWT_SECRET_KEY in production to keep sessions valid across restarts.
+SECRET_KEY = settings.jwt_secret_key.strip() or secrets.token_hex(32)
+log = logging.getLogger(__name__)
+if not settings.jwt_secret_key.strip():
+    log.warning(
+        "JWT_SECRET_KEY is not set. Tokens will be invalid after backend restart."
+    )
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 

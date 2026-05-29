@@ -1,12 +1,17 @@
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from neo4j.graph import Node, Relationship
 
 from db.connection import get_driver
+from services.auth import get_current_user
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/cypher", tags=["cypher"])
+router = APIRouter(
+    prefix="/cypher",
+    tags=["cypher"],
+    dependencies=[Depends(get_current_user)],
+)
 
 # ── Schema description (static + enriched at runtime) ────────────────────────
 
