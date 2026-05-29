@@ -1,9 +1,10 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from neo4j.graph import Node, Relationship
 
 from db.connection import get_driver
+from db.queries.users import is_user_admin
 from services.auth import get_current_user
 
 log = logging.getLogger(__name__)
@@ -82,11 +83,19 @@ class AssistBody(BaseModel):
     request: str
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _require_admin(current_user: str) -> None:
+    if not is_user_admin(get_driver(), current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/schema")
-def get_schema():
+def get_schema(current_user: str = Depends(get_current_user)):
     """Return live schema info (labels, relationship types, property keys per label)."""
+    _require_admin(current_user)
     driver = get_driver()
     try:
         with driver.session() as session:
@@ -109,8 +118,9 @@ def get_schema():
 
 
 @router.post("/run")
-def run_query(body: QueryBody):
+def run_query(body: QueryBody, current_user: str = Depends(get_current_user)):
     """Execute an arbitrary Cypher query and return rows + mutation counters."""
+    _require_admin(current_user)
     query = body.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Empty query")
@@ -157,8 +167,9 @@ def delete_node(node_id: str):
 
 
 @router.post("/assist")
-def assist_query(body: AssistBody):
+def assist_query(body: AssistBody, current_user: str = Depends(get_current_user)):
     """Use Ollama to generate a Cypher query from a natural language description."""
+    _require_admin(current_user)
     if not body.request.strip():
         raise HTTPException(status_code=400, detail="Empty request")
     try:

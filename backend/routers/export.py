@@ -7,11 +7,12 @@ import json
 import logging
 import re
 import zipfile
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from neo4j import Driver
 
 from db.connection import get_driver
+from db.queries.users import is_user_admin
 from db.queries.papers import get_paper
 from db.queries.notes import get_paper_note
 from db.queries.annotations import list_annotations
@@ -104,16 +105,20 @@ def _build_snapshot(driver: Driver) -> dict:
         "relationships": [],
     }
 
+    _SNAPSHOT_SKIP_LABELS = {"User"}
+    _SNAPSHOT_STRIP_PROPS = {"password_hash", "anthropic_api_key", "anthropic_work_api_key", "anthropic_work_base_url"}
+
     with driver.session() as session:
         snapshot["nodes"] = [
             {
                 "export_id": record["export_id"],
                 "labels": record["labels"],
-                "properties": dict(record["props"]),
+                "properties": {k: v for k, v in dict(record["props"]).items() if k not in _SNAPSHOT_STRIP_PROPS},
             }
             for record in session.run(
                 """
                 MATCH (n)
+                WHERE NOT any(l IN labels(n) WHERE l IN ['User'])
                 RETURN elementId(n) AS export_id, labels(n) AS labels, properties(n) AS props
                 ORDER BY export_id
                 """
@@ -543,8 +548,10 @@ def export_snapshot(driver: Driver = Depends(get_driver)):
 
 
 @router.post("/import/snapshot")
-async def import_snapshot(file: UploadFile = File(...), replace: bool = True, driver: Driver = Depends(get_driver)):
+async def import_snapshot(file: UploadFile = File(...), replace: bool = True, current_user: str = Depends(get_current_user), driver: Driver = Depends(get_driver)):
     """Import a full graph snapshot previously exported by this app."""
+    if not is_user_admin(driver, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     if not file.filename or not file.filename.endswith(".json"):
         raise HTTPException(status_code=400, detail="Only .json snapshot files are accepted")
 

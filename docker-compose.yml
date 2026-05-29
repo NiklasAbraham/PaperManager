@@ -5,10 +5,11 @@ services:
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
       - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_apoc_export_file_enabled=true
-      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_export_file_enabled=false
+      - NEO4J_apoc_import_file_enabled=false
       - NEO4J_apoc_import_file_use__neo4j__config=true
-      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.meta.*,apoc.schema.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.meta.*,apoc.schema.*,apoc.math.*,apoc.text.*,apoc.util.*,apoc.convert.*,apoc.map.*,apoc.coll.*,apoc.date.*,apoc.node.*,apoc.rel.*,apoc.path.*,apoc.algo.*,apoc.create.*,apoc.periodic.*,apoc.refactor.*,apoc.merge.*
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -57,6 +58,7 @@ services:
       - papermanager
     volumes:
       - ./backend:/app
+      - ./prompts:/prompts
       - backend_data:/data
 
   frontend:
