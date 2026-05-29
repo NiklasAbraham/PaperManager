@@ -434,6 +434,39 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Documentation Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-guide" class="md-nav__link">
+    <span class="md-ellipsis">
+      User Guide
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#technical-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Technical Reference
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#developer-context-specs" class="md-nav__link">
+    <span class="md-ellipsis">
+      Developer Context (.specs/)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -906,6 +939,39 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Documentation Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-guide" class="md-nav__link">
+    <span class="md-ellipsis">
+      User Guide
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#technical-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Technical Reference
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#developer-context-specs" class="md-nav__link">
+    <span class="md-ellipsis">
+      Developer Context (.specs/)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1013,6 +1079,7 @@
 <p>See <a href="technical/architecture/">Architecture</a> for full technical detail.</p>
 <hr />
 <h2 id="documentation-map">Documentation Map<a class="headerlink" href="#documentation-map" title="Permanent link">&para;</a></h2>
+<h3 id="user-guide">User Guide<a class="headerlink" href="#user-guide" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -1045,6 +1112,17 @@
 <td><a href="user-guide/mcp-server/">MCP Server</a></td>
 <td>Claude Desktop integration</td>
 </tr>
+</tbody>
+</table>
+<h3 id="technical-reference">Technical Reference<a class="headerlink" href="#technical-reference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
 <tr>
 <td><a href="technical/architecture/">Architecture</a></td>
 <td>System design and module interaction diagrams</td>
@@ -1063,7 +1141,11 @@
 </tr>
 <tr>
 <td><a href="technical/ai-pipelines/">AI Pipelines</a></td>
-<td>Metadata extraction, summarisation, chat</td>
+<td>Metadata extraction, summarisation, chat, embeddings</td>
+</tr>
+<tr>
+<td><a href="technical/ingestion-workflow/">Ingestion Workflow</a></td>
+<td>Staged PDF upload flow in detail</td>
 </tr>
 <tr>
 <td><a href="technical/api-reference/">API Reference</a></td>
@@ -1072,6 +1154,54 @@
 <tr>
 <td><a href="decisions/">Decisions Log</a></td>
 <td>Architecture decision record</td>
+</tr>
+</tbody>
+</table>
+<h3 id="developer-context-specs">Developer Context (<code>.specs/</code>)<a class="headerlink" href="#developer-context-specs" title="Permanent link">&para;</a></h3>
+<p>Detailed spec files for contributors and AI assistants working on the codebase live in <a href="../.specs/"><code>.specs/</code></a>:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../.specs/000_general.md">000_general.md</a></td>
+<td>Overview, tech stack, quick start</td>
+</tr>
+<tr>
+<td><a href="../.specs/001_architecture.md">001_architecture.md</a></td>
+<td>Module map, design decisions</td>
+</tr>
+<tr>
+<td><a href="../.specs/002_data_model.md">002_data_model.md</a></td>
+<td>Full graph schema</td>
+</tr>
+<tr>
+<td><a href="../.specs/003_ingestion.md">003_ingestion.md</a></td>
+<td>All ingestion workflows</td>
+</tr>
+<tr>
+<td><a href="../.specs/004_ai_pipelines.md">004_ai_pipelines.md</a></td>
+<td>All AI models and pipelines</td>
+</tr>
+<tr>
+<td><a href="../.specs/005_knowledge_chat.md">005_knowledge_chat.md</a></td>
+<td>Knowledge chat pipeline in depth</td>
+</tr>
+<tr>
+<td><a href="../.specs/006_api.md">006_api.md</a></td>
+<td>Complete API reference</td>
+</tr>
+<tr>
+<td><a href="../.specs/007_deployment.md">007_deployment.md</a></td>
+<td>Docker / production deployment</td>
+</tr>
+<tr>
+<td><a href="../.specs/008_mcp_server.md">008_mcp_server.md</a></td>
+<td>MCP server setup and tools</td>
 </tr>
 </tbody>
 </table>

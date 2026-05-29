@@ -811,7 +811,7 @@
         <li class="md-nav__item">
   <a href="#metadata-extraction-strategy" class="md-nav__link">
     <span class="md-ellipsis">
-      Metadata extraction strategy
+      Metadata Extraction Strategy
     </span>
   </a>
   
@@ -820,7 +820,7 @@
         <li class="md-nav__item">
   <a href="#key-design-decisions" class="md-nav__link">
     <span class="md-ellipsis">
-      Key design decisions
+      Key Design Decisions
     </span>
   </a>
   
@@ -855,24 +855,26 @@
 
 
 <h1 id="papermanager-project-overview">PaperManager — Project Overview<a class="headerlink" href="#papermanager-project-overview" title="Permanent link">&para;</a></h1>
-<p>A personal research knowledge management system with a graph database backend,
-AI-assisted summaries, Q&amp;A, and a local web frontend.</p>
+<p>A personal research knowledge management system with a graph database backend, AI-assisted summaries, Q&amp;A, and a local web frontend.</p>
+<hr />
 <h2 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Drop PDFs (papers, books, lecture decks) into the system → stored in Google Drive</li>
-<li>Auto-summarize papers via Claude; extract claims, topics, references, figures</li>
+<li>Auto-summarise papers via Claude; extract claims, topics, references, figures</li>
 <li>Tag papers with topics, free-form tags, and people</li>
-<li>Write Markdown notes per paper with @Person and #Topic mentions</li>
+<li>Write Markdown notes per paper with <code>@Person</code> and <code>#Topic</code> mentions</li>
 <li>Chat with individual papers or across the entire library (Knowledge Chat)</li>
 <li>Filter and explore via projects, tags, topics, people, venues</li>
-<li>Visualize the knowledge graph of connections</li>
+<li>Visualise the knowledge graph of connections</li>
 <li>Discover new papers from arXiv, PubMed, and Semantic Scholar</li>
 <li>Track authors and auto-import their new publications</li>
 <li>Read and annotate technical blog posts alongside papers</li>
 <li>Highlight and annotate PDFs in-browser</li>
-<li>Find research gaps and synthesize insights across papers</li>
+<li>Find research gaps and synthesise insights across papers</li>
 <li>Detect and merge near-duplicate papers</li>
+<li>Use Claude Desktop to interact with the library via MCP tools</li>
 </ul>
+<hr />
 <h2 id="stack">Stack<a class="headerlink" href="#stack" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -903,8 +905,12 @@ AI-assisted summaries, Q&amp;A, and a local web frontend.</p>
 <td>Ollama + llama3.2:3b (local)</td>
 </tr>
 <tr>
+<td>AI (embeddings)</td>
+<td>Ollama + nomic-embed-text (local, 768-dim)</td>
+</tr>
+<tr>
 <td>Metadata APIs</td>
-<td>Semantic Scholar + CrossRef (free, no key)</td>
+<td>Semantic Scholar + CrossRef (free, no key needed)</td>
 </tr>
 <tr>
 <td>MCP server</td>
@@ -916,7 +922,8 @@ AI-assisted summaries, Q&amp;A, and a local web frontend.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="metadata-extraction-strategy">Metadata extraction strategy<a class="headerlink" href="#metadata-extraction-strategy" title="Permanent link">&para;</a></h2>
+<hr />
+<h2 id="metadata-extraction-strategy">Metadata Extraction Strategy<a class="headerlink" href="#metadata-extraction-strategy" title="Permanent link">&para;</a></h2>
 <p>When a PDF is ingested, metadata is extracted in priority order:</p>
 <ol>
 <li><strong>DOI/arXiv ID found</strong> → Semantic Scholar API → CrossRef fallback</li>
@@ -926,29 +933,33 @@ AI-assisted summaries, Q&amp;A, and a local web frontend.</p>
 <li><strong>Abstract missing</strong> → regex → Claude Haiku fallback</li>
 </ol>
 <p>The <code>metadata_source</code> field on each Paper node records which path was used.</p>
-<h2 id="key-design-decisions">Key design decisions<a class="headerlink" href="#key-design-decisions" title="Permanent link">&para;</a></h2>
+<hr />
+<h2 id="key-design-decisions">Key Design Decisions<a class="headerlink" href="#key-design-decisions" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Notes are separate graph nodes (not text fields on Paper) — enables @mention and #topic relationships</li>
+<li>Notes are separate graph nodes (not text fields on Paper) — enables <code>@mention</code> and <code>#topic</code> relationships</li>
 <li>Tags are free-form nodes — anything goes (source, status, context)</li>
-<li>Topics are formal research areas, separate from Tags</li>
-<li>People are nodes with specialties linked to Topics; tracked authors auto-import new papers</li>
-<li>Papers link to People via <code>INVOLVES {role}</code> for workflow states</li>
-<li>Projects are nodes that can be related to each other</li>
-<li>Papers can belong to multiple projects</li>
+<li>Topics are formal research areas, separate from Tags; linked to Person specialties</li>
+<li>People are nodes with specialties; tracked authors auto-import new papers via Semantic Scholar</li>
+<li>Papers link to People via <code>INVOLVES {role}</code> for workflow states (shared_by, working_on, collaborating, etc.)</li>
+<li>Projects are nodes that can be related to each other; papers can belong to multiple projects</li>
 <li>User identity enables per-user conversations and attribution</li>
 <li>Blogs and BlogPosts are first-class graph nodes alongside Papers</li>
 <li>Chapters allow books and lecture decks to be navigated section by section</li>
-<li>Claims, Annotations, and Figures are extracted and stored as graph nodes</li>
-<li>Vector embeddings on Paper nodes enable semantic similarity search</li>
+<li>Claims, Annotations, Figures, and Tables are extracted and stored as graph nodes</li>
+<li>Vector embeddings (768-dim, nomic-embed-text) on Paper nodes enable semantic similarity search</li>
+<li>All prompt templates live in <code>prompts/</code> as plain text — edit without restarting</li>
+<li>MCP tools and HTTP routers share the same <code>db/queries/</code> and <code>services/</code> layer</li>
 </ul>
+<hr />
 <h2 id="docs-in-this-folder">Docs in this folder<a class="headerlink" href="#docs-in-this-folder" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>overview.md</code> — this file</li>
 <li><code>decisions.md</code> — architecture decisions log</li>
-<li><code>data_model.md</code> — legacy schema reference (see <code>technical/data-model.md</code> for current)</li>
-<li><code>technical/</code> — current technical reference</li>
+<li><code>technical/</code> — full technical reference (architecture, data model, AI pipelines, API, backend, frontend)</li>
 <li><code>user-guide/</code> — user-facing how-to guides</li>
+<li><code>tasks/</code> — historical task spec files from initial development</li>
 </ul>
+<p>For developer/contributor context, see <a href="../.specs/"><code>.specs/</code></a>.</p>
 
 
 
