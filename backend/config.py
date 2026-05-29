@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     # App
     backend_port: int = 8000
     frontend_url: str = "http://localhost:5173"
+    jwt_secret_key: str = ""
+    trusted_hosts: str = "localhost,127.0.0.1"
+    trust_proxy_headers: bool = False
+
+    # API hardening
+    rate_limit_enabled: bool = True
+    rate_limit_default_requests: int = 120
+    rate_limit_default_window_seconds: int = 60
+    rate_limit_auth_requests: int = 10
+    rate_limit_auth_window_seconds: int = 60
+    rate_limit_exempt_paths: str = "/docs,/redoc,/openapi.json"
+    rate_limit_auth_paths: str = "/auth/login"
 
     # Ollama
     ollama_model: str = "llama3.2:3b"

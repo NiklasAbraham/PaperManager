@@ -1,21 +1,30 @@
 """Admin endpoints: clear paper data, seed defaults."""
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
+
 from db.connection import get_driver
+from db.queries.users import is_user_admin
+from services.auth import get_current_user
 from services.drive import delete_file
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.delete("/clear-papers")
-def clear_papers():
+def clear_papers(current_user: str = Depends(get_current_user)):
     """
     Delete all Paper, Person, Note, and Figure nodes (and their Drive files).
     Tag and Topic nodes are preserved — they are the 'generic infrastructure'.
     Project nodes are also removed since they reference papers.
     Returns counts of deleted items.
     """
+    if not is_user_admin(get_driver(), current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators can clear papers")
     driver = get_driver()
     counts: dict[str, int] = {}
 

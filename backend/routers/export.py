@@ -19,9 +19,14 @@ from db.queries.claims import get_paper_claims
 from db.queries.references import get_references, get_cited_by
 from db.queries.figures import list_figures
 from db.queries.tables import list_tables
+from services.auth import get_current_user
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/export", tags=["export"])
+router = APIRouter(
+    prefix="/export",
+    tags=["export"],
+    dependencies=[Depends(get_current_user)],
+)
 
 SNAPSHOT_FORMAT = "papermanager-graph-snapshot"
 SNAPSHOT_VERSION = 1
