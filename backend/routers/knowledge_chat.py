@@ -28,7 +28,10 @@ def _sse(event: dict) -> str:
 
 # ── @mention parsing ──────────────────────────────────────────────────────────
 
-_MENTION_RE = re.compile(r"@(project|tag|topic|paper|blog|person):([^\s@,]+)", re.IGNORECASE)
+_MENTION_RE = re.compile(
+    r"@(project|tag|topic|paper|blog|person):(?:\"([^\"]+)\"|'([^']+)'|([^\s@,]+))",
+    re.IGNORECASE,
+)
 
 # Paper colour palette for context bar (cycled)
 _PAPER_COLORS = [
@@ -39,7 +42,12 @@ _PAPER_COLORS = [
 
 def _parse_mentions(text: str) -> list[tuple[str, str]]:
     """Return list of (type, value) tuples from @mentions in text."""
-    return [(m.group(1).lower(), m.group(2)) for m in _MENTION_RE.finditer(text)]
+    mentions: list[tuple[str, str]] = []
+    for m in _MENTION_RE.finditer(text):
+        value = m.group(2) or m.group(3) or m.group(4)
+        if value:
+            mentions.append((m.group(1).lower(), value))
+    return mentions
 
 
 def _fetch_papers_for_mention(
@@ -225,7 +233,7 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
              "knowledge_chat_system.txt").read()
     ) + 200  # buffer for papers_block header
 
-    history_tokens = sum(estimate_tokens(m["content"]) for m in body.history)
+    history_tokens = sum(estimate_tokens(m.content) for m in body.history)
     question_tokens = estimate_tokens(body.question)
 
     # Enrich papers with their notes + conversation summaries
@@ -299,7 +307,7 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
     try:
         for event in knowledge_chat_stream(
             question=body.question,
-            history=[{"role": m["role"], "content": m["content"]} for m in body.history],
+            history=[{"role": m.role, "content": m.content} for m in body.history],
             papers=all_papers,
             model=body.model,
             use_web=body.use_web,
