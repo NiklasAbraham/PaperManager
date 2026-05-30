@@ -232,7 +232,9 @@ export default function KnowledgeChat() {
     const cursor = textareaRef.current?.selectionStart ?? input.length;
     const before = input.slice(0, cursor);
     const after = input.slice(cursor);
-    const replaced = before.replace(/@[\w:]*$/, `@${opt.type}:${opt.value} `);
+    const needsQuoting = /[\s,:@]/.test(opt.value);
+    const mentionValue = needsQuoting ? `"${opt.value.replace(/"/g, "'")}"` : opt.value;
+    const replaced = before.replace(/@[\w:]*$/, `@${opt.type}:${mentionValue} `);
     setInput(replaced + after);
     setMentionDropdown([]);
     setTimeout(() => textareaRef.current?.focus(), 0);
