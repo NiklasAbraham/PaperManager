@@ -173,7 +173,7 @@ def _parse_ref_json(raw: str) -> list[dict]:
 
 
 def extract_references_ai_full(raw_text: str) -> list[dict]:
-    """Extract references using Claude Work → Claude personal → Ollama (no S2)."""
+    """Extract references using LiteLLM/Gemma → Claude Work → Claude personal (no S2)."""
     ref_section = _get_ref_section_text(raw_text)
     ref_text = (ref_section or raw_text)[:80000]
     prompt = _REF_AI_PROMPT.format(ref_text=ref_text)
@@ -181,6 +181,22 @@ def extract_references_ai_full(raw_text: str) -> list[dict]:
     work_key = (ai_cfg.get("anthropic_work_api_key") or "").strip()
     work_base = (ai_cfg.get("anthropic_work_base_url") or "").strip()
     personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
+
+    # LiteLLM / Gemma (default — shorter context)
+    try:
+        from services.litellm_client import chat_completion
+
+        short_prompt = _REF_AI_PROMPT.format(ref_text=ref_text[:12000])
+        raw = chat_completion(
+            messages=[{"role": "user", "content": short_prompt}],
+            json_mode=True,
+        )
+        refs = _parse_ref_json(raw)
+        if refs:
+            log.debug("References via LiteLLM | count=%d", len(refs))
+            return refs
+    except Exception as exc:
+        log.debug("LiteLLM references failed: %s", exc)
 
     # Claude Work
     if work_key:
@@ -226,42 +242,15 @@ def extract_references_ai_full(raw_text: str) -> list[dict]:
         except Exception as exc:
             log.debug("Claude personal references failed: %s", exc)
 
-    # Ollama (shorter context)
-    try:
-        import ollama
-        short_prompt = _REF_AI_PROMPT.format(ref_text=ref_text[:4000])
-        resp = ollama.chat(
-            model=settings.ollama_model,
-            messages=[{"role": "user", "content": short_prompt}],
-            format="json",
-        )
-        refs = _parse_ref_json(resp["message"]["content"])
-        if refs:
-            log.debug("References via Ollama | count=%d", len(refs))
-            return refs
-    except Exception as exc:
-        log.debug("Ollama references failed: %s", exc)
-
     return []
 
 
 def _extract_references_with_ai(ref_text: str) -> list[dict]:
     """Use Claude to parse references from text when regex fails or returns too few."""
     try:
-        import anthropic
-        ai_cfg = get_effective_ai_config()
-        personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
-        if not personal_key:
-            return []
+        from services.litellm_client import chat_completion
 
-        client = anthropic.Anthropic(
-            api_key=personal_key,
-            base_url="https://api.anthropic.com",
-            http_client=httpx.Client(verify=settings.ssl_verify if settings.ssl_verify is not False else False),
-        )
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=8192,
+        raw = chat_completion(
             messages=[{
                 "role": "user",
                 "content": (
@@ -276,11 +265,12 @@ def _extract_references_with_ai(ref_text: str) -> list[dict]:
                     "    doi (string or null — only if explicitly present in the text),\n"
                     "    arxiv_id (string or null — e.g. '2301.07041', only if explicitly present)\n"
                     "- Return ONLY valid JSON array — no markdown fences, no explanation.\n\n"
-                    f"Text:\n{ref_text[:80000]}"
+                    f"Text:\n{ref_text[:12000]}"
                 ),
             }],
+            json_mode=True,
         )
-        raw = response.content[0].text.strip()
+        raw = raw.strip()
         # Strip markdown code fences if the model added them
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)

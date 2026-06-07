@@ -76,15 +76,69 @@ export async function updateMyAiKeys(body: UpdateMyAiKeysBody): Promise<MyAiKeyS
   });
 }
 
-export async function parsePdf(file: File): Promise<ParsedMeta> {
+export async function parsePdf(file: File, signal?: AbortSignal): Promise<ParsedMeta> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/papers/parse`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}/papers/parse`, { method: "POST", body: form, signal });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Parse failed ${res.status}: ${detail}`);
   }
   return res.json();
+}
+
+export interface PreprocessStatus {
+  preprocess_key: string;
+  status: "pending" | "running" | "ready" | "error" | "missing";
+  error?: string;
+}
+
+export async function preprocessPdf(
+  file: File,
+  captionMethod = "docling",
+  signal?: AbortSignal,
+): Promise<PreprocessStatus> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("caption_method", captionMethod);
+  const res = await fetch(`${BASE}/papers/preprocess`, { method: "POST", body: form, signal });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Preprocess failed ${res.status}: ${detail}`);
+  }
+  return res.json();
+}
+
+export async function getPreprocessStatus(preprocessKey: string): Promise<PreprocessStatus> {
+  return apiFetch<PreprocessStatus>(`/papers/preprocess/${preprocessKey}`);
+}
+
+export interface TagSuggestions {
+  existing: string[];
+  new: string[];
+  all_tags: string[];
+}
+
+export interface AnalysisStatus {
+  analysis_key: string;
+  status: "pending" | "running" | "ready" | "error" | "missing";
+  error?: string;
+  tag_suggestions?: TagSuggestions;
+}
+
+export async function preanalyzePdf(file: File, signal?: AbortSignal): Promise<AnalysisStatus> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/papers/preanalyze`, { method: "POST", body: form, signal });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Preanalyze failed ${res.status}: ${detail}`);
+  }
+  return res.json();
+}
+
+export async function getPreanalysisStatus(analysisKey: string): Promise<AnalysisStatus> {
+  return apiFetch<AnalysisStatus>(`/papers/preanalyze/${analysisKey}`);
 }
 
 export async function uploadPdf(
@@ -97,6 +151,8 @@ export async function uploadPdf(
   documentType?: string,
   claimsModel?: string,
   generateEmbedding?: boolean,
+  preprocessKey?: string,
+  analysisKey?: string,
 ): Promise<T_IngestOut> {
   const form = new FormData();
   form.append("file", file);
@@ -106,6 +162,8 @@ export async function uploadPdf(
   if (summaryInstructions) form.append("summary_instructions", summaryInstructions);
   if (debug) form.append("debug", "true");
   if (documentType) form.append("document_type", documentType);
+  if (preprocessKey) form.append("preprocess_key", preprocessKey);
+  if (analysisKey) form.append("analysis_key", analysisKey);
   // Pass empty string to skip claims extraction; omit to use backend default
   if (claimsModel !== undefined) form.append("claims_model", claimsModel);
   if (generateEmbedding === false) form.append("skip_embedding", "true");
@@ -313,13 +371,18 @@ export async function deletePaper(paperId: string): Promise<void> {
   }
 }
 
-export async function checkDuplicate(doi?: string, title?: string): Promise<{ id: string; title: string } | null> {
+export async function checkDuplicate(doi?: string, title?: string): Promise<{ id: string; title: string; hasPdf: boolean } | null> {
   const params = new URLSearchParams();
   if (doi) params.set("doi", doi);
   else if (title) params.set("title", title);
   else return null;
-  const res = await apiFetch<{ duplicate: { id: string; title: string } | null }>(`/papers/check-duplicate?${params}`);
-  return res.duplicate ?? null;
+  const res = await apiFetch<{ duplicate: { id: string; title: string; drive_file_id?: string | null } | null }>(`/papers/check-duplicate?${params}`);
+  if (!res.duplicate) return null;
+  return {
+    id: res.duplicate.id,
+    title: res.duplicate.title,
+    hasPdf: !!res.duplicate.drive_file_id,
+  };
 }
 
 export async function updatePaper(paperId: string, data: Partial<{
@@ -800,8 +863,13 @@ export async function regenerateChapterSummary(paperId: string, chapterId: strin
   });
 }
 
+export async function listLitellmModels(): Promise<string[]> {
+  return apiFetch<string[]>("/litellm/models");
+}
+
+/** @deprecated use listLitellmModels */
 export async function listOllamaModels(): Promise<string[]> {
-  return apiFetch<string[]>("/ollama/models");
+  return listLitellmModels();
 }
 
 export async function chatWithChapter(
@@ -1223,7 +1291,7 @@ export interface ScanResult {
   total_papers: number;
 }
 
-export async function scanDuplicates(model: string = "ollama"): Promise<ScanResult> {
+export async function scanDuplicates(model: string = "litellm"): Promise<ScanResult> {
   return apiFetch(`/merge/scan?model=${encodeURIComponent(model)}`, { method: "POST" });
 }
 

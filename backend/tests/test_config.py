@@ -8,7 +8,8 @@ def test_settings_importable():
     assert hasattr(s, "neo4j_password")
     assert hasattr(s, "anthropic_api_key")
     assert hasattr(s, "google_drive_folder_id")
-    assert hasattr(s, "ollama_model")
+    assert hasattr(s, "litellm_model")
+    assert hasattr(s, "litellm_endpoint")
     assert hasattr(s, "backend_port")
     assert hasattr(s, "jwt_secret_key")
     assert hasattr(s, "trusted_hosts")
@@ -19,7 +20,7 @@ def test_settings_defaults():
     # Test only fields that are not overridden by .env
     s = Settings()
     assert s.backend_port == 8000
-    assert s.ollama_model == "llama3.2:3b"
+    assert s.litellm_model == "google/gemma-4-26b-a4b-it"
     assert s.frontend_url == "http://localhost:5173"
     assert s.rate_limit_enabled is True
     assert s.rate_limit_default_requests == 120

@@ -1,11 +1,47 @@
 import logging
 import re
 import httpx
+import time
 from difflib import SequenceMatcher
+from functools import wraps
 
 from config import settings
 
 log = logging.getLogger(__name__)
+
+
+def retry_with_backoff(max_retries=2, initial_delay=0.5):
+    """Retry decorator with exponential backoff for API calls.
+    
+    Does NOT retry on 429 (rate limit) errors - those should fail fast
+    and let the caller use alternative strategies (LLM, heuristics).
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except httpx.HTTPStatusError as e:
+                    # Don't retry rate limits - fail fast to allow fallback to LLM
+                    if e.response.status_code == 429:
+                        log.warning("%s rate limited (429) - failing fast for LLM fallback", func.__name__)
+                        raise
+                    # Don't retry other HTTP errors either
+                    raise
+                except (httpx.TimeoutException, httpx.ConnectError) as e:
+                    if attempt == max_retries:
+                        log.warning("%s failed after %d retries | %s", func.__name__, max_retries + 1, e)
+                        raise
+                    delay = initial_delay * (2 ** attempt)
+                    log.debug("%s timeout/error on attempt %d, retrying in %.2fs", func.__name__, attempt + 1, delay)
+                    time.sleep(delay)
+                except Exception as e:
+                    # Don't retry on other errors
+                    raise
+            return None
+        return wrapper
+    return decorator
 
 _SS_BASE = "https://api.semanticscholar.org/graph/v1/paper"
 _CR_BASE = "https://api.crossref.org/works"
@@ -58,7 +94,7 @@ def search_semantic_scholar_by_title(title: str) -> dict | None:
             f"{_SS_BASE}/search",
             params={"query": title, "fields": _FIELDS, "limit": 3},
             verify=_ssl(),
-            timeout=10,
+            timeout=5,
         )
         if r.status_code != 200:
             return None
@@ -126,7 +162,7 @@ def _get_s2_paper_id(doi: str) -> str | None:
             f"{_S2_PAPER_BASE}/{s2_id}",
             params={"fields": "paperId"},
             verify=_ssl(),
-            timeout=10,
+            timeout=5,
         )
         if r.status_code != 200:
             return None
@@ -198,19 +234,30 @@ def get_related_papers(doi: str, limit: int = 10) -> list[dict]:
 
 
 def lookup_semantic_scholar(doi: str) -> dict | None:
-    # S2 requires a typed identifier prefix; bare DOIs need "DOI:"
-    if doi.startswith("10."):
-        s2_id = f"DOI:{doi}"
-    elif doi.lower().startswith("arxiv:"):
-        s2_id = doi  # already prefixed
-    else:
-        s2_id = doi
-    try:
-        r = httpx.get(f"{_SS_BASE}/{s2_id}", params={"fields": _FIELDS}, verify=_ssl(), timeout=10)
+    """Lookup metadata from Semantic Scholar by DOI or arXiv ID."""
+    @retry_with_backoff(max_retries=1, initial_delay=0.3)
+    def _fetch():
+        # S2 requires a typed identifier prefix; bare DOIs need "DOI:"
+        if doi.startswith("10."):
+            s2_id = f"DOI:{doi}"
+        elif doi.lower().startswith("arxiv:"):
+            s2_id = doi  # already prefixed
+        else:
+            s2_id = doi
+        
+        r = httpx.get(f"{_SS_BASE}/{s2_id}", params={"fields": _FIELDS}, verify=_ssl(), timeout=5)
+        if r.status_code == 429:
+            log.warning("S2 rate limit hit | id=%s", s2_id)
+            r.raise_for_status()  # Raise to trigger fast failure
         if r.status_code != 200:
             log.warning("S2 lookup failed | id=%s | status=%d | body=%.120s", s2_id, r.status_code, r.text)
             return None
-        data = r.json()
+        return r.json()
+    
+    try:
+        data = _fetch()
+        if not data:
+            return None
         names, detail = _parse_s2_authors(data.get("authors") or [])
         return {
             "title": (data.get("title") or "").strip(),
@@ -224,18 +271,30 @@ def lookup_semantic_scholar(doi: str) -> dict | None:
             "topics": [],
             "metadata_source": "semantic_scholar",
         }
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            log.info("S2 rate limited - will try LLM fallback")
+        return None
     except Exception as e:
-        log.warning("S2 lookup error | id=%s | %s", s2_id, e)
+        log.warning("S2 lookup error | doi=%s | %s", doi, e)
         return None
 
 
 def lookup_crossref(doi: str) -> dict | None:
-    try:
-        r = httpx.get(f"{_CR_BASE}/{doi}", verify=_ssl(), timeout=10)
+    """Lookup metadata from CrossRef by DOI."""
+    @retry_with_backoff(max_retries=1, initial_delay=0.3)
+    def _fetch():
+        r = httpx.get(f"{_CR_BASE}/{doi}", verify=_ssl(), timeout=5)
         if r.status_code != 200:
             log.warning("CrossRef lookup failed | doi=%s | status=%d", doi, r.status_code)
             return None
-        msg = r.json().get("message", {})
+        return r.json()
+    
+    try:
+        data = _fetch()
+        if not data:
+            return None
+        msg = data.get("message", {})
         title_list = msg.get("title", [])
         authors_raw = msg.get("author", [])
         authors = [

@@ -141,7 +141,7 @@ def backfill_claims():
             skipped += 1
             continue
         try:
-            claims_data = extract_claims(raw_text, paper.get("title", ""), model="claude-haiku-4-5-20251001")
+            claims_data = extract_claims(raw_text, paper.get("title", ""), model="litellm")
             if claims_data:
                 create_claims(driver, paper["id"], claims_data)
                 log.info("Backfill claims | paper=%s | count=%d", paper["id"], len(claims_data))

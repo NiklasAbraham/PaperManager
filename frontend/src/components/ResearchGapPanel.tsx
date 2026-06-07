@@ -2,12 +2,12 @@ import { useState } from "react";
 import { findResearchGaps } from "../api/client";
 import ReactMarkdown from "react-markdown";
 
-type Model = "claude" | "claude-work" | "ollama";
+type Model = "claude" | "claude-work" | "litellm";
 
 const MODEL_LABELS: Record<Model, string> = {
   claude: "Claude",
   "claude-work": "Claude (Work)",
-  ollama: "Ollama",
+  litellm: "Gemma (LiteLLM)",
 };
 
 interface Props {
@@ -19,7 +19,7 @@ interface Props {
 export default function ResearchGapPanel({ onClose, projectId, paperIds }: Props) {
   const [topic, setTopic] = useState("");
   const [scope, setScope] = useState<"library" | "project">(projectId ? "project" : "library");
-  const [model, setModel] = useState<Model>("claude");
+  const [model, setModel] = useState<Model>("litellm");
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [papersConsidered, setPapersConsidered] = useState<number>(0);
@@ -128,7 +128,7 @@ export default function ResearchGapPanel({ onClose, projectId, paperIds }: Props
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
                 <div className="flex rounded border border-gray-300 overflow-hidden">
-                  {(["claude", "claude-work", "ollama"] as Model[]).map((m) => (
+                  {(["claude", "claude-work", "litellm"] as Model[]).map((m) => (
                     <button
                       key={m}
                       type="button"

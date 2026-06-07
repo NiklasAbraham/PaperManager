@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, validateSnapshot, clearPapers, seedDefaults, listOllamaModels, getMyAiKeyStatus, updateMyAiKeys, type MyAiKeyStatus, type SnapshotValidation } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, validateSnapshot, clearPapers, seedDefaults, listLitellmModels, getMyAiKeyStatus, updateMyAiKeys, type MyAiKeyStatus, type SnapshotValidation } from "../api/client";
 import UserManagement from "../components/UserManagement";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
@@ -26,7 +26,7 @@ export default function Settings() {
   const [clearResult, setClearResult] = useState<Record<string, number> | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{ seeded: number } | null>(null);
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [litellmModels, setLitellmModels] = useState<string[]>([]);
   const [debugCount, setDebugCount] = useState<number | null>(null);
   const [debugDeleting, setDebugDeleting] = useState(false);
   const [debugDeleteResult, setDebugDeleteResult] = useState<{ deleted: number; figures_deleted: number } | null>(null);
@@ -41,7 +41,7 @@ export default function Settings() {
 
   useEffect(() => {
     countDebugPapers().then(setDebugCount).catch(() => setDebugCount(null));
-    listOllamaModels().then(setOllamaModels).catch(() => setOllamaModels([]));
+    listLitellmModels().then(setLitellmModels).catch(() => setLitellmModels([]));
     getMyAiKeyStatus().then((s) => {
       setAiStatus(s);
       setWorkBaseUrlInput(s.user_anthropic_work_base_url || "");
@@ -269,12 +269,12 @@ export default function Settings() {
           />
         </Row>
 
-        <Row label="Figure caption method" description="How figures are detected and captioned at upload time. Docling uses a neural layout model (best quality).">
+        <Row label="Figure caption method" description="How figures are detected and captioned at upload time. Docling uses the layout model on hermione (on-demand GPU) when DOCLING_MODE=on_demand.">
           <ToggleGroup
             value={settings.figureCaptionMethod}
             options={[
               { value: "docling", label: "Docling (AI layout)" },
-              { value: "ollama", label: "Ollama (text)" },
+              { value: "litellm", label: "LiteLLM (Gemma)" },
               { value: "claude-vision", label: "Claude Vision" },
             ]}
             onChange={(v) => update({ figureCaptionMethod: v as AppSettings["figureCaptionMethod"] })}
@@ -284,19 +284,18 @@ export default function Settings() {
 
       {/* ── Books & Chapters ── */}
       <Section title="Books & Chapters" description="Settings for chapter detection and AI summarisation.">
-        <Row label="Summary model" description="Model used to generate per-chapter summaries. 'Claude Work' uses your enterprise gateway; 'Claude' uses the personal API key; Ollama models run locally.">
+        <Row label="Summary model" description="Model used to generate per-chapter summaries. 'Claude Work' uses your enterprise gateway; 'Claude' uses the personal API key; LiteLLM models use the hosted Gemma proxy.">
           {(() => {
             const CLAUDE_OPTIONS = [
               { value: "claude-work",              label: "Claude Work (Opus)" },
               { value: "claude-opus-4-6",          label: "Claude (Opus)" },
               { value: "claude-haiku-4-5-20251001", label: "Claude (Haiku)" },
             ];
-            const localOptions = ollamaModels.map((m) => ({ value: m, label: m }));
+            const localOptions = litellmModels.map((m) => ({ value: m, label: m }));
             const allOptions = [
               ...CLAUDE_OPTIONS,
               ...(localOptions.length > 0 ? [{ value: "─────────", label: "─────────" }, ...localOptions] : []),
-              // keep current value if it's not in any known list
-              ...(!CLAUDE_OPTIONS.some(o => o.value === settings.chapterSummaryModel) && !ollamaModels.includes(settings.chapterSummaryModel)
+              ...(!CLAUDE_OPTIONS.some(o => o.value === settings.chapterSummaryModel) && !litellmModels.includes(settings.chapterSummaryModel)
                 ? [{ value: settings.chapterSummaryModel, label: settings.chapterSummaryModel }]
                 : []),
             ];
@@ -366,7 +365,7 @@ export default function Settings() {
             options={[
               { value: "claude",      label: "Claude" },
               { value: "claude-work", label: "Claude (Work)" },
-              { value: "ollama",      label: "Ollama" },
+              { value: "litellm",      label: "Gemma (LiteLLM)" },
             ]}
             onChange={(v) => update({ knowledgeChatDefaultModel: v as AppSettings["knowledgeChatDefaultModel"] })}
           />
@@ -423,19 +422,19 @@ export default function Settings() {
           />
         </Row>
 
-        <Row label="Claims extraction model" description="Model used to extract claims. Claude Haiku is fast and cheap; Ollama runs locally.">
+        <Row label="Claims extraction model" description="Model used to extract claims. Claude Haiku is fast and cheap; LiteLLM models use the hosted Gemma proxy.">
           {(() => {
             const CLAUDE_OPTIONS = [
               { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
               { value: "claude-opus-4-6",           label: "Claude Opus 4.6" },
             ];
-            const localOptions = ollamaModels.map((m) => ({ value: m, label: m }));
+            const localOptions = litellmModels.map((m) => ({ value: m, label: m }));
             const allOptions = [
               ...CLAUDE_OPTIONS,
               ...(localOptions.length > 0
                 ? [{ value: "─────────", label: "─────────" }, ...localOptions]
                 : []),
-              ...(!CLAUDE_OPTIONS.some((o) => o.value === settings.claimsModel) && !ollamaModels.includes(settings.claimsModel)
+              ...(!CLAUDE_OPTIONS.some((o) => o.value === settings.claimsModel) && !litellmModels.includes(settings.claimsModel)
                 ? [{ value: settings.claimsModel, label: settings.claimsModel }]
                 : []),
             ];
@@ -449,7 +448,7 @@ export default function Settings() {
           })()}
         </Row>
 
-        <Row label="Generate embeddings on upload" description="Compute a 768-dim vector embedding for each paper using local Ollama (nomic-embed-text) after upload. Enables semantic search in Knowledge Chat. Requires Ollama to be running.">
+        <Row label="Generate embeddings on upload" description="Compute a 768-dim vector embedding for each paper via LiteLLM (nomic-embed-text) after upload. Enables semantic search in Knowledge Chat. Requires LiteLLM to be configured.">
           <Toggle
             value={settings.generateEmbeddingsOnUpload}
             onChange={(v) => update({ generateEmbeddingsOnUpload: v })}
@@ -759,7 +758,7 @@ export default function Settings() {
         />
         <BackfillRow
           label="Generate embeddings"
-          description="Compute vector embeddings for papers that have no embedding yet using local Ollama (nomic-embed-text). Required for semantic search in Knowledge Chat."
+          description="Compute vector embeddings for papers that have no embedding yet via LiteLLM (nomic-embed-text). Required for semantic search in Knowledge Chat."
           state={backfill.embeddings}
           onRun={() => runBackfill("embeddings")}
         />

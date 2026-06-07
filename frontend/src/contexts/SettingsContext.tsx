@@ -28,7 +28,7 @@ export interface AppSettings {
   chapterSummaryModel: string;
 
   // Figures
-  figureCaptionMethod: "docling" | "ollama" | "claude-vision";
+  figureCaptionMethod: "docling" | "ollama" | "litellm" | "claude-vision";
 
   // Graph
   defaultGraphMode: "full" | "papers";
@@ -37,7 +37,7 @@ export interface AppSettings {
   graphShowEdgeLabels: boolean;
 
   // Knowledge Chat
-  knowledgeChatDefaultModel: "claude" | "claude-work" | "ollama";
+  knowledgeChatDefaultModel: "claude" | "claude-work" | "litellm" | "ollama";
   knowledgeChatUseWeb: boolean;
   knowledgeChatOpusThreshold: number; // token count above which Opus is used instead of Sonnet
 
@@ -61,7 +61,7 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   showSummaryPromptStep: true,
   autoSaveReferences: false,
   defaultSummaryInstructions: DEFAULT_SUMMARY_INSTRUCTIONS,
-  chapterSummaryModel: "llama3.2:3b",
+  chapterSummaryModel: "google/gemma-4-26b-a4b-it",
   figureCaptionMethod: "docling",
   defaultGraphMode: "papers",
   graphNodeSize: 16,
@@ -71,7 +71,7 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   knowledgeChatUseWeb: true,
   knowledgeChatOpusThreshold: 40000,
   autoExtractClaims: true,
-  claimsModel: "claude-haiku-4-5-20251001",
+  claimsModel: "litellm",
   generateEmbeddingsOnUpload: true,
   compactionKeepLastN: 6,
   debugMode: false,
@@ -83,7 +83,17 @@ function loadFromStorage(): AppSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return SETTINGS_DEFAULTS;
-    return { ...SETTINGS_DEFAULTS, ...JSON.parse(raw) };
+    const parsed = { ...SETTINGS_DEFAULTS, ...JSON.parse(raw) };
+    if (parsed.knowledgeChatDefaultModel === "ollama") {
+      parsed.knowledgeChatDefaultModel = "litellm";
+    }
+    if (parsed.chapterSummaryModel === "llama3.2:3b") {
+      parsed.chapterSummaryModel = SETTINGS_DEFAULTS.chapterSummaryModel;
+    }
+    if (parsed.figureCaptionMethod === "ollama") {
+      parsed.figureCaptionMethod = "litellm";
+    }
+    return parsed;
   } catch {
     return SETTINGS_DEFAULTS;
   }

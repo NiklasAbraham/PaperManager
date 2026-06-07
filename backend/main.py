@@ -50,6 +50,13 @@ from routers.merge import router as merge_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("PaperManager backend starting up")
+    # Enlarge the threadpool that serves sync endpoints. The default (40) can be
+    # starved by a handful of long /papers/upload requests (each parks a thread
+    # while Docling runs), which would block /auth/login from getting a worker.
+    import anyio.to_thread
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    limiter.total_tokens = settings.server_threadpool_size
+    log.info("Threadpool size set to %d", settings.server_threadpool_size)
     get_driver().verify_connectivity()
     log.info("Neo4j connection verified")
     run_schema_setup(get_driver())
@@ -174,17 +181,17 @@ app.include_router(author_tracker_router)
 app.include_router(merge_router)
 
 
-@app.get("/ollama/models", response_model=list[str])
-def list_ollama_models():
-    """Return the names of locally available Ollama models."""
+@app.get("/litellm/models", response_model=list[str])
+@app.get("/ollama/models", response_model=list[str], include_in_schema=False)
+def list_litellm_models():
+    """Return model IDs available through the LiteLLM proxy."""
+    from services.litellm_client import list_available_models
+
     try:
-        import ollama
-        models_resp = ollama.list()
-        # ollama.list() returns an object with a .models list of model objects
-        names = [m.model for m in models_resp.models if m.model]
-        return sorted(names)
+        return list_available_models()
     except Exception:
-        return []
+        from config import settings
+        return [settings.litellm_model]
 
 
 @app.get("/health", response_model=HealthResponse)

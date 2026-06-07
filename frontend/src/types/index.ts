@@ -160,7 +160,7 @@ export interface Chapter {
 export interface Figure {
   id: string;
   paper_id: string;
-  figure_number: number | null;
+  figure_number: number | string | null;
   caption: string | null;
   drive_file_id: string;
   drive_url: string | null;

@@ -193,9 +193,8 @@ def papers(name: str):
 
 @tags_router.post("/suggest")
 def suggest_tags(body: SuggestBody):
-    """Suggest relevant tags using Claude Haiku (falls back to Ollama)."""
-    import json as _json
-    from config import settings as _settings
+    """Suggest relevant tags using Gemma/LiteLLM (falls back to Claude Work)."""
+    from services.tag_suggester import suggest_tags_litellm
 
     driver = get_driver()
     existing_tags = [t["name"] for t in list_tags(driver)]
@@ -203,59 +202,21 @@ def suggest_tags(body: SuggestBody):
     if not body.abstract and not body.title:
         raise HTTPException(status_code=400, detail="Title or abstract required")
 
-    abstract_block = f"Abstract:\n{body.abstract}" if body.abstract else "(no abstract available)"
-    # Exclude system/source tags from the suggestion list — not useful to suggest these
-    _SKIP = {"pdf-upload", "from-url", "from-references", "bulk-import", "debug",
-             "from-linkedin", "from-twitter", "from-email", "from-conference",
-             "from-newsletter", "from-google-scholar", "from-google", "from-ai-chat", "from-arxiv", "from-colleague"}
-    candidate_tags = [t for t in existing_tags if t not in _SKIP]
-    tag_list = ", ".join(candidate_tags) if candidate_tags else "(none yet)"
+    # ── Strategy A: LiteLLM / Gemma (primary) ────────────────────────────────
+    result = suggest_tags_litellm(body.title, body.abstract, existing_tags)
+    if result is not None:
+        return result
 
-    prompt = (
-        "You are helping organise academic papers in a personal research library.\n\n"
-        f"Available tags in this library:\n{tag_list}\n\n"
-        f"Paper to tag:\nTitle: {body.title}\n{abstract_block}\n\n"
-        "Task:\n"
-        "1. From the available tags above, pick the most relevant ones for this paper (ideally 3–6).\n"
-        "2. If fewer than 4 existing tags fit well, suggest additional NEW tag names (total ≥ 4).\n"
-        "   New tags: lowercase, hyphen-separated, max 60 chars each.\n\n"
-        'Return ONLY valid JSON with exactly two keys:\n'
-        '  "existing": [list of chosen tags from the available list]\n'
-        '  "new": [list of brand-new tag names, or empty list]\n\n'
-        "No explanation, no markdown fences, just the JSON object."
-    )
-
-    def _parse(raw_text: str) -> tuple[list[str], list[str]]:
-        text = raw_text.strip()
-        # Strip markdown fences if present
-        import re as _re
-        text = _re.sub(r"^```(?:json)?\s*", "", text)
-        text = _re.sub(r"\s*```$", "", text)
-        # Extract first JSON object
-        m = _re.search(r"\{.*\}", text, _re.DOTALL)
-        raw = _json.loads(m.group() if m else text)
-        existing_set = set(existing_tags)
-        valid_existing = [t for t in (raw.get("existing") or []) if t in existing_set]
-        new_tags = [
-            t.lower().replace(" ", "-")[:60]
-            for t in (raw.get("new") or [])
-            if t and t.lower().replace(" ", "-")[:60] not in existing_set
-        ]
-        return valid_existing, new_tags
-
+    # ── Strategy B: Claude Work (Palantir gateway) ───────────────────────────
+    import json as _json
+    from config import settings as _settings
     import anthropic, httpx
+    from services.tag_suggester import build_prompt, parse_response, _SKIP
     from services.user_ai_config import get_effective_ai_config
+
+    candidate_tags = [t for t in existing_tags if t not in _SKIP]
+    prompt = build_prompt(body.title, body.abstract, candidate_tags)
     _ssl = False if not _settings.ssl_verify else (_settings.ssl_ca_bundle or True)
-
-    def _call_claude(client: "anthropic.Anthropic", model: str) -> tuple[list, list]:
-        resp = client.messages.create(
-            model=model,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return _parse(resp.content[0].text)
-
-    # ── Strategy A: Claude Work (Palantir gateway) ────────────────────────────
     ai_cfg = get_effective_ai_config()
     work_key = (ai_cfg.get("anthropic_work_api_key") or "").strip()
     work_base = (ai_cfg.get("anthropic_work_base_url") or "").strip()
@@ -268,26 +229,18 @@ def suggest_tags(body: SuggestBody):
             if work_base:
                 kwargs["base_url"] = work_base
             client = anthropic.Anthropic(**kwargs)
-            valid_existing, new_tags = _call_claude(client, "claude-haiku-4-5-20251001")
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            valid_existing, new_tags = parse_response(resp.content[0].text, existing_tags)
             log.debug("Tag suggestion via Claude Work | existing=%d new=%d", len(valid_existing), len(new_tags))
             return {"existing": valid_existing, "new": new_tags, "all_tags": existing_tags}
         except Exception as e:
-            log.warning("Claude Work tag suggestion failed, trying Ollama | %s", e)
+            log.warning("Claude Work tag suggestion failed | %s", e)
 
-    # ── Strategy B: Ollama fallback ───────────────────────────────────────────
-    try:
-        import ollama
-        response = ollama.chat(
-            model=_settings.ollama_model,
-            messages=[{"role": "user", "content": prompt}],
-            format="json",
-        )
-        valid_existing, new_tags = _parse(response["message"]["content"])
-        log.debug("Tag suggestion via Ollama | existing=%d new=%d", len(valid_existing), len(new_tags))
-        return {"existing": valid_existing, "new": new_tags, "all_tags": existing_tags}
-    except Exception as e:
-        log.warning("Tag suggestion failed entirely | %s", e)
-        return {"existing": [], "new": [], "all_tags": existing_tags}
+    return {"existing": [], "new": [], "all_tags": existing_tags}
 
 
 @tags_router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)

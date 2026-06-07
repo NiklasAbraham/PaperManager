@@ -1,4 +1,4 @@
-"""Claude and Ollama AI services — summarization and chat."""
+"""Claude and LiteLLM AI services — summarization and chat."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,14 @@ import httpx
 import anthropic
 from config import settings
 from services.user_ai_config import get_effective_ai_config
-from services.web_search import WEB_SEARCH_TOOL, WEB_SEARCH_TOOL_OLLAMA, search_web
+from services.litellm_client import (
+    WEB_SEARCH_TOOL_OPENAI,
+    chat_completion,
+    get_litellm_client,
+    parse_tool_args,
+    resolve_chat_model,
+)
+from services.web_search import WEB_SEARCH_TOOL, search_web
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +76,7 @@ def _ssl_verify():
 
 
 def summarize_paper(text: str, title: str = "", custom_instructions: str | None = None) -> str:
-    """Return a markdown summary of *text* using Claude.
+    """Return a markdown summary of *text* using the local Gemma model (LiteLLM).
 
     If *custom_instructions* is provided it replaces the instructional section of
     the default prompt while still appending the paper title and text automatically.
@@ -78,51 +85,36 @@ def summarize_paper(text: str, title: str = "", custom_instructions: str | None 
     if not text or not text.strip():
         return "_No text could be extracted from this paper._"
 
+    # Gemma has a smaller context window than Claude — cap the paper text.
+    paper_text = text[:24000]
     if custom_instructions and custom_instructions.strip():
         prompt = (
             f"{custom_instructions.strip()}\n\n"
             f"Paper title: {title or '(unknown)'}\n\n"
-            f"Paper text:\n{text[:600000]}"
+            f"Paper text:\n{paper_text}"
         )
     else:
         prompt = _load_prompt("summary.txt").format(
             title=title or "(unknown)",
-            text=text[:600000],
+            text=paper_text,
         )
 
-    def _call(client: anthropic.Anthropic, prompt_text: str) -> str | None:
-        msg = client.messages.create(
-            model="claude-opus-4-6",
+    try:
+        result = chat_completion(
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=4096,
-            messages=[{"role": "user", "content": prompt_text}],
         )
-        if msg.content and msg.stop_reason != "refusal":
-            return msg.content[0].text
-        log.warning("summarize_paper: stop_reason=%s content=%s", msg.stop_reason, bool(msg.content))
-        return None
+    except Exception as exc:
+        log.warning("summarize_paper: LiteLLM call failed | %s", exc)
+        return "_Summary could not be generated (the LLM call failed)._"
 
-    # Strategy A: personal API with full text
-    result = _call(_personal_client(), prompt)
-
-    # Strategy B: personal API with truncated text (avoids refusals from garbled PDF content)
-    if result is None:
-        short_prompt = prompt[:20000]
-        log.info("summarize_paper: retrying personal API with truncated prompt (%d chars)", len(short_prompt))
-        result = _call(_personal_client(), short_prompt)
-
-    # Strategy C: Work API (Palantir gateway) — may have different content policy
-    cfg = get_effective_ai_config()
-    if result is None and (cfg.get("anthropic_work_api_key") or "").strip():
-        log.info("summarize_paper: trying Work API")
-        result = _call(_work_client(), prompt)
-
-    if result is None:
-        return "_Summary could not be generated (Claude refused the content). The extracted PDF text may contain garbled or problematic characters._"
+    if not result or not result.strip():
+        return "_Summary could not be generated._"
     return result
 
 
 def suggest_topics(title: str, abstract: str = "", summary: str = "") -> list[str]:
-    """Return a list of research topic names for a paper using Claude Haiku."""
+    """Return a list of research topic names for a paper using the local Gemma model."""
     import json, re
 
     if not title and not abstract and not summary:
@@ -137,18 +129,23 @@ def suggest_topics(title: str, abstract: str = "", summary: str = "") -> list[st
 
     prompt = _load_prompt("topics.txt").format(title=title or "(unknown)", context=context)
 
-    client = _personal_client()
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=256,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = message.content[0].text.strip()
-    # Extract JSON even if Claude wraps it in markdown fences
+    try:
+        text = chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            json_mode=True,
+            max_tokens=256,
+        )
+    except Exception as exc:
+        log.warning("suggest_topics: LiteLLM call failed | %s", exc)
+        return []
+    # Extract JSON even if the model wraps it in markdown fences
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if not match:
         return []
-    raw = json.loads(match.group())
+    try:
+        raw = json.loads(match.group())
+    except json.JSONDecodeError:
+        return []
     return [t.strip() for t in (raw.get("topics") or []) if t.strip()]
 
 
@@ -232,63 +229,63 @@ def chat_with_paper_work(
     return _run_claude_with_tools(client, "claude-opus-4-6", system, messages)
 
 
-def chat_with_paper_ollama(
+def chat_with_paper_litellm(
     paper_text: str,
     paper_title: str,
     question: str,
     history: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Answer *question* about a paper using Ollama (local LLM).
+    """Answer *question* about a paper using LiteLLM (Gemma via proxy).
     Uses tool calling to allow web searches when the model supports it."""
-    import ollama
+    client = get_litellm_client()
+    model = settings.litellm_model
 
     system = _load_prompt("chat_system.txt").format(
         title=paper_title or "(unknown)",
-        text=paper_text[:12000],  # smaller context window for local models
+        text=paper_text[:12000],
     )
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for msg in (history or []):
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": question})
 
-    # Agentic tool-use loop (supported by llama3.1+ models)
-    max_iterations = 5  # safety cap
+    max_iterations = 5
+    last_content = ""
     for _ in range(max_iterations):
         try:
-            response = ollama.chat(
-                model=settings.ollama_model,
+            response = client.chat.completions.create(
+                model=model,
                 messages=messages,
-                tools=[WEB_SEARCH_TOOL_OLLAMA],
+                tools=[WEB_SEARCH_TOOL_OPENAI],
             )
         except Exception as exc:
-            # If the model doesn't support tools, fall back to plain chat
-            log.warning("Ollama tool-calling failed, falling back to plain chat | %s", exc)
-            response = ollama.chat(model=settings.ollama_model, messages=messages)
-            return response["message"]["content"].strip()
+            log.warning("LiteLLM tool-calling failed, falling back to plain chat | %s", exc)
+            return chat_completion(messages=messages, model=model)
 
-        msg = response["message"]
-        tool_calls = msg.get("tool_calls") or []
+        choice = response.choices[0].message
+        last_content = (choice.content or "").strip()
+        tool_calls = choice.tool_calls or []
         if not tool_calls:
-            return (msg.get("content") or "").strip()
+            return last_content
 
-        # Execute tool calls
-        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
+        messages.append(choice.model_dump(exclude_none=True))
         for tc in tool_calls:
-            fn = tc.get("function", {})
-            if fn.get("name") == "web_search":
-                args = fn.get("arguments") or {}
+            if tc.function.name == "web_search":
+                args = parse_tool_args(tc.function.arguments)
                 query = args.get("query", "")
                 max_r = int(args.get("max_results", 5))
                 results = search_web(query, max_results=max_r)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "content": json.dumps(results),
-                    }
-                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(results),
+                })
 
-    # If we exhausted iterations just return the last content
-    return (response["message"].get("content") or "").strip()
+    return last_content
+
+
+# Backward-compatible alias
+chat_with_paper_ollama = chat_with_paper_litellm
 
 
 # ── Knowledge Chat (cross-library, streaming) ─────────────────────────────────
@@ -704,12 +701,12 @@ def summarize_chapter(title: str, text: str, model: str | None = None) -> str:
     """Return a markdown summary of a book/lecture chapter.
 
     Routes to work gateway when model=='claude-work', personal Anthropic when
-    model starts with 'claude-', otherwise Ollama.
+    model starts with 'claude-', otherwise LiteLLM.
     """
     if not text or not text.strip():
         return "_No text available for this chapter._"
 
-    effective_model = model or settings.ollama_model
+    effective_model = resolve_chat_model(model)
     use_claude = effective_model == "claude-work" or effective_model.startswith("claude-")
     prompt = _load_prompt("chapter_summary.txt").format(
         title=title or "(untitled chapter)",
@@ -733,12 +730,10 @@ def summarize_chapter(title: str, text: str, model: str | None = None) -> str:
         )
         return message.content[0].text
     else:
-        import ollama
-        response = ollama.chat(
-            model=effective_model,
+        return chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            model=effective_model,
         )
-        return response["message"]["content"].strip()
 
 
 def chat_with_chapter(
@@ -747,30 +742,27 @@ def chat_with_chapter(
     question: str,
     history: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Answer *question* about a specific chapter using Claude."""
+    """Answer *question* about a specific chapter using Gemma."""
     system = _load_prompt("chapter_chat_system.txt").format(
         title=chapter_title or "(untitled chapter)",
-        text=chapter_text[:30000],
+        text=chapter_text[:24000],
     )
-    client = _personal_client()
-    messages: list[dict[str, Any]] = list(history or [])
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    messages.extend(history or [])
     messages.append({"role": "user", "content": question})
-    response = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        system=system,
+    return chat_completion(
         messages=messages,
+        max_tokens=1024,
     )
-    return response.content[0].text
 
 
 def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
     """
-    Use Ollama to propose a chapter structure from a book/lecture PDF text.
+    Use LiteLLM to propose a chapter structure from a book/lecture PDF text.
     Returns a list of dicts: [{number, title, level}, ...].
     Falls back to [] on any error.
     """
-    import json, re, ollama
+    import json, re
 
     if not text or not text.strip():
         return []
@@ -783,11 +775,7 @@ def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
         f"Document title: {title or '(unknown)'}\n\n"
         f"Document text (first 6000 words):\n{text[:15000]}"
     )
-    response = ollama.chat(
-        model=settings.ollama_model,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw_text = response["message"]["content"].strip()
+    raw_text = chat_completion(messages=[{"role": "user", "content": prompt}])
     match = re.search(r'\{.*\}', raw_text, re.DOTALL)
     if not match:
         return []
@@ -807,12 +795,11 @@ def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
         return []
 
 
-def extract_affiliations_with_ollama(author_names: list[str], text: str) -> dict[str, str | None]:
-    """Use Ollama to extract institutional affiliations for authors from paper text.
+def extract_affiliations_with_litellm(author_names: list[str], text: str) -> dict[str, str | None]:
+    """Use LiteLLM to extract institutional affiliations for authors from paper text.
     Returns {author_name: affiliation_or_None}.
     """
     import json as _json
-    import ollama
 
     if not author_names:
         return {}
@@ -822,22 +809,24 @@ def extract_affiliations_with_ollama(author_names: list[str], text: str) -> dict
         text=text[:4000],  # first 4000 chars — affiliations are always in the header
     )
     try:
-        response = ollama.chat(
-            model=settings.ollama_model,
+        raw = chat_completion(
             messages=[{"role": "user", "content": prompt}],
-            format="json",
+            json_mode=True,
         )
-        raw = _json.loads(response["message"]["content"])
+        parsed = _json.loads(raw)
         result: dict[str, str | None] = {}
-        for entry in raw.get("affiliations") or []:
+        for entry in parsed.get("affiliations") or []:
             name = entry.get("name", "").strip()
             aff = entry.get("affiliation") or None
             if name:
                 result[name] = aff
         return result
     except Exception as exc:
-        log.warning("Ollama affiliation extraction failed: %s", exc)
+        log.warning("LiteLLM affiliation extraction failed: %s", exc)
         return {}
+
+
+extract_affiliations_with_ollama = extract_affiliations_with_litellm
 
 
 # ── Blog post AI ───────────────────────────────────────────────────────────────
@@ -852,16 +841,13 @@ def summarize_blog_post(content: str, title: str = "") -> str:
         f"Focus on the key ideas, insights, and takeaways. "
         f"Use markdown formatting.\n\n"
         f"Title: {title or '(unknown)'}\n\n"
-        f"Content:\n{content[:30000]}"
+        f"Content:\n{content[:24000]}"
     )
 
-    client = _personal_client()
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=800,
+    return chat_completion(
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=800,
     )
-    return message.content[0].text
 
 
 def chat_with_blog_post(
@@ -874,22 +860,19 @@ def chat_with_blog_post(
     system = (
         f"You are an expert assistant helping the user understand a blog post.\n\n"
         f"Blog post title: {title or '(unknown)'}\n\n"
-        f"Blog post content:\n{content[:60000]}\n\n"
+        f"Blog post content:\n{content[:24000]}\n\n"
         f"Answer the user's questions about this blog post concisely and accurately. "
         f"If the answer is not in the blog post, say so."
     )
 
-    client = _personal_client()
-    messages: list[dict[str, Any]] = list(history or [])
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    messages.extend(history or [])
     messages.append({"role": "user", "content": question})
 
-    response = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        system=system,
+    return chat_completion(
         messages=messages,
+        max_tokens=1024,
     )
-    return response.content[0].text
 
 
 # ── Research Gap Finder (T29) ─────────────────────────────────────────────────
@@ -897,7 +880,7 @@ def chat_with_blog_post(
 def find_research_gaps(
     topic: str,
     papers: list[dict],   # list of {title, abstract, summary, year}
-    model: str = "claude",
+    model: str = "litellm",
 ) -> str:
     """
     Analyze research gaps using the specified model with web_search tool enabled.
@@ -906,7 +889,7 @@ def find_research_gaps(
     Args:
         topic: Research topic or question
         papers: List of papers with title, abstract, summary, year
-        model: "claude" (personal), "claude-work", or "ollama"
+        model: "claude" (personal), "claude-work", or "litellm"
     """
     def _paper_block(p: dict) -> str:
         parts = [f"- **{p.get('title', 'Untitled')}** ({p.get('year', '?')})"]
@@ -931,17 +914,13 @@ def find_research_gaps(
             [{"role": "user", "content": system_prompt}],
             max_tokens=2048,
         )
-    elif model == "ollama":
-        # Ollama doesn't support tool calling as robustly, so we'll use a simpler approach
-        import ollama
-        response = ollama.chat(
-            model=settings.ollama_model,
+    elif model in ("litellm", "ollama"):
+        return chat_completion(
             messages=[
                 {"role": "system", "content": "You are a research strategist analyzing research gaps. Provide structured analysis with sections: Coverage Summary, Identified Gaps, Recommended Next Reads, and Open Questions."},
-                {"role": "user", "content": system_prompt}
+                {"role": "user", "content": system_prompt},
             ],
         )
-        return response["message"]["content"].strip()
     else:  # "claude" (personal)
         client = _personal_client()
         return _run_claude_with_tools(
@@ -955,8 +934,8 @@ def find_research_gaps(
 
 def extract_claims(text: str, title: str, model: str | None = None) -> list[dict]:
     """
-    Extract claims from paper text using Claude Haiku or Ollama.
-    Routes to Anthropic when model starts with 'claude-', otherwise Ollama.
+    Extract claims from paper text using Claude Haiku or LiteLLM.
+    Routes to Anthropic when model starts with 'claude-', otherwise LiteLLM.
     Returns list of {"text": str, "type": str}.
     Returns [] on any error (non-fatal — called best-effort on upload).
     """
@@ -964,7 +943,7 @@ def extract_claims(text: str, title: str, model: str | None = None) -> list[dict
     if not text or not text.strip():
         return []
     
-    effective_model = model or settings.ollama_model
+    effective_model = resolve_chat_model(model)
     prompt = _load_prompt("claims.txt").format(
         title=title or "(unknown)",
         text=text[:40000] if effective_model.startswith("claude-") else text[:12000],
@@ -980,14 +959,11 @@ def extract_claims(text: str, title: str, model: str | None = None) -> list[dict
             )
             raw = message.content[0].text.strip()
         else:
-            # Use Ollama
-            import ollama
-            response = ollama.chat(
-                model=effective_model,
+            raw = chat_completion(
                 messages=[{"role": "user", "content": prompt}],
-                format="json",
+                model=effective_model,
+                json_mode=True,
             )
-            raw = response["message"]["content"].strip()
         
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
@@ -1016,13 +992,11 @@ Return JSON: {{"queries": ["...", "..."]}}
 Question: {question}"""
     
     try:
-        client = _personal_client()
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
+        raw = chat_completion(
             messages=[{"role": "user", "content": prompt}],
-        )
-        raw = message.content[0].text.strip()
+            max_tokens=256,
+            json_mode=True,
+        ).strip()
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         if not match:
             return []
@@ -1094,9 +1068,7 @@ def synthesize_papers(
             max_tokens=2048,
         )
     else:
-        response = client.messages.create(
-            model="claude-opus-4-6",
-            max_tokens=2048,
+        return chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=2048,
         )
-        return response.content[0].text

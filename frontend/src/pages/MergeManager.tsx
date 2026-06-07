@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { scanDuplicates, executeMerge, type DuplicatePair } from "../api/client";
 
-type Model = "ollama" | "claude" | "none";
+type Model = "litellm" | "claude" | "none";
 
 export default function MergeManager() {
-  const [model, setModel] = useState<Model>("ollama");
+  const [model, setModel] = useState<Model>("litellm");
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [pairs, setPairs] = useState<DuplicatePair[] | null>(null);
@@ -81,7 +81,7 @@ export default function MergeManager() {
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-sm font-medium text-gray-700">Verification model</span>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-            {(["ollama", "claude", "none"] as Model[]).map((m) => (
+            {(["litellm", "claude", "none"] as Model[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setModel(m)}
@@ -91,7 +91,7 @@ export default function MergeManager() {
                     : "bg-white text-gray-600 hover:bg-gray-50"
                 }`}
               >
-                {m === "ollama" ? "Ollama (local)" : m === "claude" ? "Claude Haiku" : "None (similarity only)"}
+                {m === "litellm" ? "Gemma (LiteLLM)" : m === "claude" ? "Claude Haiku" : "None (similarity only)"}
               </button>
             ))}
           </div>

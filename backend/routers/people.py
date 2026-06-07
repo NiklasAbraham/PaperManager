@@ -257,8 +257,20 @@ def ai_extract_authors(paper_id: str):
     _work_base = (_ai_cfg.get("anthropic_work_base_url") or "").strip()
     _personal_key = (_ai_cfg.get("anthropic_api_key") or "").strip()
 
-    # 1. Claude Work (primary)
-    if _work_key:
+    # 1. LiteLLM / Gemma (primary)
+    try:
+        from services.litellm_client import chat_completion
+
+        raw = chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            json_mode=True,
+        )
+        result = _parse_llm_json(raw)
+    except Exception as exc:
+        _log.debug("LiteLLM ai-extract-authors failed: %s", exc)
+
+    # 2. Claude Work
+    if result is None and _work_key:
         try:
             kwargs: dict = {"api_key": _work_key, "http_client": _httpx.Client(verify=False)}
             if _work_base:
@@ -272,7 +284,7 @@ def ai_extract_authors(paper_id: str):
         except Exception as exc:
             _log.debug("Claude Work ai-extract-authors failed: %s", exc)
 
-    # 2. Claude personal
+    # 3. Claude personal
     if result is None and _personal_key:
         try:
             client = _anthropic.Anthropic(api_key=_personal_key)
@@ -283,19 +295,6 @@ def ai_extract_authors(paper_id: str):
             result = _parse_llm_json(resp.content[0].text)
         except Exception as exc:
             _log.debug("Claude personal ai-extract-authors failed: %s", exc)
-
-    # 3. Ollama fallback
-    if result is None:
-        try:
-            import ollama as _ollama
-            resp = _ollama.chat(
-                model=_settings.ollama_model,
-                messages=[{"role": "user", "content": prompt}],
-                format="json",
-            )
-            result = _parse_llm_json(resp["message"]["content"])
-        except Exception as exc:
-            _log.debug("Ollama ai-extract-authors failed: %s", exc)
 
     if result is None:
         raise HTTPException(status_code=503, detail="All LLM backends failed")

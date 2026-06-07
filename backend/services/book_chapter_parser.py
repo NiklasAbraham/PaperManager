@@ -93,11 +93,8 @@ def _ollama_reclassify_headings(raw_chapters: list[dict]) -> list[dict]:
     Falls back to the original list on any error.
     """
     import json
-    try:
-        import ollama
-        from config import settings
-    except ImportError:
-        return raw_chapters
+    from services.litellm_client import chat_completion, resolve_chat_model
+    from config import settings
 
     if not raw_chapters:
         return raw_chapters
@@ -119,11 +116,10 @@ def _ollama_reclassify_headings(raw_chapters: list[dict]) -> list[dict]:
     )
 
     try:
-        response = ollama.chat(
-            model=settings.ollama_model,
+        raw = chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            model=resolve_chat_model(settings.litellm_model),
         )
-        raw = response["message"]["content"].strip()
         match = re.search(r"\[.*\]", raw, re.DOTALL)
         if not match:
             return raw_chapters
@@ -185,38 +181,9 @@ def _enforce_monotone_pages(chapters: list[dict], total_pages: int) -> list[dict
 
 # ── Primary: Docling-based detection ─────────────────────────────────────────
 
-def detect_chapters_docling(pdf_bytes: bytes) -> list[dict]:
-    """
-    Use Docling to detect chapters from PDF bytes.
-
-    Returns a list of chapter dicts ready for storage:
-      {number, title, level, text, summary, start_page, end_page}
-
-    Page numbers come directly from Docling's provenance data — they are
-    guaranteed to be in document-reading order (no Table-of-Contents confusion).
-    """
-    try:
-        from docling.document_converter import DocumentConverter
-        from docling.datamodel.base_models import DocItemLabel
-    except ImportError:
-        log.warning("Docling not available; cannot do Docling-based detection")
-        return []
-
-    # Write to temp file (Docling needs a filesystem path)
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-        f.write(pdf_bytes)
-        tmp_path = f.name
-
-    try:
-        log.info("Running Docling PDF conversion for chapter detection...")
-        converter = DocumentConverter()
-        result = converter.convert(tmp_path)
-        doc = result.document
-    except Exception as exc:
-        log.warning("Docling conversion failed: %s", exc)
-        return []
-    finally:
-        os.unlink(tmp_path)
+def _chapters_from_docling_document(doc) -> list[dict]:
+    """Build chapter list from an in-memory DoclingDocument."""
+    from docling.datamodel.base_models import DocItemLabel
 
     total_pages = len(doc.pages) if doc.pages else 0
     log.info("Docling conversion done: %d pages", total_pages)
@@ -285,6 +252,53 @@ def detect_chapters_docling(pdf_bytes: bytes) -> list[dict]:
 
     log.info("Docling chapter detection: %d chapters found", len(chapters))
     return chapters
+
+
+def detect_chapters_docling(pdf_bytes: bytes) -> list[dict]:
+    """
+    Use Docling to detect chapters from PDF bytes.
+
+    Uses on-demand docling-serve on hermione when ``docling_mode=on_demand``,
+    otherwise in-process Docling (requires the docling package).
+    """
+    from config import settings
+
+    try:
+        if settings.docling_serve_url.strip():
+            from services.docling_remote import convert_pdf, load_document_from_response
+
+            payload = convert_pdf(pdf_bytes, settings.docling_serve_url.strip())
+            doc = load_document_from_response(payload)
+            return _chapters_from_docling_document(doc)
+
+        if (settings.docling_mode or "local").strip().lower() == "on_demand":
+            from services.on_demand_docling import on_demand_docling
+            from services.docling_remote import convert_pdf, load_document_from_response
+
+            with on_demand_docling() as manager_url:
+                payload = convert_pdf(pdf_bytes, manager_url, via_manager_proxy=True)
+                doc = load_document_from_response(payload)
+                return _chapters_from_docling_document(doc)
+
+        from docling.document_converter import DocumentConverter
+    except ImportError:
+        log.warning("Docling not available; cannot do Docling-based detection")
+        return []
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        f.write(pdf_bytes)
+        tmp_path = f.name
+
+    try:
+        log.info("Running Docling PDF conversion for chapter detection...")
+        converter = DocumentConverter()
+        result = converter.convert(tmp_path)
+        return _chapters_from_docling_document(result.document)
+    except Exception as exc:
+        log.warning("Docling conversion failed: %s", exc)
+        return []
+    finally:
+        os.unlink(tmp_path)
 
 
 # ── Fallback: regex-based detection ──────────────────────────────────────────

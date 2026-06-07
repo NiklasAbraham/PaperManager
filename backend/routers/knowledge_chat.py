@@ -397,24 +397,22 @@ def compact(conv_id: str):
     )
 
     try:
-        client = _personal_client()
-        wm_response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=512,
+        from services.litellm_client import chat_completion
+
+        wm_text = chat_completion(
             messages=[{"role": "user", "content": extraction_prompt}],
-        )
-        wm_text = wm_response.content[0].text.strip()
+            max_tokens=512,
+            json_mode=True,
+        ).strip()
         # Validate JSON; fall back to empty structure on parse failure
         match = _re.search(r"\{.*\}", wm_text, _re.DOTALL)
         working_memory_json = match.group() if match else "{}"
         _json.loads(working_memory_json)  # validate
 
-        prose_response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
+        prose_summary = chat_completion(
             messages=[{"role": "user", "content": prose_prompt}],
-        )
-        prose_summary = prose_response.content[0].text.strip()
+            max_tokens=256,
+        ).strip()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Compaction failed: {exc}")
 
