@@ -801,9 +801,9 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#stage-1-parse-immediate-on-drop" class="md-nav__link">
+  <a href="#stage-1-parse-preprocess-preanalyze-immediate-on-drop" class="md-nav__link">
     <span class="md-ellipsis">
-      Stage 1 — Parse (immediate, on drop)
+      Stage 1 — Parse + preprocess + preanalyze (immediate, on drop)
     </span>
   </a>
   
@@ -909,9 +909,9 @@
 <p>How papers enter the library, what runs when, and why.</p>
 <hr />
 <h2 id="pdf-upload-queue">PDF Upload (queue)<a class="headerlink" href="#pdf-upload-queue" title="Permanent link">&para;</a></h2>
-<h3 id="stage-1-parse-immediate-on-drop">Stage 1 — Parse (immediate, on drop)<a class="headerlink" href="#stage-1-parse-immediate-on-drop" title="Permanent link">&para;</a></h3>
-<p>Triggered by: <code>POST /papers/parse</code>
-Runs in background as soon as you drop the file. Nothing is saved.</p>
+<h3 id="stage-1-parse-preprocess-preanalyze-immediate-on-drop">Stage 1 — Parse + preprocess + preanalyze (immediate, on drop)<a class="headerlink" href="#stage-1-parse-preprocess-preanalyze-immediate-on-drop" title="Permanent link">&para;</a></h3>
+<p>Three requests start as soon as you drop a file. Nothing is saved.</p>
+<p><strong>1a — Metadata</strong> (<code>POST /papers/parse</code>)</p>
 <table>
 <thead>
 <tr>
@@ -923,7 +923,7 @@ Runs in background as soon as you drop the file. Nothing is saved.</p>
 <tbody>
 <tr>
 <td>Extract raw text</td>
-<td>pypdf / pdfminer</td>
+<td>pypdf</td>
 <td>local, fast</td>
 </tr>
 <tr>
@@ -937,8 +937,8 @@ Runs in background as soon as you drop the file. Nothing is saved.</p>
 <td>network</td>
 </tr>
 <tr>
-<td>Ollama fallback</td>
-<td><code>llama3.2:3b</code> on first 3 000 chars</td>
+<td>LiteLLM fallback</td>
+<td>first 3 000 chars</td>
 <td>local, ~2 s</td>
 </tr>
 <tr>
@@ -953,9 +953,71 @@ Runs in background as soon as you drop the file. Nothing is saved.</p>
 </tr>
 </tbody>
 </table>
-<p>Result: title, authors, year, DOI, abstract are pre-filled in the modal.
-<strong>No paper is created. No summary. No figures.</strong></p>
-<p>The queue row shows "Ready — click to review" once this finishes.</p>
+<p><strong>1b — Layout</strong> (<code>POST /papers/preprocess</code>)</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What runs</th>
+<th>Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Docling</td>
+<td>figures + tables (once per PDF hash)</td>
+<td>GPU / slow</td>
+</tr>
+</tbody>
+</table>
+<p><strong>1c — Analysis</strong> (<code>POST /papers/preanalyze</code>) — the heavy LLM work, precomputed</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What runs</th>
+<th>Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>summary</td>
+<td><code>summarize_paper</code> (default instructions)</td>
+<td>LLM</td>
+</tr>
+<tr>
+<td>ai_topics</td>
+<td><code>suggest_topics</code></td>
+<td>LLM</td>
+</tr>
+<tr>
+<td>claims</td>
+<td><code>extract_claims</code></td>
+<td>LLM</td>
+</tr>
+<tr>
+<td>references</td>
+<td><code>extract_references</code></td>
+<td>LLM / network</td>
+</tr>
+<tr>
+<td>affiliations</td>
+<td><code>extract_affiliations_with_litellm</code></td>
+<td>LLM</td>
+</tr>
+<tr>
+<td>tag_suggestions</td>
+<td><code>suggest_tags_litellm</code></td>
+<td>LLM</td>
+</tr>
+</tbody>
+</table>
+<p>Result: metadata pre-fills the modal; figures/tables <strong>and</strong> the full LLM analysis
+are cached on disk (keyed by PDF SHA-256). <strong>No paper is created.</strong></p>
+<p>The queue row turns <strong>green ("Ready — click to review")</strong> only once metadata,
+layout, <strong>and</strong> analysis are all ready — meaning Upload will be a pure save with no
+LLM work. The queue is persisted to IndexedDB and re-verified on return.</p>
+<p>Normative spec: <code>.specs/009_upload_queue_workflow.md</code></p>
 <hr />
 <h3 id="stage-2-confirm-modal-user-driven">Stage 2 — Confirm (modal, user-driven)<a class="headerlink" href="#stage-2-confirm-modal-user-driven" title="Permanent link">&para;</a></h3>
 <p>You open the modal, verify the pre-filled metadata, and <strong>pick the document type</strong>.
@@ -997,34 +1059,40 @@ Document type controls what runs in Stage 3:</p>
 Runs synchronously — the modal spinner shows while this completes.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>PDF bytes
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  │
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  ├─ 1. extract_metadata          → title / authors / year / DOI / abstract
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  │       (same pipeline as Stage 1, runs again — raw text needed for summary)
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  │
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  ├─ 2. title_override            → apply any title edit from the modal
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  │
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  ├─ 3. Drive upload              → stores PDF, returns drive_file_id
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  │
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  ├─ 4. summarize_paper           → Claude opus-4 on full raw text          [PAPER only]
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  │       uses your custom summary instructions if set
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>  │
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>  ├─ 5. embed_paper               → Ollama embedding (skip if disabled)
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>  │
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>  ├─ 6. save to Neo4j             → Paper node created (or stub enriched)
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>  │       duplicate check: 409 if paper with drive_file_id already exists
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>  │
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  ├─ 7. link authors              → Person nodes, affiliations, S2 IDs
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  │
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  ├─ 8. link topics               → Semantic Scholar topics + AI suggestions
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  ├─ 0. load cached analysis      → analysis_key → result.json (no LLM)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  ├─ 1. metadata                  → REUSE cached meta (else extract_metadata)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  ├─ 2. title_override            → apply any title edit from the modal
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  ├─ 3. Drive upload              → stores PDF, returns drive_file_id
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  ├─ 4. summary                   → REUSE cached summary                     [PAPER only]
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>  │       re-runs summarize_paper ONLY if you edited the instructions
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>  │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>  ├─ 5. embed_paper               → skipped unless litellm_embed_model is set
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>  │
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>  ├─ 6. save to Neo4j             → Paper node created (or stub enriched)
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>  │       duplicate check: 409 if paper with drive_file_id already exists
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  ├─ 7. link authors              → Person nodes, REUSE cached affiliations, S2 IDs
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  │       7b. enrichment          → ORCID + S2 HTTP (not LLM, 24h cooldown)
 <a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  │
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>  ├─ 9. extract claims            → Claude Haiku                            [PAPER only]
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>  ├─ 8. link topics              → Semantic Scholar topics + REUSE cached AI topics
 <a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>  │
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>  ├─ 10. extract references       → S2 API → regex → Claude Haiku fallback  [PAPER only]
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>  ├─ 9. claims                   → REUSE cached claims                       [PAPER only]
 <a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>  │
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>  └─ 11. extract figures          → Docling layout model → pypdf fallback    [PAPER only]
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>          captions: Ollama (default) | Claude vision | Docling built-in
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>  ├─ 10. references              → REUSE cached references                   [PAPER only]
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>  │
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>  └─ 12. figures + tables        → reuse Stage 1b cache; upload images to Drive  [PAPER only]
 </code></pre></div>
-<p><strong>AI summary runs exactly once — here, step 4.</strong>
-It never ran during Stage 1 (parse) or during queue waiting.</p>
+<p><strong>With a fully-precomputed (green) row, Upload makes <em>no</em> LLM calls</strong> — everything
+is reused from the analysis cache. The only intentional LLM call is the summary, and
+only if you edited the summary instructions in the modal.</p>
+<p><strong>Where the Upload time goes:</strong> ~1–2 s Drive PDF upload + Neo4j writes + ORCID/S2
+enrichment, then ~10–15 s uploading figure/table images to Google Drive (step 12).
+That last step is the bulk of the wait and is not precomputed by design.</p>
+<p><strong>Docling runs at most once per PDF:</strong> during Stage 1b (queue) when possible; upload step 12 only runs Docling if preprocess failed or was skipped.</p>
 <hr />
 <h3 id="stage-4-onboarding-modal-user-driven">Stage 4 — Onboarding (modal, user-driven)<a class="headerlink" href="#stage-4-onboarding-modal-user-driven" title="Permanent link">&para;</a></h3>
 <p>After the upload completes the modal walks through:</p>
