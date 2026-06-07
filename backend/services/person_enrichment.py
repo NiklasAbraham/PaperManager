@@ -307,22 +307,21 @@ If you find nothing useful, return {{}}.
 
 
 def _enrich_person_with_ollama(person_name: str, raw_text: str) -> dict:
-    """Use Ollama to extract profile info about a named person from text.
+    """Use LiteLLM to extract profile info about a named person from text.
 
     Returns a dict with any of: affiliation, bio, skills (list).
     Returns empty dict on failure or if nothing found.
     """
     import json as _json
+    from services.litellm_client import chat_completion
+
     snippet = raw_text[:5000]  # keep prompt manageable
     prompt = _OLLAMA_PROMPT.format(name=person_name, text=snippet)
     try:
-        import ollama
-        resp = ollama.chat(
-            model=settings.ollama_model,
+        raw = chat_completion(
             messages=[{"role": "user", "content": prompt}],
-            format="json",
+            json_mode=True,
         )
-        raw = resp["message"]["content"] if isinstance(resp, dict) else resp.message.content
         data = _json.loads(raw.strip())
         if not isinstance(data, dict):
             return {}

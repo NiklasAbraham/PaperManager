@@ -4,8 +4,6 @@ import logging
 from pypdf import PdfReader
 from io import BytesIO
 
-from services.metadata_lookup import lookup_semantic_scholar, lookup_crossref, search_semantic_scholar_by_title
-
 log = logging.getLogger(__name__)
 
 DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>]+)")
@@ -23,10 +21,17 @@ ABSTRACT_RE = re.compile(
 
 # ── Text extraction ───────────────────────────────────────────────────────────
 
-def extract_text(pdf_bytes: bytes) -> str:
+def extract_text(pdf_bytes: bytes, max_pages: int | None = None) -> str:
+    """Extract text from a PDF.
+
+    max_pages limits how many leading pages are read — used by the upload-queue
+    preview, where only the first page or two is needed for metadata and reading
+    a full 100+ page document would be needlessly slow (pypdf is CPU-bound).
+    """
     try:
         reader = PdfReader(BytesIO(pdf_bytes))
-        pages = [page.extract_text() or "" for page in reader.pages]
+        pages_iter = reader.pages if max_pages is None else reader.pages[:max_pages]
+        pages = [page.extract_text() or "" for page in pages_iter]
         return "\n".join(pages).strip()
     except Exception:
         return ""
@@ -63,12 +68,11 @@ def find_doi(text: str) -> str | None:
     return None
 
 
-# ── Layer 2: local LLM via Ollama ─────────────────────────────────────────────
+# ── Layer 2: LLM via LiteLLM ──────────────────────────────────────────────────
 
 def extract_metadata_with_llm(first_page_text: str) -> dict | None:
     try:
-        import ollama
-        from config import settings
+        from services.litellm_client import chat_completion
 
         prompt = f"""Extract metadata from this academic paper's first page.
 Return ONLY valid JSON with exactly these keys:
@@ -78,12 +82,10 @@ venue (string or null), abstract (string or null)
 Paper text:
 {first_page_text[:3000]}
 """
-        response = ollama.chat(
-            model=settings.ollama_model,
+        raw = chat_completion(
             messages=[{"role": "user", "content": prompt}],
-            format="json",
+            json_mode=True,
         )
-        raw = response["message"]["content"]
         data = json.loads(raw)
         return {
             "title": str(data.get("title") or "").strip(),
@@ -96,7 +98,8 @@ Paper text:
             "topics": [],
             "metadata_source": "llm",
         }
-    except Exception:
+    except Exception as e:
+        log.warning("LLM metadata extraction failed: %s", e)
         return None
 
 
@@ -154,20 +157,13 @@ def extract_abstract_with_ai(text: str, document_type: str | None = None) -> str
         f"Paper text:\n{text[:5000]}"
     )
     try:
-        import anthropic
-        from services.user_ai_config import get_effective_ai_config
-        ai_cfg = get_effective_ai_config()
-        personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
-        if not personal_key:
-            return None
+        from services.litellm_client import chat_completion
 
-        client = anthropic.Anthropic(api_key=personal_key)
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
+        raw = chat_completion(
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=1024,
         )
-        result = _clean_abstract(response.content[0].text)
+        result = _clean_abstract(raw)
         return result if len(result) > 50 else None
     except Exception:
         log.debug("AI abstract extraction failed", exc_info=True)
@@ -208,35 +204,41 @@ def _fill_missing_abstract(result: dict, text: str) -> dict:
     return result
 
 
-def extract_metadata(pdf_bytes: bytes) -> dict:
-    text = extract_text(pdf_bytes)
+def extract_metadata(pdf_bytes: bytes, *, allow_llm: bool = True, max_pages: int | None = None) -> dict:
+    """Extract metadata from PDF.
+
+    Strategy:
+    1. LLM (Gemma via LiteLLM) — primary extractor when allow_llm=True.
+    2. Heuristics — fast fallback (always succeeds).
+
+    max_pages limits PDF text extraction to the first N pages. The upload-queue
+    preview passes max_pages so it only reads the title page(s) instead of the
+    whole document — this keeps the queue fast and avoids serializing large
+    CPU-bound pypdf reads when many papers are dropped at once.
+    """
+    text = extract_text(pdf_bytes, max_pages=max_pages)
     doi = find_doi(text)
-    log.info("Extracting metadata | doi=%s | text_len=%d", doi, len(text))
+    log.info("Extracting metadata | doi=%s | text_len=%d | max_pages=%s", doi, len(text), max_pages)
 
-    # Layer 1a: API lookup by DOI/arXiv
-    if doi:
-        result = lookup_semantic_scholar(doi) or lookup_crossref(doi)
-        if result and result.get("title"):
-            log.info("Metadata via API (layer 1) | source=%s | title=%.60s", result.get("metadata_source"), result.get("title"))
-            result["raw_text"] = text
-            return _fill_missing_abstract(result, text)
+    # Layer 1: LLM (Gemma via LiteLLM) — primary metadata extractor.
+    if allow_llm:
+        first_page = text[:3000]
+        try:
+            result = extract_metadata_with_llm(first_page)
+            if result and result.get("title"):
+                log.info("Metadata via LLM (layer 1) | title=%.60s", result.get("title"))
+                if doi:
+                    result["doi"] = doi
+                result["raw_text"] = text
+                return _fill_missing_abstract(result, text)
+            log.warning("LLM returned no usable title — falling back to heuristics")
+        except Exception as e:
+            log.warning("LLM metadata extraction failed: %s", e)
 
-    # Layer 2: local LLM
-    first_page = text[:3000]
-    result = extract_metadata_with_llm(first_page)
-    if result and result.get("title"):
-        log.info("Metadata via LLM (layer 2) | title=%.60s", result.get("title"))
-        result["raw_text"] = text
-        # Layer 1b: try S2 by title from LLM
-        s2 = search_semantic_scholar_by_title(result["title"])
-        if s2:
-            log.info("Upgraded to S2 via title search | title=%.60s", s2.get("title"))
-            s2["raw_text"] = text
-            return _fill_missing_abstract(s2, text)
-        return _fill_missing_abstract(result, text)
-
-    # Layer 3: heuristics
-    log.info("Metadata via heuristics (layer 3)")
+    # Layer 2: heuristics (fast; also the path used for allow_llm=False preview).
+    log.info("Metadata via heuristics (layer 2)")
     result = extract_metadata_heuristic(text)
+    if doi:
+        result["doi"] = doi
     result["raw_text"] = text
     return result

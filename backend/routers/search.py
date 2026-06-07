@@ -78,14 +78,13 @@ def interpret_search(body: InterpretBody):
     )
 
     try:
-        import ollama
-        from config import settings as _cfg
-        response = ollama.chat(
-            model=_cfg.ollama_model,
+        from services.litellm_client import chat_completion
+
+        raw = chat_completion(
             messages=[{"role": "user", "content": prompt}],
-            format="json",
+            json_mode=True,
         )
-        parsed = json.loads(response["message"]["content"])
+        parsed = json.loads(raw)
         result = {
             "keyword": parsed.get("keyword") or None,
             "tag":     parsed.get("tag")     or None,

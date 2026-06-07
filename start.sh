@@ -33,7 +33,7 @@ resolve_python() {
 
 PYTHON="$(resolve_python || true)"
 
-# Make sure Homebrew-installed binaries (node, npm, ollama) are on PATH
+# Make sure Homebrew-installed binaries (node, npm) are on PATH
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # ── colours ───────────────────────────────────────────────────────────────────
@@ -46,23 +46,6 @@ error() { echo -e "${RED}[error]${NC} $*"; exit 1; }
 [ -n "$PYTHON" ] && [ -x "$PYTHON" ] || error "Python interpreter not found. Set PAPERMANAGER_PYTHON, activate your conda env, create .venv, or install python3."
 [ -d "$FRONTEND/node_modules" ] || error "Frontend deps missing — run: cd frontend && npm install"
 command -v npm &>/dev/null    || error "npm not found — install Node.js via: brew install node"
-
-# ── Ollama (optional) ─────────────────────────────────────────────────────────
-if command -v ollama &>/dev/null; then
-  if ! pgrep -x ollama &>/dev/null; then
-    info "Starting Ollama..."
-    ollama serve &>/tmp/ollama.log &
-    sleep 2
-  else
-    info "Ollama already running."
-  fi
-  if ! ollama list 2>/dev/null | grep -q "llama3.2:3b"; then
-    info "Pulling llama3.2:3b (first-time only, may take a while)..."
-    ollama pull llama3.2:3b
-  fi
-else
-  warn "Ollama not found — metadata extraction will use heuristics only."
-fi
 
 # ── Backend ───────────────────────────────────────────────────────────────────
 info "Starting backend..."

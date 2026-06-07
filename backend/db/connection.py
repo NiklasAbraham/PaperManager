@@ -16,6 +16,9 @@ def _create_driver() -> Driver:
         max_connection_lifetime=1800,       # close connections older than 30 min (before Aura kills them)
         keep_alive=True,
         connection_acquisition_timeout=30,
+        # Must be >= server_threadpool_size so sync endpoints never block waiting
+        # for a DB connection while many requests are in flight.
+        max_connection_pool_size=settings.neo4j_max_pool_size,
     )
 
 

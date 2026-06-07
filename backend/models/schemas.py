@@ -216,7 +216,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = []
-    model: str = "claude"  # "claude" | "ollama"
+    model: str = "litellm"  # "claude" | "litellm"
     conversation_id: str | None = None
 
 
@@ -258,7 +258,7 @@ class MessageOut(BaseModel):
 class FigureOut(BaseModel):
     id: str
     paper_id: str
-    figure_number: int | None = None
+    figure_number: int | str | None = None
     caption: str | None = None
     drive_file_id: str
     drive_url: str | None = None
@@ -311,7 +311,7 @@ class FigureChatRequest(BaseModel):
 
 
 class FigureExtractRequest(BaseModel):
-    caption_method: str = "ollama"  # "ollama" | "claude-vision"
+    caption_method: str = "litellm"  # "litellm" | "ollama" | "claude-vision"
 
 
 # ── Blogs ─────────────────────────────────────────────────────────────────────
@@ -393,7 +393,7 @@ class ResearchGapsRequest(BaseModel):
     topic: str
     project_id: str | None = None
     paper_ids: list[str] | None = None
-    model: str = "claude"  # "claude" | "claude-work" | "ollama"
+    model: str = "litellm"  # "claude" | "claude-work" | "litellm"
 
 
 class ResearchGapsResponse(BaseModel):

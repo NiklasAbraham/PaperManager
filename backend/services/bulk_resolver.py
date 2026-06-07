@@ -45,13 +45,12 @@ def _try_arxiv_title_search(title: str) -> dict | None:
         return None
 
 
-def _ollama_suggest_arxiv_query(title: str) -> str | None:
-    """Use Ollama to suggest a clean arXiv title search query for a paper title."""
+def _litellm_suggest_arxiv_query(title: str) -> str | None:
+    """Use LiteLLM to suggest a clean arXiv title search query for a paper title."""
     try:
-        import ollama
-        from config import settings
-        response = ollama.chat(
-            model=settings.ollama_model,
+        from services.litellm_client import chat_completion
+
+        query = chat_completion(
             messages=[{
                 "role": "user",
                 "content": (
@@ -60,11 +59,10 @@ def _ollama_suggest_arxiv_query(title: str) -> str | None:
                     "Output ONLY the query text, nothing else."
                 ),
             }],
-        )
-        query = (response.message.content or "").strip().strip('"')
+        ).strip().strip('"')
         return query if query else None
     except Exception as e:
-        log.warning("Ollama query suggestion failed | %s", e)
+        log.warning("LiteLLM query suggestion failed | %s", e)
         return None
 
 
@@ -107,7 +105,7 @@ def resolve_entry(entry: dict) -> dict | None:
             log.info("Resolved via arXiv title search | title=%.60s", meta["title"])
             return meta
 
-        improved = _ollama_suggest_arxiv_query(title)
+        improved = _litellm_suggest_arxiv_query(title)
         if improved and improved.lower() != title.lower():
             log.info("Trying Ollama-improved arXiv query | query=%.60s", improved)
             meta = _try_arxiv_title_search(improved)

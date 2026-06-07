@@ -104,15 +104,13 @@ def _parse_batch_response(raw: str, batch: list[tuple[dict, dict, float]]) -> li
     return results
 
 
-def _verify_with_ollama(pairs: list[tuple[dict, dict, float]], model: str) -> list[DuplicatePair]:
-    """Batch-verify candidate pairs with Ollama (chunked to _BATCH_SIZE)."""
-    try:
-        import ollama
-    except ImportError:
-        return _no_ai_pairs(pairs)
+def _verify_with_litellm(pairs: list[tuple[dict, dict, float]], model: str) -> list[DuplicatePair]:
+    """Batch-verify candidate pairs with LiteLLM (chunked to _BATCH_SIZE)."""
+    from services.litellm_client import chat_completion, resolve_chat_model
 
     template = _load_prompt_template()
     results: list[DuplicatePair] = []
+    resolved = resolve_chat_model(model)
 
     for chunk_start in range(0, len(pairs), _BATCH_SIZE):
         batch = pairs[chunk_start: chunk_start + _BATCH_SIZE]
@@ -121,12 +119,14 @@ def _verify_with_ollama(pairs: list[tuple[dict, dict, float]], model: str) -> li
             pairs_block=_build_pairs_block(batch),
         )
         try:
-            resp = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
-            raw = resp["message"]["content"].strip()
+            raw = chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=resolved,
+            )
             results.extend(_parse_batch_response(raw, batch))
-            log.info("Merge scan batch %d–%d: Ollama verified", chunk_start, chunk_start + len(batch) - 1)
+            log.info("Merge scan batch %d–%d: LiteLLM verified", chunk_start, chunk_start + len(batch) - 1)
         except Exception as exc:
-            log.warning("Ollama batch verification failed (chunk %d): %s — falling back to similarity", chunk_start, exc)
+            log.warning("LiteLLM batch verification failed (chunk %d): %s — falling back to similarity", chunk_start, exc)
             results.extend(_no_ai_pairs(batch))
 
     return results
@@ -142,10 +142,10 @@ def _verify_with_claude(pairs: list[tuple[dict, dict, float]]) -> list[Duplicate
         ai_cfg = get_effective_ai_config()
         personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
         if not personal_key:
-            return _verify_with_ollama(pairs, cfg.ollama_model)
+            return _verify_with_litellm(pairs, cfg.litellm_model)
         client = anthropic.Anthropic(api_key=personal_key)
     except Exception:
-        return _verify_with_ollama(pairs, cfg.ollama_model)
+        return _verify_with_litellm(pairs, cfg.litellm_model)
 
     template = _load_prompt_template()
     results: list[DuplicatePair] = []
@@ -200,11 +200,11 @@ def _slim(p: dict) -> dict:
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.post("/scan", response_model=ScanResult)
-def scan_duplicates(model: str = "ollama"):
+def scan_duplicates(model: str = "litellm"):
     """
     Compare all paper titles and return candidate duplicate pairs.
 
-    model: "ollama" (default, local) | "claude" | "none" (raw similarity only)
+    model: "litellm" (default) | "ollama" (alias) | "claude" | "none" (raw similarity only)
     """
     from config import settings as cfg
 
@@ -245,9 +245,8 @@ def scan_duplicates(model: str = "ollama"):
     if not candidates:
         return ScanResult(pairs=[], total_papers=total)
 
-    if model == "ollama":
-        ollama_model = cfg.ollama_model
-        pairs = _verify_with_ollama(candidates, ollama_model)
+    if model in ("litellm", "ollama"):
+        pairs = _verify_with_litellm(candidates, cfg.litellm_model)
     elif model == "claude":
         pairs = _verify_with_claude(candidates)
     else:

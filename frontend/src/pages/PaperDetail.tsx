@@ -145,7 +145,7 @@ export default function PaperDetail() {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [claimsLoaded, setClaimsLoaded] = useState(false);
   const [extractingClaims, setExtractingClaims] = useState(false);
-  const [claimsModel, setClaimsModel] = useState<"claude" | "ollama">("claude");
+  const [claimsModel, setClaimsModel] = useState<"claude" | "litellm">("claude");
   // Authors (meta tab)
   const [newAuthorName, setNewAuthorName] = useState("");
   const [addingAuthor, setAddingAuthor] = useState(false);
@@ -710,6 +710,19 @@ export default function PaperDetail() {
 
   const downloadMarkdown = () => exportPaperMarkdown(id!);
 
+  const downloadPdf = async () => {
+    if (!driveEmbed || !paper) return;
+    const res = await fetch(driveEmbed);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${paper.title.slice(0, 40).replace(/[^\w\s]/g, "").trim()}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleAddRelated = async (related: RelatedPaper) => {
     const key = related.url;
     setAddingRelatedIds((prev) => new Set(prev).add(key));
@@ -805,6 +818,16 @@ export default function PaperDetail() {
             className="text-xs text-gray-400 hover:text-violet-600 transition-colors px-2 py-1 border border-gray-200 rounded-lg"
           >
             .md
+          </button>
+
+          {/* PDF download */}
+          <button
+            onClick={downloadPdf}
+            title={driveEmbed ? "Download PDF" : "No PDF uploaded"}
+            disabled={!driveEmbed}
+            className="text-xs text-gray-400 hover:text-violet-600 transition-colors px-2 py-1 border border-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+          >
+            .pdf
           </button>
 
         </div>
@@ -2312,13 +2335,13 @@ export default function PaperDetail() {
                   <h3 className="text-sm font-semibold text-gray-700">Claims & Findings</h3>
                   <div className="flex items-center gap-2">
                     <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
-                      {(["claude", "ollama"] as const).map((m) => (
+                      {(["claude", "litellm"] as const).map((m) => (
                         <button
                           key={m}
                           onClick={() => setClaimsModel(m)}
                           className={`px-2.5 py-1 ${claimsModel === m ? "bg-violet-600 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}
                         >
-                          {m === "claude" ? "Claude" : "Ollama"}
+                          {m === "claude" ? "Claude" : "Gemma (LiteLLM)"}
                         </button>
                       ))}
                     </div>

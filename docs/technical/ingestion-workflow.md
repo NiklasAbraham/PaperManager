@@ -6,24 +6,46 @@ How papers enter the library, what runs when, and why.
 
 ## PDF Upload (queue)
 
-### Stage 1 — Parse (immediate, on drop)
+### Stage 1 — Parse + preprocess + preanalyze (immediate, on drop)
 
-Triggered by: `POST /papers/parse`
-Runs in background as soon as you drop the file. Nothing is saved.
+Three requests start as soon as you drop a file. Nothing is saved.
+
+**1a — Metadata** (`POST /papers/parse`)
 
 | Step | What runs | Cost |
 |------|-----------|------|
-| Extract raw text | pypdf / pdfminer | local, fast |
+| Extract raw text | pypdf | local, fast |
 | Find DOI / arXiv ID | regex on first page | local, fast |
 | Metadata lookup | Semantic Scholar → CrossRef API | network |
-| Ollama fallback | `llama3.2:3b` on first 3 000 chars | local, ~2 s |
+| LiteLLM fallback | first 3 000 chars | local, ~2 s |
 | Heuristics fallback | first-line title, year regex | local, instant |
 | Abstract extraction | regex → Claude Haiku if needed | conditional |
 
-Result: title, authors, year, DOI, abstract are pre-filled in the modal.
-**No paper is created. No summary. No figures.**
+**1b — Layout** (`POST /papers/preprocess`)
 
-The queue row shows "Ready — click to review" once this finishes.
+| Step | What runs | Cost |
+|------|-----------|------|
+| Docling | figures + tables (once per PDF hash) | GPU / slow |
+
+**1c — Analysis** (`POST /papers/preanalyze`) — the heavy LLM work, precomputed
+
+| Step | What runs | Cost |
+|------|-----------|------|
+| summary | `summarize_paper` (default instructions) | LLM |
+| ai_topics | `suggest_topics` | LLM |
+| claims | `extract_claims` | LLM |
+| references | `extract_references` | LLM / network |
+| affiliations | `extract_affiliations_with_litellm` | LLM |
+| tag_suggestions | `suggest_tags_litellm` | LLM |
+
+Result: metadata pre-fills the modal; figures/tables **and** the full LLM analysis
+are cached on disk (keyed by PDF SHA-256). **No paper is created.**
+
+The queue row turns **green ("Ready — click to review")** only once metadata,
+layout, **and** analysis are all ready — meaning Upload will be a pure save with no
+LLM work. The queue is persisted to IndexedDB and re-verified on return.
+
+Normative spec: `.specs/009_upload_queue_workflow.md`
 
 ---
 
@@ -50,35 +72,43 @@ Runs synchronously — the modal spinner shows while this completes.
 ```
 PDF bytes
   │
-  ├─ 1. extract_metadata          → title / authors / year / DOI / abstract
-  │       (same pipeline as Stage 1, runs again — raw text needed for summary)
+  ├─ 0. load cached analysis      → analysis_key → result.json (no LLM)
+  │
+  ├─ 1. metadata                  → REUSE cached meta (else extract_metadata)
   │
   ├─ 2. title_override            → apply any title edit from the modal
   │
   ├─ 3. Drive upload              → stores PDF, returns drive_file_id
   │
-  ├─ 4. summarize_paper           → Claude opus-4 on full raw text          [PAPER only]
-  │       uses your custom summary instructions if set
+  ├─ 4. summary                   → REUSE cached summary                     [PAPER only]
+  │       re-runs summarize_paper ONLY if you edited the instructions
   │
-  ├─ 5. embed_paper               → Ollama embedding (skip if disabled)
+  ├─ 5. embed_paper               → skipped unless litellm_embed_model is set
   │
   ├─ 6. save to Neo4j             → Paper node created (or stub enriched)
   │       duplicate check: 409 if paper with drive_file_id already exists
   │
-  ├─ 7. link authors              → Person nodes, affiliations, S2 IDs
+  ├─ 7. link authors              → Person nodes, REUSE cached affiliations, S2 IDs
+  │       7b. enrichment          → ORCID + S2 HTTP (not LLM, 24h cooldown)
   │
-  ├─ 8. link topics               → Semantic Scholar topics + AI suggestions
+  ├─ 8. link topics              → Semantic Scholar topics + REUSE cached AI topics
   │
-  ├─ 9. extract claims            → Claude Haiku                            [PAPER only]
+  ├─ 9. claims                   → REUSE cached claims                       [PAPER only]
   │
-  ├─ 10. extract references       → S2 API → regex → Claude Haiku fallback  [PAPER only]
+  ├─ 10. references              → REUSE cached references                   [PAPER only]
   │
-  └─ 11. extract figures          → Docling layout model → pypdf fallback    [PAPER only]
-          captions: Ollama (default) | Claude vision | Docling built-in
+  └─ 12. figures + tables        → reuse Stage 1b cache; upload images to Drive  [PAPER only]
 ```
 
-**AI summary runs exactly once — here, step 4.**
-It never ran during Stage 1 (parse) or during queue waiting.
+**With a fully-precomputed (green) row, Upload makes _no_ LLM calls** — everything
+is reused from the analysis cache. The only intentional LLM call is the summary, and
+only if you edited the summary instructions in the modal.
+
+**Where the Upload time goes:** ~1–2 s Drive PDF upload + Neo4j writes + ORCID/S2
+enrichment, then ~10–15 s uploading figure/table images to Google Drive (step 12).
+That last step is the bulk of the wait and is not precomputed by design.
+
+**Docling runs at most once per PDF:** during Stage 1b (queue) when possible; upload step 12 only runs Docling if preprocess failed or was skipped.
 
 ---
 

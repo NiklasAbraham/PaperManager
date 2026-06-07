@@ -26,9 +26,15 @@ interface Props {
   queueTotal?: number;
   /** Skip the summary-prompt step — use default instructions. Set true for queue/batch mode. */
   skipSummaryStep?: boolean;
+  /** Docling cache key from queue preprocess — avoids re-running layout on upload. */
+  preprocessKey?: string;
+  /** LLM analysis cache key from queue preanalyze — avoids re-running summary/claims/refs. */
+  analysisKey?: string;
+  /** Tag suggestions precomputed in the queue — shown instantly in the tags step. */
+  precomputedTagSuggestions?: { existing: string[]; new: string[]; all_tags: string[] };
 }
 
-export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug, queuePosition, queueTotal, skipSummaryStep }: Props) {
+export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug, queuePosition, queueTotal, skipSummaryStep, preprocessKey, analysisKey, precomputedTagSuggestions }: Props) {
   const urlMode = !file && !!url;
   const { settings } = useAppSettings();
 
@@ -218,6 +224,22 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const goToTagStep = (paper: T_IngestOut) => {
     setUploadedPaper(paper);
     setStep(4);
+    // Use tag suggestions precomputed in the queue when available — instant.
+    if (precomputedTagSuggestions) {
+      setTagsLoading(true);
+      apiFetch<{ id: string; name: string }[]>(`/papers/${paper.id}/tags`)
+        .then((current) => {
+          setAppliedTags(new Set(current.map((t) => t.name)));
+          setTagSuggestions({
+            existing: precomputedTagSuggestions.existing,
+            new: precomputedTagSuggestions.new,
+            all_tags: precomputedTagSuggestions.all_tags ?? [],
+          });
+        })
+        .catch(() => {})
+        .finally(() => setTagsLoading(false));
+      return;
+    }
     setTagsLoading(true);
     Promise.all([
       apiFetch<{ id: string; name: string }[]>(`/papers/${paper.id}/tags`),
@@ -287,6 +309,8 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
           documentType !== "paper" ? documentType : undefined,
           settings.autoExtractClaims ? settings.claimsModel : "",
           settings.generateEmbeddingsOnUpload,
+          documentType === "paper" ? preprocessKey : undefined,
+          documentType === "paper" ? analysisKey : undefined,
         );
       }
       await applySource(paper.id);
@@ -1070,7 +1094,11 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
               <span className="text-amber mt-0.5 shrink-0">⚠</span>
               <div className="flex-1 min-w-0">
                 <span className="font-medium text-amber-800">Possible duplicate — </span>
-                <span className="text-amber">"{duplicate.title}" is already in your library.</span>
+                {duplicate.drive_file_id ? (
+                  <span className="text-amber">"{duplicate.title}" already has a PDF in your library.</span>
+                ) : (
+                  <span className="text-amber">"{duplicate.title}" exists as a reference without a PDF. Uploading now will enrich that existing paper.</span>
+                )}
               </div>
               <a
                 href={`/paper/${duplicate.id}`}

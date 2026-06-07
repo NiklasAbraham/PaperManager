@@ -25,7 +25,15 @@ from services.pdf_parser import extract_metadata
 from services.metadata_from_url import resolve_url
 from services.metadata_lookup import get_related_papers
 from services.drive import upload_pdf, get_file_url, delete_file, download_pdf
-from services.ai import summarize_paper, suggest_topics, chat_with_paper, chat_with_paper_work, chat_with_paper_ollama, extract_affiliations_with_ollama, extract_claims
+from services.ai import (
+    summarize_paper,
+    suggest_topics,
+    chat_with_paper,
+    chat_with_paper_work,
+    chat_with_paper_litellm,
+    extract_affiliations_with_litellm,
+    extract_claims,
+)
 from services.references import extract_references
 from services.figure_extractor import extract_figures
 from services.drive import upload_image
@@ -52,10 +60,74 @@ def check_duplicate(doi: Optional[str] = None, title: Optional[str] = None):
 async def parse_pdf(file: UploadFile = File(...)):
     """Extract metadata from a PDF without saving anything.
     Used by the frontend confirmation modal before the real upload."""
+    from fastapi.concurrency import run_in_threadpool
+
     pdf_bytes = await file.read()
-    meta = extract_metadata(pdf_bytes)
+    # Queue preflight must stay fast and must NOT hold a worker thread on a
+    # multi-second LLM call: sync endpoints (login, /users/identify) share the
+    # same AnyIO threadpool, and a burst of dropped PDFs running Gemma here
+    # would starve auth requests (502/504 "can't login"). So the preview uses
+    # heuristics only (allow_llm=False) and reads just the first 2 pages. The
+    # full Gemma-backed extraction runs later in POST /papers/upload.
+    meta = await run_in_threadpool(
+        extract_metadata, pdf_bytes, allow_llm=False, max_pages=2
+    )
     meta.pop("raw_text", None)  # too large for JSON
     return meta
+
+
+@router.post("/preprocess")
+async def preprocess_pdf(
+    file: UploadFile = File(...),
+    caption_method: Optional[str] = Form("docling"),
+):
+    """
+    Start Docling figure/table extraction for a queued PDF (runs once per file hash).
+    Call when the file enters the upload queue, in parallel with /parse.
+    """
+    from services.ingest_preprocess_cache import ensure_started
+    from fastapi.concurrency import run_in_threadpool
+
+    pdf_bytes = await file.read()
+    # Offload hashing + file I/O off the event loop.
+    return await run_in_threadpool(
+        ensure_started, pdf_bytes, caption_method=caption_method or "docling"
+    )
+
+
+@router.get("/preprocess/{preprocess_key}")
+def preprocess_status(preprocess_key: str):
+    """Poll preprocess job status (pending | running | ready | error | missing)."""
+    from services.ingest_preprocess_cache import get_status
+
+    return get_status(preprocess_key)
+
+
+@router.post("/preanalyze")
+async def preanalyze_pdf(file: UploadFile = File(...)):
+    """
+    Start the heavy LLM analysis (summary, topics, claims, references, tag
+    suggestions) for a queued PDF — runs once per file hash in the background.
+    Call when the file enters the upload queue; /upload reuses the cached result.
+    """
+    from services.ingest_analysis_cache import ensure_started
+    from fastapi.concurrency import run_in_threadpool
+
+    pdf_bytes = await file.read()
+    return await run_in_threadpool(ensure_started, pdf_bytes)
+
+
+@router.get("/preanalyze/{analysis_key}")
+def preanalyze_status(analysis_key: str):
+    """Poll analysis job status; includes tag_suggestions once ready."""
+    from services.ingest_analysis_cache import get_status, load_result
+
+    st = get_status(analysis_key)
+    if st.get("status") == "ready":
+        result = load_result(analysis_key)
+        if result:
+            st["tag_suggestions"] = result.get("tag_suggestions")
+    return st
 
 
 @router.post("", response_model=PaperOut, status_code=status.HTTP_201_CREATED)
@@ -64,31 +136,55 @@ def create(body: PaperCreate):
 
 
 @router.post("/upload", response_model=IngestOut, status_code=status.HTTP_201_CREATED)
-async def upload(
+def upload(
     file: UploadFile = File(...),
     title_override: Optional[str] = Form(None),
     project_id: Optional[str] = Form(None),
     caption_method: Optional[str] = Form("ollama"),
     summary_instructions: Optional[str] = Form(None),
     document_type: Optional[str] = Form(None),
-    claims_model: Optional[str] = Form("claude-haiku-4-5-20251001"),
+    claims_model: Optional[str] = Form("litellm"),
     skip_embedding: bool = Form(False),
+    preprocess_key: Optional[str] = Form(None),
+    analysis_key: Optional[str] = Form(None),
     debug: bool = Form(False),
     x_user_name: Optional[str] = Header(None),
 ):
     """Full ingestion pipeline: PDF → metadata → Drive → summary → Neo4j.
-    
+
+    Defined as a SYNC endpoint on purpose: the pipeline is entirely blocking
+    (LLM calls, Drive upload, Neo4j writes). As a sync def, FastAPI runs it in
+    the threadpool instead of on the event loop, so a long upload can't freeze
+    the single worker's event loop and starve auth/other requests.
+
     When document_type is 'book' or 'lecture_deck', references and figure
     extraction are skipped — chapter detection is available separately via
     POST /papers/{id}/chapters/detect.
     """
-    pdf_bytes = await file.read()
+    pdf_bytes = file.file.read()
 
     is_book = document_type in ("book", "lecture_deck")
+    log.info("UPLOAD START | filename=%s | bytes=%d | document_type=%s",
+             file.filename, len(pdf_bytes), document_type)
 
-    # Step 1-2: Extract metadata
-    meta = extract_metadata(pdf_bytes)
+    # Step 0: Reuse the queue's precomputed analysis if available (summary,
+    # topics, claims, references, metadata) — makes the upload near-instant.
+    analysis = None
+    if analysis_key:
+        from services.ingest_analysis_cache import wait_for_result as _wait_analysis
+        analysis = _wait_analysis(analysis_key, timeout=180.0)
+        if analysis:
+            log.info("UPLOAD using cached analysis | key=%s", analysis_key[:12])
+
+    # Step 1-2: Extract metadata (reuse cached metadata when present)
+    if analysis and analysis.get("meta"):
+        meta = analysis["meta"]
+    else:
+        log.info("UPLOAD step 1: extract_metadata (LLM primary)")
+        meta = extract_metadata(pdf_bytes)
     raw_text = meta.get("raw_text", "")
+    log.info("UPLOAD step 1 done | source=%s | title=%.60s",
+             meta.get("metadata_source"), meta.get("title"))
 
     # Step 3: Apply title override
     if title_override:
@@ -106,14 +202,21 @@ async def upload(
     # Step 5: Generate AI summary (skipped for books/lecture decks)
     summary = None
     if not is_book and raw_text:
-        try:
-            summary = summarize_paper(raw_text, meta.get("title", ""), summary_instructions or None)
-            log.info("Summary generated | title=%.60s", meta.get("title"))
-        except Exception as exc:
-            log.warning("Summary failed (non-fatal) | %s", exc)
+        # Reuse the precomputed summary only when the user kept default
+        # instructions (the queue precompute always uses defaults).
+        if analysis and analysis.get("summary") and not summary_instructions:
+            summary = analysis["summary"]
+            log.info("Summary reused from cache | title=%.60s", meta.get("title"))
+        else:
+            try:
+                summary = summarize_paper(raw_text, meta.get("title", ""), summary_instructions or None)
+                log.info("Summary generated | title=%.60s", meta.get("title"))
+            except Exception as exc:
+                log.warning("Summary failed (non-fatal) | %s", exc)
 
     # Step 5b: Generate vector embedding (best-effort — don't fail if Ollama is down)
-    if not skip_embedding:
+    from config import settings as _settings
+    if not skip_embedding and _settings.litellm_embed_model:
         try:
             from services.embeddings import embed_paper as _embed_paper
             meta["embedding"] = _embed_paper(
@@ -141,33 +244,24 @@ async def upload(
                     "existing_title": existing.get("title", ""),
                 }),
             )
-        # Stub (no PDF yet) — enrich it with the new upload data
+        # Stub (no PDF yet) — enrich the existing node in place so all existing
+        # links (e.g. references/citations) remain attached to the same paper.
         log.info("Enriching stub paper %s with uploaded PDF", existing["id"])
-        paper = merge_paper_by_doi(driver, {
-            "title": meta.get("title", ""),
-            "year": meta.get("year"),
+        paper = update_paper(driver, existing["id"], {
+            "title": meta.get("title") or existing.get("title") or "",
+            "year": meta.get("year") if meta.get("year") is not None else existing.get("year"),
             "doi": meta.get("doi") or existing.get("doi"),
-            "abstract": meta.get("abstract"),
+            "abstract": meta.get("abstract") or existing.get("abstract"),
             "summary": summary,
             "drive_file_id": drive_file_id,
-            "citation_count": meta.get("citation_count"),
-            "metadata_source": meta.get("metadata_source", "heuristic"),
+            "citation_count": meta.get("citation_count") if meta.get("citation_count") is not None else existing.get("citation_count"),
+            "metadata_source": meta.get("metadata_source", existing.get("metadata_source") or "heuristic"),
             "raw_text": raw_text,
-            "venue": meta.get("venue"),
-            "document_type": document_type,
-        }) if meta.get("doi") or existing.get("doi") else create_paper(driver, {
-            "title": meta.get("title", ""),
-            "year": meta.get("year"),
-            "doi": meta.get("doi"),
-            "abstract": meta.get("abstract"),
-            "summary": summary,
-            "drive_file_id": drive_file_id,
-            "citation_count": meta.get("citation_count"),
-            "metadata_source": meta.get("metadata_source", "heuristic"),
-            "raw_text": raw_text,
-            "venue": meta.get("venue"),
-            "document_type": document_type,
+            "venue": meta.get("venue") or existing.get("venue"),
+            "document_type": document_type or existing.get("document_type"),
         })
+        if not paper:
+            raise HTTPException(status_code=500, detail="Failed to enrich existing paper")
     elif meta.get("doi"):
         # No existing paper but DOI known — use merge to future-proof against race conditions
         paper = merge_paper_by_doi(driver, {
@@ -223,9 +317,13 @@ async def upload(
     missing = [n for n in meta.get("authors", []) if n and not aff_map.get(n)]
     if missing and raw_text:
         try:
-            ollama_affs = extract_affiliations_with_ollama(missing, raw_text)
-            aff_map.update(ollama_affs)
-            log.info("Ollama affiliations extracted | count=%d", len(ollama_affs))
+            if analysis and analysis.get("affiliations") is not None:
+                litellm_affs = analysis["affiliations"]
+                log.info("Affiliations reused from cache | count=%d", len(litellm_affs))
+            else:
+                litellm_affs = extract_affiliations_with_litellm(missing, raw_text)
+                log.info("LiteLLM affiliations extracted | count=%d", len(litellm_affs))
+            aff_map.update(litellm_affs)
         except Exception as exc:
             log.warning("Ollama affiliation extraction failed (non-fatal) | %s", exc)
 
@@ -257,11 +355,14 @@ async def upload(
 
     # Step 8b: AI topic suggestion (best-effort, supplements Semantic Scholar topics)
     try:
-        ai_topics = suggest_topics(
-            title=meta.get("title", ""),
-            abstract=meta.get("abstract", "") or "",
-            summary=summary or "",
-        )
+        if analysis and analysis.get("ai_topics") is not None:
+            ai_topics = analysis["ai_topics"]
+        else:
+            ai_topics = suggest_topics(
+                title=meta.get("title", ""),
+                abstract=meta.get("abstract", "") or "",
+                summary=summary or "",
+            )
         for topic_name in ai_topics:
             if topic_name and topic_name not in topics_added:
                 link_paper_topic(driver, paper["id"], topic_name)
@@ -271,9 +372,12 @@ async def upload(
         log.warning("AI topic suggestion failed (non-fatal) | %s", exc)
 
     # Step 8c: Extract claims (best-effort — skipped for books/lecture decks)
-    if not is_book:
+    if not is_book and claims_model:
         try:
-            claims_data = extract_claims(raw_text, meta.get("title", ""), model=claims_model)
+            if analysis and analysis.get("claims") is not None:
+                claims_data = analysis["claims"]
+            else:
+                claims_data = extract_claims(raw_text, meta.get("title", ""), model=claims_model)
             if claims_data:
                 create_claims(driver, paper["id"], claims_data)
                 log.info("Claims extracted | count=%d | paper_id=%s", len(claims_data), paper["id"])
@@ -291,30 +395,47 @@ async def upload(
     references_found = []
     if not is_book:
         try:
-            references_found = extract_references(raw_text, meta.get("doi"))
+            if analysis and analysis.get("references") is not None:
+                references_found = analysis["references"]
+            else:
+                references_found = extract_references(raw_text, meta.get("doi"))
             log.info("References extracted | count=%d | paper_id=%s", len(references_found), paper["id"])
         except Exception as exc:
             log.warning("Reference extraction failed (non-fatal) | %s", exc)
     else:
         log.info("Skipping reference extraction for document_type=%s | paper_id=%s", document_type, paper["id"])
 
-    # Step 11: Extract figures (best-effort — skipped for books/lecture decks)
+    # Step 11: Figures + tables (best-effort — skipped for books/lecture decks)
     if not is_book:
         try:
-            figs = extract_figures(pdf_bytes, caption_method=caption_method or "ollama").get("figures", [])
-            for i, fig in enumerate(figs):
-                fig_filename = f"{paper['id']}_p{fig['page_number']}_{i+1}.png"
-                fig_drive_id = upload_image(fig["image_bytes"], fig_filename)
-                create_figure(driver, {
-                    "paper_id": paper["id"],
-                    "figure_number": fig["figure_number"],
-                    "caption": fig["caption"],
-                    "drive_file_id": fig_drive_id,
-                    "page_number": fig["page_number"],
-                })
-            log.info("Figures extracted | count=%d | paper_id=%s", len(figs), paper["id"])
+            from services.ingest_preprocess_cache import wait_for_result, consume_result
+            from services.ingest_assets import save_figures_and_tables
+
+            extraction = None
+            if preprocess_key:
+                # Bound the wait so a slow/stuck Docling job can't park this
+                # worker thread for the full 10 min default.
+                extraction = wait_for_result(preprocess_key, timeout=300.0)
+                if extraction:
+                    consume_result(preprocess_key)
+                    log.info(
+                        "Using queued Docling cache | paper_id=%s | figures=%d | tables=%d",
+                        paper["id"],
+                        len(extraction.get("figures") or []),
+                        len(extraction.get("tables") or []),
+                    )
+            if extraction is None:
+                log.info("Running Docling on upload (no cache) | paper_id=%s", paper["id"])
+                extraction = extract_figures(
+                    pdf_bytes, caption_method=caption_method or "ollama"
+                )
+            n_figs, n_tbls = save_figures_and_tables(driver, paper["id"], extraction)
+            log.info(
+                "Figures/tables saved | figures=%d | tables=%d | paper_id=%s",
+                n_figs, n_tbls, paper["id"],
+            )
         except Exception as exc:
-            log.warning("Figure extraction failed (non-fatal) | %s", exc)
+            log.warning("Figure/table extraction failed (non-fatal) | %s", exc)
     else:
         log.info("Skipping figure extraction for document_type=%s | paper_id=%s", document_type, paper["id"])
 
@@ -579,7 +700,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
         missing = [n for n in merged.get("authors", []) if n and not aff_map.get(n)]
         if missing and raw_text:
             try:
-                aff_map.update(extract_affiliations_with_ollama(missing, raw_text))
+                aff_map.update(extract_affiliations_with_litellm(missing, raw_text))
             except Exception:
                 pass
 
@@ -1005,8 +1126,20 @@ def ai_extract_metadata(paper_id: str):
     _work_base = (_ai_cfg.get("anthropic_work_base_url") or "").strip()
     _personal_key = (_ai_cfg.get("anthropic_api_key") or "").strip()
 
-    # Try Claude Work first
-    if _work_key:
+    # LiteLLM / Gemma (primary)
+    try:
+        from services.litellm_client import chat_completion
+
+        raw = chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            json_mode=True,
+        )
+        result = _parse_llm_json(raw)
+    except Exception as exc:
+        log.debug("LiteLLM ai-extract failed: %s", exc)
+
+    # Fallback: Claude Work
+    if result is None and _work_key:
         try:
             import ssl
             ctx = ssl.create_default_context()
@@ -1038,21 +1171,8 @@ def ai_extract_metadata(paper_id: str):
         except Exception as exc:
             log.debug("Claude personal ai-extract failed: %s", exc)
 
-    # Fallback: Ollama
     if result is None:
-        try:
-            import ollama as _ollama
-            resp = _ollama.chat(
-                model=_settings.ollama_model,
-                messages=[{"role": "user", "content": prompt}],
-                format="json",
-            )
-            result = _parse_llm_json(resp["message"]["content"])
-        except Exception as exc:
-            log.debug("Ollama ai-extract failed: %s", exc)
-
-    if result is None:
-        raise HTTPException(status_code=503, detail="All LLM backends failed — check Claude Work, personal API key, and Ollama")
+        raise HTTPException(status_code=503, detail="All LLM backends failed — check Claude Work, personal API key, and LiteLLM")
 
     abstract = str(result.get("abstract") or "").strip() or None
     year_raw = result.get("year")
@@ -1178,12 +1298,13 @@ async def refetch_pdf(paper_id: str):
 
     # Save authors (PDF extraction may have found them)
     authors_saved = []
-    existing_author_ids = {
-        r["person"]["id"]
-        for r in driver.session().run(
-            "MATCH (p:Paper {id:$id})-[:AUTHORED_BY]->(a:Person) RETURN a AS person", id=paper_id
-        )
-    }
+    with driver.session() as _sess:
+        existing_author_ids = {
+            r["person"]["id"]
+            for r in _sess.run(
+                "MATCH (p:Paper {id:$id})-[:AUTHORED_BY]->(a:Person) RETURN a AS person", id=paper_id
+            )
+        }
     for name in pdf_meta.get("authors") or []:
         if not name:
             continue
@@ -1251,12 +1372,13 @@ async def upload_pdf_for_paper(paper_id: str, file: UploadFile = File(...)):
     update_paper(driver, paper_id, updates)
 
     # Add any new authors found by PDF extraction
-    existing_author_ids = {
-        r["person"]["id"]
-        for r in driver.session().run(
-            "MATCH (p:Paper {id:$id})-[:AUTHORED_BY]->(a:Person) RETURN a AS person", id=paper_id
-        )
-    }
+    with driver.session() as _sess:
+        existing_author_ids = {
+            r["person"]["id"]
+            for r in _sess.run(
+                "MATCH (p:Paper {id:$id})-[:AUTHORED_BY]->(a:Person) RETURN a AS person", id=paper_id
+            )
+        }
     authors_added = []
     for name in pdf_meta.get("authors") or []:
         if not name:
@@ -1297,8 +1419,8 @@ def chat(paper_id: str, body: ChatRequest, x_user_name: Optional[str] = Header(N
     raw_text = paper.get("raw_text") or ""
     history = [{"role": m.role, "content": m.content} for m in body.history]
     kwargs = dict(paper_text=raw_text, paper_title=paper.get("title", ""), question=body.question, history=history)
-    if body.model == "ollama":
-        answer = chat_with_paper_ollama(**kwargs)
+    if body.model in ("litellm", "ollama"):
+        answer = chat_with_paper_litellm(**kwargs)
     elif body.model == "claude-work":
         answer = chat_with_paper_work(**kwargs)
     else:
@@ -1524,14 +1646,12 @@ def _generate_search_keywords(driver, paper: dict) -> list[str]:
     except Exception:
         topics = []
 
-    # 2. Claude Haiku — extract keywords from title + abstract
+    # 2. LiteLLM / Gemma — extract keywords from title + abstract
     title = paper.get("title", "")
     abstract = paper.get("abstract") or paper.get("summary") or ""
     if title and (abstract or len(title) > 20):
         try:
-            import httpx as _httpx
-            import anthropic
-            from services.user_ai_config import get_effective_ai_config
+            from services.litellm_client import chat_completion
             snippet = f"Title: {title}\n\nAbstract: {abstract[:1500]}"
             prompt = (
                 "Return a JSON array of 6-8 short search keywords (2-4 words each) "
@@ -1539,46 +1659,26 @@ def _generate_search_keywords(driver, paper: dict) -> list[str]:
                 "Focus on methods, domains, and concepts — not author names or venues. "
                 "Return ONLY the JSON array, no explanation.\n\n" + snippet
             )
-            ai_cfg = get_effective_ai_config()
-            work_key = (ai_cfg.get("anthropic_work_api_key") or "").strip()
-            work_base = (ai_cfg.get("anthropic_work_base_url") or "").strip()
-            personal_key = (ai_cfg.get("anthropic_api_key") or "").strip()
-            if work_key:
-                kwargs: dict = {"api_key": work_key,
-                                "http_client": _httpx.Client(verify=False)}
-                if work_base:
-                    kwargs["base_url"] = work_base
-                client = anthropic.Anthropic(**kwargs)
-                model = "claude-sonnet-4-6"
-            elif personal_key:
-                client = anthropic.Anthropic(api_key=personal_key,
-                                             base_url="https://api.anthropic.com")
-                model = "claude-haiku-4-5-20251001"
-            else:
-                client = None
-
-            if client:
-                resp = client.messages.create(
-                    model=model, max_tokens=256,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                import json, re
-                raw = resp.content[0].text.strip()
-                raw = re.sub(r"^```(?:json)?\s*", "", raw)
-                raw = re.sub(r"\s*```$", "", raw)
-                kws = json.loads(raw)
-                if isinstance(kws, list) and kws:
-                    combined = topics + [str(k) for k in kws if k]
-                    seen: set[str] = set()
-                    deduped = []
-                    for k in combined:
-                        lo = k.lower()
-                        if lo not in seen:
-                            seen.add(lo)
-                            deduped.append(k)
-                    return deduped[:8]
+            import json, re
+            raw = chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                json_mode=True,
+            ).strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            kws = json.loads(raw)
+            if isinstance(kws, list) and kws:
+                combined = topics + [str(k) for k in kws if k]
+                seen: set[str] = set()
+                deduped = []
+                for k in combined:
+                    lo = k.lower()
+                    if lo not in seen:
+                        seen.add(lo)
+                        deduped.append(k)
+                return deduped[:8]
         except Exception as exc:
-            log.debug("Keyword generation via Claude failed: %s", exc)
+            log.debug("Keyword generation via LiteLLM failed: %s", exc)
 
     # 3. Fallback: significant words from the title
     import re as _re

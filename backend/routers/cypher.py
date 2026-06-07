@@ -168,24 +168,19 @@ def delete_node(node_id: str):
 
 @router.post("/assist")
 def assist_query(body: AssistBody, current_user: str = Depends(get_current_user)):
-    """Use Ollama to generate a Cypher query from a natural language description."""
+    """Use LiteLLM to generate a Cypher query from a natural language description."""
     _require_admin(current_user)
     if not body.request.strip():
         raise HTTPException(status_code=400, detail="Empty request")
     try:
-        import ollama
-        from config import settings
+        from services.litellm_client import chat_completion
 
         prompt = SCHEMA_PROMPT + f'\n"{body.request.strip()}"'
-        response = ollama.chat(
-            model=settings.ollama_model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response["message"]["content"].strip()
+        raw = chat_completion(messages=[{"role": "user", "content": prompt}])
         # Strip any markdown fences the model adds despite instructions
         for fence in ("```cypher", "```"):
             raw = raw.removeprefix(fence)
         raw = raw.removesuffix("```").strip()
         return {"query": raw}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Ollama unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"LiteLLM unavailable: {e}")

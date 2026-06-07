@@ -1,9 +1,11 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
-import { parsePdf, previewUrl, deletePaper, checkDuplicate } from "../api/client";
+import { parsePdf, preprocessPdf, getPreprocessStatus, preanalyzePdf, getPreanalysisStatus, previewUrl, deletePaper, checkDuplicate } from "../api/client";
+import { useAppSettings } from "../contexts/SettingsContext";
 import UploadConfirmModal from "./UploadConfirmModal";
 import type { ParsedMeta, T_IngestOut } from "../types";
+import type { TagSuggestions } from "../api/client";
 import {
   persistItem, removePersistedItem, loadPersistedQueue,
   fileToBuffer, bufferToFile,
@@ -26,10 +28,20 @@ type QueuedPdf = {
   uploadResult?: T_IngestOut;
   duplicateId?: string;
   duplicateTitle?: string;
+  duplicateHasPdf?: boolean;
+  /** SHA-256 cache key from POST /papers/preprocess — Docling runs once per key. */
+  preprocessKey?: string;
+  preprocessStatus?: "pending" | "running" | "ready" | "error";
+  /** SHA-256 cache key from POST /papers/preanalyze — LLM analysis runs once per key. */
+  analysisKey?: string;
+  analysisStatus?: "pending" | "running" | "ready" | "error";
+  /** Precomputed tag suggestions, ready before the user opens the modal. */
+  tagSuggestions?: TagSuggestions;
 };
 
 export default function PaperDrop({ onUploaded, debug }: Props) {
   const navigate = useNavigate();
+  const { settings } = useAppSettings();
   const [open, setOpen]   = useState(false);
   const [tab, setTab]     = useState<Tab>("pdf");
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +56,8 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
   const [loadingUrl, setLoadingUrl] = useState(false);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   const [urlMeta, setUrlMeta]       = useState<ParsedMeta | null>(null);
+  const persistSigById = useRef<Map<string, string>>(new Map());
+  const fileBytesById = useRef<Map<string, ArrayBuffer>>(new Map());
 
   // ── Restore queue from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
@@ -57,22 +71,62 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
         error: s.error,
         duplicateId: s.duplicateId,
         duplicateTitle: s.duplicateTitle,
+        duplicateHasPdf: s.duplicateHasPdf,
         uploadResult: s.uploadResult,
+        preprocessKey: s.preprocessKey,
+        preprocessStatus: s.preprocessStatus as QueuedPdf["preprocessStatus"],
+        analysisKey: s.analysisKey,
+        analysisStatus: s.analysisStatus as QueuedPdf["analysisStatus"],
+        tagSuggestions: s.tagSuggestions as QueuedPdf["tagSuggestions"],
       }));
       setQueue(restored);
       setTab("queue");
+      // The precompute results live in a backend disk cache that may have been
+      // cleared (e.g. backend restart). Re-verify each restored row and kick off
+      // a fresh precompute for anything that is no longer ready, so the queue
+      // ends up fully precomputed again without the user doing anything.
+      restored.forEach((item) => { void ensurePrecompute(item); });
     }).catch(() => { /* IndexedDB unavailable — silent fail */ });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Persist queue changes to IndexedDB ────────────────────────────────────
   useEffect(() => {
+    const liveIds = new Set(queue.map((q) => q.id));
+    // Drop stale cache entries for removed queue rows.
+    [...persistSigById.current.keys()].forEach((id) => {
+      if (!liveIds.has(id)) persistSigById.current.delete(id);
+    });
+    [...fileBytesById.current.keys()].forEach((id) => {
+      if (!liveIds.has(id)) fileBytesById.current.delete(id);
+    });
+
     queue.forEach((item) => {
       if (item.status === "done" || item.status === "uploading" || item.status === "parsing") {
         // Transient states — remove from store if previously saved
         removePersistedItem(item.id).catch(() => {});
+        persistSigById.current.delete(item.id);
+        fileBytesById.current.delete(item.id);
         return;
       }
-      fileToBuffer(item.file).then((bytes) => {
+
+      const persistSig = JSON.stringify({
+        status: item.status,
+        error: item.error,
+        meta: item.meta,
+        duplicateId: item.duplicateId,
+        duplicateTitle: item.duplicateTitle,
+        duplicateHasPdf: item.duplicateHasPdf,
+        uploadResultId: item.uploadResult?.id,
+        preprocessKey: item.preprocessKey,
+        preprocessStatus: item.preprocessStatus,
+        analysisKey: item.analysisKey,
+        analysisStatus: item.analysisStatus,
+        hasTagSuggestions: !!item.tagSuggestions,
+      });
+      if (persistSigById.current.get(item.id) === persistSig) return;
+
+      const cachedBytes = fileBytesById.current.get(item.id);
+      const doPersist = (bytes: ArrayBuffer) => {
         persistItem({
           id: item.id,
           fileName: item.file.name,
@@ -83,9 +137,31 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
           error: item.error,
           duplicateId: item.duplicateId,
           duplicateTitle: item.duplicateTitle,
+          duplicateHasPdf: item.duplicateHasPdf,
           uploadResult: item.uploadResult,
-        }).catch(() => {});
-      }).catch(() => {});
+          preprocessKey: item.preprocessKey,
+          preprocessStatus: item.preprocessStatus,
+          analysisKey: item.analysisKey,
+          analysisStatus: item.analysisStatus,
+          tagSuggestions: item.tagSuggestions,
+        })
+          .then(() => {
+            persistSigById.current.set(item.id, persistSig);
+          })
+          .catch(() => {});
+      };
+
+      if (cachedBytes) {
+        doPersist(cachedBytes);
+        return;
+      }
+
+      fileToBuffer(item.file)
+        .then((bytes) => {
+          fileBytesById.current.set(item.id, bytes);
+          doPersist(bytes);
+        })
+        .catch(() => {});
     });
   }, [queue]);
 
@@ -93,6 +169,51 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
   useEffect(() => {
     if (queue.length > 0 && tab !== "queue") setTab("queue");
   }, [queue.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll Docling preprocess status for queued items
+  useEffect(() => {
+    const pending = queue.filter(
+      (q) => q.preprocessKey && q.preprocessStatus && !["ready", "error"].includes(q.preprocessStatus),
+    );
+    if (!pending.length) return;
+    const interval = setInterval(() => {
+      pending.forEach((item) => {
+        if (!item.preprocessKey) return;
+        getPreprocessStatus(item.preprocessKey)
+          .then(({ status }) => {
+            if (status === item.preprocessStatus) return;
+            updateItem(item.id, {
+              preprocessStatus: status as QueuedPdf["preprocessStatus"],
+            });
+          })
+          .catch(() => {});
+      });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [queue]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll LLM analysis status for queued items (summary/claims/refs/tags precompute)
+  useEffect(() => {
+    const pending = queue.filter(
+      (q) => q.analysisKey && q.analysisStatus && !["ready", "error"].includes(q.analysisStatus),
+    );
+    if (!pending.length) return;
+    const interval = setInterval(() => {
+      pending.forEach((item) => {
+        if (!item.analysisKey) return;
+        getPreanalysisStatus(item.analysisKey)
+          .then(({ status, tag_suggestions }) => {
+            if (status === item.analysisStatus) return;
+            updateItem(item.id, {
+              analysisStatus: status as QueuedPdf["analysisStatus"],
+              ...(tag_suggestions ? { tagSuggestions: tag_suggestions } : {}),
+            });
+          })
+          .catch(() => {});
+      });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [queue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-remove done rows after 3 s (also cleans IndexedDB)
   useEffect(() => {
@@ -120,20 +241,103 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
   const updateItem = (id: string, patch: Partial<QueuedPdf>) =>
     setQueue((prev) => prev.map((q) => q.id === id ? { ...q, ...patch } : q));
 
-  const prepareItem = async (item: QueuedPdf, meta: ParsedMeta) => {
-    // Check for duplicates before showing the modal
+  // Stage 1b: kick off Docling figure/table precompute (background on backend).
+  const firePreprocess = async (item: QueuedPdf) => {
     try {
-      const dup = await checkDuplicate(meta.doi || undefined, meta.title || undefined);
+      const { preprocess_key, status } = await preprocessPdf(item.file, settings.figureCaptionMethod);
+      updateItem(item.id, {
+        preprocessKey: preprocess_key,
+        preprocessStatus: status === "pending" ? "pending" : status as QueuedPdf["preprocessStatus"],
+      });
+    } catch {
+      /* non-fatal — upload will run Docling inline if needed */
+    }
+  };
+
+  // Stage 1c: kick off heavy LLM analysis precompute (background on backend).
+  const firePreanalyze = async (item: QueuedPdf) => {
+    try {
+      const { analysis_key, status } = await preanalyzePdf(item.file);
+      updateItem(item.id, {
+        analysisKey: analysis_key,
+        analysisStatus: status === "pending" ? "pending" : status as QueuedPdf["analysisStatus"],
+      });
+    } catch {
+      /* non-fatal — upload will run the analysis inline if needed */
+    }
+  };
+
+  // After restoring the queue from IndexedDB, the backend disk cache that holds
+  // the precomputed results may be gone (e.g. backend restarted) or may not have
+  // finished yet. Re-verify each row and restart precompute for whatever is no
+  // longer ready, so the queue self-heals back to fully precomputed.
+  const ensurePrecompute = async (item: QueuedPdf) => {
+    if (item.status !== "ready") return;
+
+    let preprocessOk = false;
+    if (item.preprocessKey && item.preprocessStatus === "ready") {
+      try {
+        const { status } = await getPreprocessStatus(item.preprocessKey);
+        preprocessOk = status === "ready";
+        if (status !== item.preprocessStatus) {
+          updateItem(item.id, { preprocessStatus: status as QueuedPdf["preprocessStatus"] });
+        }
+      } catch {
+        preprocessOk = false;
+      }
+    }
+    if (!preprocessOk) await firePreprocess(item);
+
+    let analysisOk = false;
+    if (item.analysisKey && item.analysisStatus === "ready") {
+      try {
+        const { status, tag_suggestions } = await getPreanalysisStatus(item.analysisKey);
+        analysisOk = status === "ready";
+        updateItem(item.id, {
+          analysisStatus: status as QueuedPdf["analysisStatus"],
+          ...(tag_suggestions ? { tagSuggestions: tag_suggestions } : {}),
+        });
+      } catch {
+        analysisOk = false;
+      }
+    }
+    if (!analysisOk) await firePreanalyze(item);
+  };
+
+  const prepareItem = async (item: QueuedPdf, meta: ParsedMeta) => {
+    // Check for duplicates before showing the modal (with timeout)
+    try {
+      const dupPromise = checkDuplicate(meta.doi || undefined, meta.title || undefined);
+      const timeoutPromise = new Promise<null>((_, reject) => 
+        setTimeout(() => reject(new Error("Duplicate check timeout")), 8000)
+      );
+      const dup = await Promise.race([dupPromise, timeoutPromise]);
+      
       if (dup) {
+        if (dup.hasPdf) {
+          updateItem(item.id, {
+            meta,
+            status: "duplicate",
+            duplicateId: dup.id,
+            duplicateTitle: dup.title,
+            duplicateHasPdf: true,
+          });
+          return;
+        }
+        // Existing reference stub (no PDF): keep row reviewable so upload can enrich it.
         updateItem(item.id, {
           meta,
-          status: "duplicate",
+          status: "ready",
           duplicateId: dup.id,
           duplicateTitle: dup.title,
+          duplicateHasPdf: false,
         });
         return;
       }
-    } catch { /* best-effort — proceed if check fails */ }
+    } catch (e) { 
+      console.warn("Duplicate check failed or timed out:", e);
+      /* best-effort — proceed if check fails */ 
+    }
 
     updateItem(item.id, { meta, status: "ready" });
   };
@@ -152,16 +356,55 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
 
     setQueue((prev) => [...prev, ...newItems]);
 
-    newItems.forEach((item) => {
-      parsePdf(item.file)
-        .then((meta) => prepareItem(item, meta))
-        .catch((e) =>
-          updateItem(item.id, {
-            status: "error",
-            error: e instanceof Error ? e.message : "Could not read PDF",
-          })
-        );
-    });
+    // Each file uploads its full bytes twice (once for /parse, once for
+    // /preprocess). Firing them all at once exhausts the browser's per-host
+    // connection limit (Safari allows ~6), and the surplus uploads stall and
+    // abort with "Load failed" behind the HTTPS reverse proxy. So we process
+    // files through a small concurrency pool and run the two stages
+    // sequentially per file — never more than CONCURRENCY uploads in flight.
+    const CONCURRENCY = 2;
+    let cursor = 0;
+
+    const processOne = async (item: QueuedPdf) => {
+      // Stage 1a: metadata preview (fast — no LLM). Abort after 60s so a stuck
+      // request frees its connection slot instead of hanging the pool.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 60000);
+      try {
+        const meta = await parsePdf(item.file, ctrl.signal);
+        clearTimeout(timer);
+        await prepareItem(item, meta);
+      } catch (e) {
+        clearTimeout(timer);
+        const timedOut = e instanceof DOMException && e.name === "AbortError";
+        updateItem(item.id, {
+          status: "error",
+          error: timedOut
+            ? "Metadata extraction timed out — try again or upload anyway"
+            : e instanceof Error ? e.message : "Could not read PDF",
+        });
+      }
+
+      // Stage 1b: Docling figures + tables. The backend returns immediately
+      // (work runs in a background thread), so this is a quick request.
+      await firePreprocess(item);
+
+      // Stage 1c: Heavy LLM analysis (summary, topics, claims, references,
+      // tag suggestions). Runs in a background thread on the backend and is
+      // reused at upload time, so clicking through the queue is instant.
+      await firePreanalyze(item);
+    };
+
+    const worker = async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= newItems.length) break;
+        await processOne(newItems[i]);
+      }
+    };
+
+    const poolSize = Math.min(CONCURRENCY, newItems.length);
+    void Promise.all(Array.from({ length: poolSize }, () => worker()));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -380,6 +623,9 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
           <UploadConfirmModal
             file={queue[activeIdx].file}
             meta={queue[activeIdx].meta!}
+            preprocessKey={queue[activeIdx].preprocessKey}
+            analysisKey={queue[activeIdx].analysisKey}
+            precomputedTagSuggestions={queue[activeIdx].tagSuggestions}
             skipSummaryStep={true}
             queuePosition={reviewable.length > 1 ? pos : undefined}
             queueTotal={reviewable.length > 1 ? reviewable.length : undefined}
@@ -422,35 +668,86 @@ function QueueRow({
   onClick: () => void;
   onDelete: () => void;
 }) {
-  const isClickable = item.status === "ready";
+  // A queued PDF is only "fully ready" (green, clickable) once metadata parsing,
+  // Docling layout extraction AND the LLM analysis have all finished. Until then
+  // the row shows a "preparing" state and is not clickable, so the user only
+  // clicks through rows whose summary/figures/suggestions are already cached.
+  const bgAllReady =
+    item.preprocessStatus === "ready" && item.analysisStatus === "ready";
+  // A stage is still "working" only when its job actually started (has a key)
+  // and hasn't settled. If the start request failed (no key), don't block
+  // forever — treat it as settled-but-incomplete (amber, clickable).
+  const preprocessWorking =
+    !!item.preprocessKey && item.preprocessStatus !== "ready" && item.preprocessStatus !== "error";
+  const analysisWorking =
+    !!item.analysisKey && item.analysisStatus !== "ready" && item.analysisStatus !== "error";
+  const bgWorking = preprocessWorking || analysisWorking;
+
+  const fullyReady = item.status === "ready" && bgAllReady;
+  const preparing  = item.status === "ready" && bgWorking;
+  const prepFailed = item.status === "ready" && !bgWorking && !bgAllReady;
+
+  // Only fully-ready rows (everything precomputed) are clickable. Rows whose
+  // background prep failed are still clickable (upload will compute inline).
+  const isClickable = fullyReady || prepFailed;
   const title = item.meta?.title || item.uploadResult?.title || item.duplicateTitle || item.file.name;
 
-  const statusIcon = {
-    parsing:   <Spinner color="text-violet-400" />,
-    uploading: <Spinner color="text-violet-600" />,
-    ready:     <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 mt-0.5" />,
-    duplicate: <span className="text-amber-500 shrink-0 leading-none mt-0.5">⚠</span>,
-    error:     <span className="text-red-400 shrink-0 leading-none mt-0.5">✕</span>,
-    done:      <span className="text-gray-300 shrink-0 leading-none mt-0.5">✓</span>,
-  }[item.status];
+  const layoutLabel =
+    item.preprocessStatus === "ready" ? "layout ✓"
+      : item.preprocessStatus === "error" ? "layout failed"
+        : "layout…";
+  const analysisLabel =
+    item.analysisStatus === "ready" ? "analysis ✓"
+      : item.analysisStatus === "error" ? "analysis failed"
+        : "analysis…";
+  const prepHint = ` · ${layoutLabel} · ${analysisLabel}`;
 
-  const statusText = {
+  const statusIcon = (() => {
+    if (item.status === "ready") {
+      if (fullyReady) return <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 mt-0.5" />;
+      if (preparing)  return <Spinner color="text-violet-400" />;
+      return <span className="text-amber-500 shrink-0 leading-none mt-0.5">⚠</span>; // prepFailed
+    }
+    return {
+      parsing:   <Spinner color="text-violet-400" />,
+      uploading: <Spinner color="text-violet-600" />,
+      duplicate: <span className="text-amber-500 shrink-0 leading-none mt-0.5">⚠</span>,
+      error:     <span className="text-red-400 shrink-0 leading-none mt-0.5">✕</span>,
+      done:      <span className="text-gray-300 shrink-0 leading-none mt-0.5">✓</span>,
+    }[item.status as Exclude<PdfStatus, "ready">];
+  })();
+
+  const readyText = (() => {
+    const stub = item.duplicateId && item.duplicateHasPdf === false;
+    if (fullyReady) {
+      return stub
+        ? "Reference exists without PDF — click to attach PDF"
+        : "Ready — click to review";
+    }
+    if (preparing) return `Preparing…${prepHint}`;
+    // prepFailed — clickable, but background precompute didn't fully complete.
+    return stub
+      ? `Reference exists without PDF — click to attach PDF${prepHint}`
+      : `Ready — click to review (background prep incomplete)${prepHint}`;
+  })();
+
+  const statusText = item.status === "ready" ? readyText : {
     parsing:   "Extracting metadata…",
     uploading: "Uploading…",
-    ready:     "Ready — click to review",
     duplicate: "Already in your library",
     error:     item.error ?? "Something went wrong",
     done:      "Added ✓",
-  }[item.status];
+  }[item.status as Exclude<PdfStatus, "ready">];
 
-  const statusColor = {
-    parsing:   "text-violet-400",
-    uploading: "text-violet-500",
-    ready:     "text-green-600",
-    duplicate: "text-amber-600",
-    error:     "text-red-500",
-    done:      "text-gray-300",
-  }[item.status];
+  const statusColor = item.status === "ready"
+    ? (fullyReady ? "text-green-600" : preparing ? "text-violet-400" : "text-amber-600")
+    : {
+        parsing:   "text-violet-400",
+        uploading: "text-violet-500",
+        duplicate: "text-amber-600",
+        error:     "text-red-500",
+        done:      "text-gray-300",
+      }[item.status as Exclude<PdfStatus, "ready">];
 
   return (
     <div
@@ -468,6 +765,17 @@ function QueueRow({
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-gray-800 truncate">{title}</p>
         <p className={`text-xs mt-0.5 ${statusColor}`}>{statusText}</p>
+        {item.duplicateId && item.duplicateHasPdf === false && (
+          <a
+            href={`/paper/${item.duplicateId}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-violet-600 hover:underline mt-0.5 inline-block"
+          >
+            Open existing reference →
+          </a>
+        )}
         {item.status === "duplicate" && item.duplicateId && (
           <a
             href={`/paper/${item.duplicateId}`}

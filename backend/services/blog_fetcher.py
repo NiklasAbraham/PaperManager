@@ -385,13 +385,13 @@ def _format_markdown_ollama(markdown: str) -> str:
     Light Ollama cleanup pass on already-structured markdown:
     - Converts ASCII/text math expressions to LaTeX ($...$ inline, $$...$$ block)
     - Fixes broken headings or paragraph merges from the HTML extractor
-    - Returns the input unchanged if Ollama is unavailable
+    - Returns the input unchanged if LiteLLM is unavailable
     """
     if not markdown or not markdown.strip():
         return ""
     try:
-        import ollama
-        from config import settings  # noqa: PLC0415
+        from services.litellm_client import chat_completion
+
         prompt = (
             "You are a markdown editor. The text below is already in markdown format.\n"
             "Your ONLY jobs are:\n"
@@ -403,12 +403,8 @@ def _format_markdown_ollama(markdown: str) -> str:
             "4. Output ONLY the corrected markdown — no preamble, no explanation.\n\n"
             f"Markdown:\n{markdown[:7000]}"
         )
-        result = ollama.chat(
-            model=settings.ollama_model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        out = result["message"]["content"].strip()
-        # Sanity-check: Ollama output must be at least half the length of input
+        out = chat_completion(messages=[{"role": "user", "content": prompt}])
+        # Sanity-check: model output must be at least half the length of input
         return out if len(out) > len(markdown) * 0.4 else markdown
     except Exception:
         return markdown  # fall back to the already-structured input

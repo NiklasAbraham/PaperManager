@@ -15,8 +15,8 @@ import type {
 import { useAppSettings } from "../contexts/SettingsContext";
 
 const CONTEXT_LIMIT = 200_000;
-type Model = "claude" | "claude-work" | "ollama";
-const MODEL_LABELS: Record<Model, string> = { claude: "Claude", "claude-work": "Claude (Work)", ollama: "Ollama" };
+type Model = "claude" | "claude-work" | "litellm";
+const MODEL_LABELS: Record<Model, string> = { claude: "Claude", "claude-work": "Claude (Work)", litellm: "Gemma (LiteLLM)" };
 
 // ── Context Bar ───────────────────────────────────────────────────────────────
 
@@ -148,7 +148,9 @@ export default function KnowledgeChat() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
-  const [model, setModel] = useState<Model>(settings.knowledgeChatDefaultModel);
+  const [model, setModel] = useState<Model>(
+    settings.knowledgeChatDefaultModel === "ollama" ? "litellm" : settings.knowledgeChatDefaultModel as Model
+  );
   const [useWeb, setUseWeb] = useState<boolean>(settings.knowledgeChatUseWeb);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -487,7 +489,7 @@ export default function KnowledgeChat() {
 
             {/* Model selector */}
             <div className="flex rounded-md border border-gray-700 overflow-hidden text-xs">
-              {(["claude", "claude-work", "ollama"] as Model[]).map((m) => (
+              {(["claude", "claude-work", "litellm"] as Model[]).map((m) => (
                 <button
                   key={m}
                   onClick={() => setModel(m)}

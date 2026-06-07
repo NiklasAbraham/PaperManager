@@ -156,6 +156,50 @@ async def test_upload_authors_and_topics_in_response():
     delete_paper(get_driver(), data["id"])
 
 
+@pytest.mark.asyncio
+async def test_upload_enriches_existing_stub_without_pdf_in_place():
+    meta = _make_mock_meta(doi=None, title="Existing Stub Title")
+    existing_stub = {
+        "id": "stub-1",
+        "title": "Existing Stub Title",
+        "doi": None,
+        "drive_file_id": None,
+        "metadata_source": "from-references",
+    }
+    updated_stub = {
+        "id": "stub-1",
+        "title": "Existing Stub Title",
+        "doi": None,
+        "drive_file_id": "drive-stub",
+    }
+
+    with patch("routers.papers.extract_metadata", return_value=meta), \
+         patch("routers.papers.upload_pdf", return_value="drive-stub"), \
+         patch("routers.papers.summarize_paper", return_value="Summary"), \
+         patch("routers.papers.find_duplicate", return_value=existing_stub), \
+         patch("routers.papers.update_paper", return_value=updated_stub) as mock_update, \
+         patch("routers.papers.create_paper") as mock_create, \
+         patch("routers.papers.merge_paper_by_doi") as mock_merge, \
+         patch("routers.papers.get_or_create_person", return_value={"id": "p", "name": "A"}), \
+         patch("routers.papers.link_author"), \
+         patch("routers.papers.get_or_create_topic", return_value={"id": "t", "name": "X"}), \
+         patch("routers.papers.link_paper_topic"):
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                "/papers/upload",
+                files={"file": ("test.pdf", FIXTURE.read_bytes(), "application/pdf")},
+            )
+
+    assert r.status_code == 201
+    data = r.json()
+    assert data["id"] == "stub-1"
+    assert data["drive_file_id"] == "drive-stub"
+    mock_update.assert_called_once()
+    mock_create.assert_not_called()
+    mock_merge.assert_not_called()
+
+
 # ── integration tests ─────────────────────────────────────────────────────────
 
 @pytest.mark.integration

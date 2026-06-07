@@ -94,16 +94,17 @@ def ask_user(name: str, body: AskBody):
     )
 
     try:
-        client = _personal_client()
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        from services.litellm_client import chat_completion
+
+        answer = chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             max_tokens=1024,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
         )
-        answer = response.content[0].text
     except Exception as exc:
-        log.error("Ask-user Claude call failed: %s", exc)
+        log.error("Ask-user LLM call failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"AI call failed: {exc}")
 
     return {"answer": answer, "message_count": len(messages)}
