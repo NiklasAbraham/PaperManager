@@ -50,6 +50,8 @@ class PaperOut(BaseModel):
     bookmarked: bool | None = None
     color: str | None = None
     document_type: str | None = None   # "paper" | "book" | "lecture_deck"
+    added_by: str | None = None
+    added_by_color: str | None = None
 
 
 # ── People ────────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ export interface Paper {
   color?: string;
   document_type?: "paper" | "book" | "lecture_deck";
   added_by?: string;
+  added_by_color?: string;
 }
 
 export interface StartupRole {
@@ -352,4 +353,3 @@ export interface Claim {
   text: string;
   type: "claim" | "hypothesis" | "finding" | "method" | "limitation";
 }
-

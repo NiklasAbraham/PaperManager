@@ -20,6 +20,17 @@ const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
   tag: "#d97706", project: "#db2777", note: "#6b7280", unknown: "#9ca3af",
 };
 
+function resolveUserColor(name?: string, explicitColor?: string): string {
+  if (explicitColor) return explicitColor;
+  if (!name?.trim()) return "#94a3b8";
+  const palette = [
+    "#7c3aed", "#2563eb", "#0d9488", "#ea580c", "#db2777",
+    "#16a34a", "#4f46e5", "#d97706", "#0891b2", "#be123c",
+  ];
+  const hash = [...name.trim().toLowerCase()].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return palette[hash % palette.length];
+}
+
 interface PaperFull extends Paper {
   authors?: Person[];
   topics?: Topic[];
@@ -758,6 +769,7 @@ export default function PaperDetail() {
     read: "✅ Read",
   };
   const currentStatus = paper.reading_status ?? "unread";
+  const uploaderColor = resolveUserColor(paper.added_by, paper.added_by_color);
 
   return (
     <div className="h-[calc(100vh-53px)] flex flex-col">
@@ -792,6 +804,19 @@ export default function PaperDetail() {
               </button>
             ))}
           </div>
+
+          {paper.added_by && (
+            <span
+              className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-white border border-gray-200 text-gray-600"
+              title={`Uploaded by ${paper.added_by}`}
+            >
+              <span
+                className="w-2 h-2 rounded-full border border-white/80 shrink-0"
+                style={{ backgroundColor: uploaderColor }}
+              />
+              {paper.added_by}
+            </span>
+          )}
 
           {/* Bookmark */}
           <button
