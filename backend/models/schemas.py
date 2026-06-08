@@ -163,6 +163,24 @@ class ProjectPaperLink(BaseModel):
     paper_id: str
 
 
+class ProjectMemberAdd(BaseModel):
+    username: str
+    role: Literal["read", "write", "admin"] = "read"
+
+
+class ProjectMemberUpdate(BaseModel):
+    role: Literal["read", "write", "admin"]
+
+
+class ProjectMemberOut(BaseModel):
+    username: str
+    user_id: str
+    color: str | None = None
+    role: str
+    joined_at: str
+    updated_at: str | None = None
+
+
 # ── Notes ─────────────────────────────────────────────────────────────────────
 
 class NoteBody(BaseModel):
