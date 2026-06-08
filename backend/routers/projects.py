@@ -315,6 +315,21 @@ def add_member(project_id: str, body: ProjectMemberAdd, current_user: str = Depe
         )
     
     member = add_project_member(get_driver(), project_id, body.username, body.role)
+    
+    # Log the action
+    from db.queries.audit_log import log_action
+    try:
+        log_action(
+            get_driver(),
+            current_user,
+            "add_member",
+            "project",
+            project_id,
+            {"added_user": body.username, "role": body.role}
+        )
+    except Exception:
+        pass  # Don't fail the request if logging fails
+    
     return ProjectMemberOut(**member)
 
 
@@ -376,6 +391,20 @@ def remove_member(project_id: str, username: str, current_user: str = Depends(ge
     
     if not remove_project_member(get_driver(), project_id, username):
         raise HTTPException(status_code=404, detail="Member not found in project")
+    
+    # Log the action
+    from db.queries.audit_log import log_action
+    try:
+        log_action(
+            get_driver(),
+            current_user,
+            "remove_member",
+            "project",
+            project_id,
+            {"removed_user": username}
+        )
+    except Exception:
+        pass  # Don't fail the request if logging fails
 
 
 @router.get("/my-projects", response_model=list[ProjectOut])
