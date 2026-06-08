@@ -146,7 +146,8 @@ def get_paper(driver: Driver, paper_id: str) -> dict | None:
             """
             MATCH (p:Paper {id: $id})
             OPTIONAL MATCH (u:User)-[:ADDED]->(p)
-            RETURN p, u.name AS added_by
+            WITH p, head(collect(u)) AS added_user
+            RETURN p, added_user.name AS added_by, added_user.color AS added_by_color
             """,
             id=paper_id,
         )
@@ -155,6 +156,7 @@ def get_paper(driver: Driver, paper_id: str) -> dict | None:
             return None
         d = dict(record["p"])
         d["added_by"] = record["added_by"]
+        d["added_by_color"] = record["added_by_color"]
         return d
 
 
@@ -164,12 +166,21 @@ def list_papers(driver: Driver, skip: int = 0, limit: int = 10000) -> list[dict]
             """
             MATCH (p:Paper)
             WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
-            RETURN p ORDER BY p.created_at DESC SKIP $skip LIMIT $limit
+            OPTIONAL MATCH (u:User)-[:ADDED]->(p)
+            WITH p, head(collect(u)) AS added_user
+            RETURN p, added_user.name AS added_by, added_user.color AS added_by_color
+            ORDER BY p.created_at DESC SKIP $skip LIMIT $limit
             """,
             skip=skip,
             limit=limit,
         )
-        return [dict(r["p"]) for r in result]
+        rows: list[dict] = []
+        for r in result:
+            d = dict(r["p"])
+            d["added_by"] = r["added_by"]
+            d["added_by_color"] = r["added_by_color"]
+            rows.append(d)
+        return rows
 
 
 def update_paper(driver: Driver, paper_id: str, data: dict) -> dict | None:

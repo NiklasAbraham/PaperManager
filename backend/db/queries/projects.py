@@ -89,10 +89,22 @@ def remove_paper_from_project(driver: Driver, paper_id: str, project_id: str):
 def get_project_papers(driver: Driver, project_id: str) -> list[dict]:
     with driver.session() as session:
         result = session.run(
-            "MATCH (p:Paper)-[:IN_PROJECT]->(proj:Project {id: $id}) RETURN p ORDER BY p.created_at DESC",
+            """
+            MATCH (p:Paper)-[:IN_PROJECT]->(proj:Project {id: $id})
+            OPTIONAL MATCH (u:User)-[:ADDED]->(p)
+            WITH p, head(collect(u)) AS added_user
+            RETURN p, added_user.name AS added_by, added_user.color AS added_by_color
+            ORDER BY p.created_at DESC
+            """,
             id=project_id,
         )
-        return [dict(r["p"]) for r in result]
+        rows: list[dict] = []
+        for r in result:
+            d = dict(r["p"])
+            d["added_by"] = r["added_by"]
+            d["added_by_color"] = r["added_by_color"]
+            rows.append(d)
+        return rows
 
 
 def link_projects(driver: Driver, project_a_id: str, project_b_id: str):

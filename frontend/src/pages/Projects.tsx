@@ -18,6 +18,7 @@ const STATUS_COLORS: Record<string, string> = {
 interface PaperRow {
   id: string; title: string; year?: number; doi?: string;
   authors?: string[]; abstract?: string; metadata_source?: string;
+  added_by?: string; added_by_color?: string;
 }
 
 interface ProjectDetail {
@@ -573,6 +574,15 @@ export default function Projects() {
                                   {(paper.authors ?? []).slice(0, 3).join(", ")}{(paper.authors ?? []).length > 3 ? " …" : ""}
                                 </span>
                               )}
+                              {paper.added_by && (
+                                <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-500">
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                                    style={{ backgroundColor: resolveUserColor(paper.added_by, paper.added_by_color) }}
+                                  />
+                                  {paper.added_by}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <button
@@ -732,4 +742,15 @@ export default function Projects() {
       )}
     </div>
   );
+}
+
+function resolveUserColor(name?: string, explicitColor?: string): string {
+  if (explicitColor) return explicitColor;
+  if (!name?.trim()) return "#94a3b8";
+  const palette = [
+    "#7c3aed", "#2563eb", "#0d9488", "#ea580c", "#db2777",
+    "#16a34a", "#4f46e5", "#d97706", "#0891b2", "#be123c",
+  ];
+  const hash = [...name.trim().toLowerCase()].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return palette[hash % palette.length];
 }
