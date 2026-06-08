@@ -7,6 +7,7 @@ import {
   projectBibtexUrl, projectCsvUrl, projectConversationsUrl, addPaperToProject, apiFetch,
 } from "../api/client";
 import ResearchGapPanel from "../components/ResearchGapPanel";
+import ProjectMembers from "../components/ProjectMembers";
 
 const STATUS_OPTIONS = ["active", "paused", "done"] as const;
 const STATUS_COLORS: Record<string, string> = {
@@ -26,7 +27,7 @@ interface ProjectDetail {
   papers: PaperRow[];
 }
 
-type DetailTab = "papers" | "note" | "keywords" | "stats";
+type DetailTab = "papers" | "note" | "keywords" | "members" | "stats";
 
 export default function Projects() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -493,7 +494,7 @@ export default function Projects() {
 
             {/* Tab bar */}
             <div className="bg-white border-b border-gray-100 px-8 flex items-center gap-1">
-              {(["papers", "note", "keywords", "stats"] as DetailTab[]).map((t) => (
+              {(["papers", "members", "note", "keywords", "stats"] as DetailTab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => setDetailTab(t)}
@@ -501,7 +502,7 @@ export default function Projects() {
                     detailTab === t ? "border-violet-600 text-violet-600" : "border-transparent text-gray-500 hover:text-gray-700"
                   }`}
                 >
-                  {t === "papers" ? `Papers (${selected.papers.length})` : t === "note" ? "Notes" : t === "keywords" ? "Keywords" : "Stats"}
+                  {t === "papers" ? `Papers (${selected.papers.length})` : t === "note" ? "Notes" : t === "keywords" ? "Keywords" : t === "members" ? "Members" : "Stats"}
                 </button>
               ))}
             </div>
@@ -638,6 +639,17 @@ export default function Projects() {
                   <p className="text-[10px] text-gray-400 mt-2">
                     {kwText.split("\n").filter(l => l.trim() && !l.trim().startsWith("#")).length} active keyword(s)
                   </p>
+                </div>
+              )}
+
+              {/* ── Members tab ── */}
+              {detailTab === "members" && (
+                <div className="max-w-3xl mx-auto px-8 py-6">
+                  <ProjectMembers
+                    projectId={selected.id}
+                    currentUser={localStorage.getItem("pm_username") || ""}
+                    userRole={undefined}
+                  />
                 </div>
               )}
 
