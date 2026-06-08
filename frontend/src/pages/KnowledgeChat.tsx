@@ -9,8 +9,8 @@ import {
   apiFetch,
 } from "../api/client";
 import type {
-  Conversation, KnowledgeMessage, ContextPaper, TokenTotals, SseEvent,
-  Tag, Topic, Project, Paper,
+  Conversation, ContextPaper, TokenTotals,
+  Tag, Topic, Paper,
 } from "../types";
 import { useAppSettings } from "../contexts/SettingsContext";
 
@@ -238,6 +238,26 @@ export default function KnowledgeChat() {
     const mentionValue = needsQuoting ? `"${opt.value.replace(/"/g, "'")}"` : opt.value;
     const replaced = before.replace(/@[\w:]*$/, `@${opt.type}:${mentionValue} `);
     setInput(replaced + after);
+    setMentionDropdown([]);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  const quotedProject = allProjects[0]
+    ? (/[\s,:@]/.test(allProjects[0]) ? `"${allProjects[0].replace(/"/g, "'")}"` : allProjects[0])
+    : "my-project";
+  const starterPrompts = [
+    { label: "Project summary", text: `@project:${quotedProject} Give me a concise summary of this project.` },
+    { label: "Paper summary", text: `@project:${quotedProject} Summarise the most important paper in this project and why it matters.` },
+    { label: "Broad analysis", text: `@project:${quotedProject} Give me a broad analysis of this project, including strengths and weaknesses.` },
+    { label: "Critical questions", text: `@project:${quotedProject} List the most critical unanswered questions for this project.` },
+    { label: "Method comparison", text: `@project:${quotedProject} Compare the main methods used across this project.` },
+    { label: "Research gaps", text: `@project:${quotedProject} Identify the biggest research gaps and open problems.` },
+    { label: "Next experiments", text: `@project:${quotedProject} Propose the next experiments or analyses we should run.` },
+    { label: "Risk review", text: `@project:${quotedProject} What are the major risks or failure points in this project?` },
+    { label: "Action plan", text: `@project:${quotedProject} Create a practical action plan with priorities for the next two weeks.` },
+  ];
+  const applyStarterPrompt = (text: string) => {
+    setInput(text);
     setMentionDropdown([]);
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
@@ -520,6 +540,20 @@ export default function KnowledgeChat() {
                 <p className="text-gray-700 text-xs mt-2 max-w-sm">
                   Try: <span className="text-violet-400">@tag:drug-discovery what methods are used?</span> or <span className="text-pink-400">@user:Alice what has she been thinking about?</span>
                 </p>
+                <div className="mt-4 w-full max-w-3xl">
+                  <p className="text-[11px] text-gray-500 mb-2 uppercase tracking-wide">Project prompt starters</p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {starterPrompts.map((p) => (
+                      <button
+                        key={p.label}
+                        onClick={() => applyStarterPrompt(p.text)}
+                        className="px-2.5 py-1.5 rounded-md border border-gray-700 bg-gray-800 text-gray-200 text-xs hover:bg-gray-700 transition-colors"
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
