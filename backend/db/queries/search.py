@@ -58,6 +58,7 @@ def _fulltext_search(
 ) -> list[dict]:
     """Search paper_search and note_search fulltext indexes, merge, deduplicate."""
     seen: dict[str, dict] = {}
+    fetch_limit = max(skip + limit, limit)
 
     # Paper-level index
     with driver.session() as session:
@@ -78,20 +79,15 @@ def _fulltext_search(
             RETURN p, score, "paper" AS matched_in,
                    added_user.name AS added_by, added_user.color AS added_by_color
             ORDER BY score DESC
-            SKIP $skip LIMIT $limit
+            SKIP 0 LIMIT $limit
             """,
             q=q, tag=tag, topic=topic, pid=project_id, person=person_id,
             year_min=year_min, year_max=year_max,
             status=reading_status, bookmarked=bookmarked,
-            skip=skip, limit=limit,
+            limit=fetch_limit,
         )
         for r in result:
-            d = dict(r["p"])
-            d["score"] = r["score"]
-            d["matched_in"] = r["matched_in"]
-            d["added_by"] = r["added_by"]
-            d["added_by_color"] = r["added_by_color"]
-            seen[d["id"]] = d
+            _merge_hit(seen, r)
 
     # Note-level index — find papers via HAS_NOTE
     with driver.session() as session:
@@ -113,24 +109,43 @@ def _fulltext_search(
             RETURN p, score, "note" AS matched_in,
                    added_user.name AS added_by, added_user.color AS added_by_color
             ORDER BY score DESC
-            SKIP $skip LIMIT $limit
+            SKIP 0 LIMIT $limit
             """,
             q=q, tag=tag, topic=topic, pid=project_id, person=person_id,
             year_min=year_min, year_max=year_max,
             status=reading_status, bookmarked=bookmarked,
-            skip=skip, limit=limit,
+            limit=fetch_limit,
         )
         for r in result:
-            paper_id = r["p"]["id"]
-            if paper_id not in seen:
-                d = dict(r["p"])
-                d["score"] = r["score"]
-                d["matched_in"] = r["matched_in"]
-                d["added_by"] = r["added_by"]
-                d["added_by_color"] = r["added_by_color"]
-                seen[paper_id] = d
+            _merge_hit(seen, r)
 
-    return sorted(seen.values(), key=lambda x: x.get("score", 0), reverse=True)
+    rows = []
+    for row in seen.values():
+        sources = sorted(row.pop("_matched_in", []))
+        row["matched_in"] = "+".join(sources) if sources else "paper"
+        rows.append(row)
+    rows.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return rows[skip: skip + limit]
+
+
+def _merge_hit(seen: dict[str, dict], row: dict) -> None:
+    """Merge one full-text hit into the deduplicated result map."""
+    paper = dict(row["p"])
+    paper_id = paper["id"]
+    score = row["score"]
+    matched_in = row["matched_in"]
+
+    existing = seen.get(paper_id)
+    if not existing:
+        paper["score"] = score
+        paper["_matched_in"] = {matched_in}
+        seen[paper_id] = paper
+        return
+
+    existing["_matched_in"].add(matched_in)
+    if score > existing.get("score", 0):
+        existing.update(paper)
+        existing["score"] = score
 
 
 def _filter_search(
