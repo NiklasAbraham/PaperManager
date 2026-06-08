@@ -50,6 +50,8 @@ class PaperOut(BaseModel):
     bookmarked: bool | None = None
     color: str | None = None
     document_type: str | None = None   # "paper" | "book" | "lecture_deck"
+    added_by: str | None = None
+    added_by_color: str | None = None
 
 
 # ── People ────────────────────────────────────────────────────────────────────
@@ -159,6 +161,24 @@ class ProjectOut(BaseModel):
 
 class ProjectPaperLink(BaseModel):
     paper_id: str
+
+
+class ProjectMemberAdd(BaseModel):
+    username: str
+    role: Literal["read", "write", "admin"] = "read"
+
+
+class ProjectMemberUpdate(BaseModel):
+    role: Literal["read", "write", "admin"]
+
+
+class ProjectMemberOut(BaseModel):
+    username: str
+    user_id: str
+    color: str | None = None
+    role: str
+    joined_at: str
+    updated_at: str | None = None
 
 
 # ── Notes ─────────────────────────────────────────────────────────────────────

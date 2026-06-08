@@ -14,6 +14,7 @@ import Teammates from "./pages/Teammates"; // page kept for direct navigation; n
 import Venues from "./pages/Venues";
 import MergeManager from "./pages/MergeManager";
 import Login from "./pages/Login";
+import AdminConsole from "./pages/AdminConsole";
 import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 import { UserProvider } from "./contexts/UserContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -53,6 +54,7 @@ function NavBar() {
       <NavLink to="/discover" className={cls}>Discover</NavLink>
       <NavLink to="/literature" className={cls}>Literature</NavLink>
       <NavLink to="/blogs" className={cls}>Blogs</NavLink>
+      <NavLink to="/admin" className={cls}>Admin</NavLink>
       <NavLink to="/settings" className={cls}>Settings</NavLink>
       <div className="ml-auto flex items-center gap-2">
         <button
@@ -128,6 +130,7 @@ function AppLayout() {
                 <Route path="/blogs" element={<Blogs />} />
                 <Route path="/teammates" element={<Teammates />} />
                 <Route path="/blogs/posts/:postId" element={<BlogPostDetail />} />
+                <Route path="/admin" element={<AdminConsole />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/merge" element={<MergeManager />} />
               </Routes>

@@ -74,7 +74,10 @@ def _fulltext_search(
               AND ($year_max IS NULL  OR p.year <= $year_max)
               AND ($status IS NULL    OR p.reading_status = $status)
               AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
-            RETURN p, score, "paper" AS matched_in
+            OPTIONAL MATCH (u:User)-[:ADDED]->(p)
+            WITH p, score, head(collect(u)) AS added_user
+            RETURN p, score, "paper" AS matched_in,
+                   added_user.name AS added_by, added_user.color AS added_by_color
             ORDER BY score DESC
             SKIP 0 LIMIT $limit
             """,
@@ -101,7 +104,10 @@ def _fulltext_search(
               AND ($year_max IS NULL  OR p.year <= $year_max)
               AND ($status IS NULL    OR p.reading_status = $status)
               AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
-            RETURN p, score, "note" AS matched_in
+            OPTIONAL MATCH (u:User)-[:ADDED]->(p)
+            WITH p, score, head(collect(u)) AS added_user
+            RETURN p, score, "note" AS matched_in,
+                   added_user.name AS added_by, added_user.color AS added_by_color
             ORDER BY score DESC
             SKIP 0 LIMIT $limit
             """,
@@ -168,7 +174,10 @@ def _filter_search(
               AND ($year_max IS NULL  OR p.year <= $year_max)
               AND ($status IS NULL    OR p.reading_status = $status)
               AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
-            RETURN p, 0.0 AS score, "filter" AS matched_in
+            OPTIONAL MATCH (u:User)-[:ADDED]->(p)
+            WITH p, head(collect(u)) AS added_user
+            RETURN p, 0.0 AS score, "filter" AS matched_in,
+                   added_user.name AS added_by, added_user.color AS added_by_color
             ORDER BY p.created_at DESC
             SKIP $skip LIMIT $limit
             """,
@@ -182,5 +191,7 @@ def _filter_search(
             d = dict(r["p"])
             d["score"] = r["score"]
             d["matched_in"] = r["matched_in"]
+            d["added_by"] = r["added_by"]
+            d["added_by_color"] = r["added_by_color"]
             rows.append(d)
         return rows

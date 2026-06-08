@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
 from db.connection import get_driver
@@ -6,9 +6,14 @@ from db.queries.projects import (
     create_project, get_project, list_projects, update_project,
     delete_project, add_paper_to_project, remove_paper_from_project,
     get_project_papers, link_projects,
+    add_project_member, remove_project_member, get_project_members, get_user_project_role, list_user_projects,
 )
 from db.queries.conversations import list_paper_conversations, get_messages
-from models.schemas import ProjectCreate, ProjectUpdate, ProjectOut, ProjectPaperLink
+from models.schemas import (
+    ProjectCreate, ProjectUpdate, ProjectOut, ProjectPaperLink,
+    ProjectMemberAdd, ProjectMemberUpdate, ProjectMemberOut,
+)
+from services.auth import get_current_user
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -286,3 +291,124 @@ def export_csv(project_id: str):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={slug}.csv"},
     )
+
+
+# ── Project Membership ────────────────────────────────────────────────────────
+
+
+@router.post("/{project_id}/members", response_model=ProjectMemberOut, status_code=status.HTTP_201_CREATED)
+def add_member(project_id: str, body: ProjectMemberAdd, current_user: str = Depends(get_current_user)):
+    """Add a user to a project with a specific role (read/write/admin)."""
+    # Check if project exists
+    if not get_project(get_driver(), project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Check if current user is admin of the project or is admin user
+    from db.queries.users import is_user_admin
+    user_role = get_user_project_role(get_driver(), project_id, current_user)
+    is_admin_user = is_user_admin(get_driver(), current_user)
+    
+    if user_role != "admin" and not is_admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only project admins can add members"
+        )
+    
+    member = add_project_member(get_driver(), project_id, body.username, body.role)
+    
+    # Log the action
+    from db.queries.audit_log import log_action
+    try:
+        log_action(
+            get_driver(),
+            current_user,
+            "add_member",
+            "project",
+            project_id,
+            {"added_user": body.username, "role": body.role}
+        )
+    except Exception:
+        pass  # Don't fail the request if logging fails
+    
+    return ProjectMemberOut(**member)
+
+
+@router.get("/{project_id}/members", response_model=list[ProjectMemberOut])
+def list_members(project_id: str, current_user: str = Depends(get_current_user)):
+    """List all members of a project."""
+    # Check if project exists
+    if not get_project(get_driver(), project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    members = get_project_members(get_driver(), project_id)
+    return [ProjectMemberOut(**m) for m in members]
+
+
+@router.patch("/{project_id}/members/{username}", response_model=ProjectMemberOut)
+def update_member_role(
+    project_id: str,
+    username: str,
+    body: ProjectMemberUpdate,
+    current_user: str = Depends(get_current_user)
+):
+    """Update a member's role in a project."""
+    # Check if project exists
+    if not get_project(get_driver(), project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Check if current user is admin of the project or is admin user
+    from db.queries.users import is_user_admin
+    user_role = get_user_project_role(get_driver(), project_id, current_user)
+    is_admin_user = is_user_admin(get_driver(), current_user)
+    
+    if user_role != "admin" and not is_admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only project admins can update member roles"
+        )
+    
+    member = add_project_member(get_driver(), project_id, username, body.role)
+    return ProjectMemberOut(**member)
+
+
+@router.delete("/{project_id}/members/{username}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_member(project_id: str, username: str, current_user: str = Depends(get_current_user)):
+    """Remove a member from a project."""
+    # Check if project exists
+    if not get_project(get_driver(), project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Check if current user is admin of the project or is admin user
+    from db.queries.users import is_user_admin
+    user_role = get_user_project_role(get_driver(), project_id, current_user)
+    is_admin_user = is_user_admin(get_driver(), current_user)
+    
+    if user_role != "admin" and not is_admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only project admins can remove members"
+        )
+    
+    if not remove_project_member(get_driver(), project_id, username):
+        raise HTTPException(status_code=404, detail="Member not found in project")
+    
+    # Log the action
+    from db.queries.audit_log import log_action
+    try:
+        log_action(
+            get_driver(),
+            current_user,
+            "remove_member",
+            "project",
+            project_id,
+            {"removed_user": username}
+        )
+    except Exception:
+        pass  # Don't fail the request if logging fails
+
+
+@router.get("/my-projects", response_model=list[ProjectOut])
+def get_my_projects(current_user: str = Depends(get_current_user)):
+    """Get all projects the current user is a member of."""
+    projects = list_user_projects(get_driver(), current_user)
+    return [ProjectOut(**p) for p in projects]
