@@ -10,6 +10,7 @@ from db.connection import get_driver
 from db.queries.papers import create_paper, delete_paper
 from db.queries.tags import get_or_create_tag, tag_paper
 from db.queries.topics import get_or_create_topic, link_paper_topic
+from db.queries.search import _fulltext_search
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -146,3 +147,86 @@ async def test_search_note_content(three_papers):
 
     ids = [x["id"] for x in r.json()["results"]]
     assert p3["id"] in ids
+
+
+class _FakeSession:
+    def __init__(self, rows, calls):
+        self.rows = rows
+        self.calls = calls
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def run(self, query, **params):
+        self.calls.append(params)
+        if '"paper_search"' in query:
+            return self.rows["paper"]
+        if '"note_search"' in query:
+            return self.rows["note"]
+        raise AssertionError("Unexpected query")
+
+
+class _FakeDriver:
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+
+    def session(self):
+        return _FakeSession(self.rows, self.calls)
+
+
+def test_fulltext_search_merges_duplicates_and_keeps_best_score():
+    driver = _FakeDriver({
+        "paper": [{"p": {"id": "p1", "title": "Paper hit"}, "score": 1.0, "matched_in": "paper"}],
+        "note": [{"p": {"id": "p1", "title": "Note hit"}, "score": 4.5, "matched_in": "note"}],
+    })
+
+    result = _fulltext_search(
+        driver=driver,
+        q="hit",
+        tag=None,
+        topic=None,
+        project_id=None,
+        person_id=None,
+        year_min=None,
+        year_max=None,
+        reading_status=None,
+        bookmarked=None,
+        skip=0,
+        limit=10,
+    )
+
+    assert len(result) == 1
+    assert result[0]["id"] == "p1"
+    assert result[0]["score"] == 4.5
+    assert result[0]["title"] == "Note hit"
+    assert result[0]["matched_in"] == "note+paper"
+
+
+def test_fulltext_search_applies_pagination_after_merge():
+    driver = _FakeDriver({
+        "paper": [{"p": {"id": "p1", "title": "Top"}, "score": 10.0, "matched_in": "paper"}],
+        "note": [{"p": {"id": "p2", "title": "Second"}, "score": 9.0, "matched_in": "note"}],
+    })
+
+    result = _fulltext_search(
+        driver=driver,
+        q="hit",
+        tag=None,
+        topic=None,
+        project_id=None,
+        person_id=None,
+        year_min=None,
+        year_max=None,
+        reading_status=None,
+        bookmarked=None,
+        skip=1,
+        limit=1,
+    )
+
+    assert len(result) == 1
+    assert result[0]["id"] == "p2"
+    assert all(call["limit"] == 2 for call in driver.calls)
