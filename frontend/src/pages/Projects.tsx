@@ -7,6 +7,7 @@ import {
   projectBibtexUrl, projectCsvUrl, projectConversationsUrl, addPaperToProject, apiFetch,
 } from "../api/client";
 import ResearchGapPanel from "../components/ResearchGapPanel";
+import ProjectMembers from "../components/ProjectMembers";
 
 const STATUS_OPTIONS = ["active", "paused", "done"] as const;
 const STATUS_COLORS: Record<string, string> = {
@@ -18,6 +19,7 @@ const STATUS_COLORS: Record<string, string> = {
 interface PaperRow {
   id: string; title: string; year?: number; doi?: string;
   authors?: string[]; abstract?: string; metadata_source?: string;
+  added_by?: string; added_by_color?: string;
 }
 
 interface ProjectDetail {
@@ -25,7 +27,7 @@ interface ProjectDetail {
   papers: PaperRow[];
 }
 
-type DetailTab = "papers" | "note" | "keywords" | "stats";
+type DetailTab = "papers" | "note" | "keywords" | "members" | "stats";
 
 export default function Projects() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -492,7 +494,7 @@ export default function Projects() {
 
             {/* Tab bar */}
             <div className="bg-white border-b border-gray-100 px-8 flex items-center gap-1">
-              {(["papers", "note", "keywords", "stats"] as DetailTab[]).map((t) => (
+              {(["papers", "members", "note", "keywords", "stats"] as DetailTab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => setDetailTab(t)}
@@ -500,7 +502,7 @@ export default function Projects() {
                     detailTab === t ? "border-violet-600 text-violet-600" : "border-transparent text-gray-500 hover:text-gray-700"
                   }`}
                 >
-                  {t === "papers" ? `Papers (${selected.papers.length})` : t === "note" ? "Notes" : t === "keywords" ? "Keywords" : "Stats"}
+                  {t === "papers" ? `Papers (${selected.papers.length})` : t === "note" ? "Notes" : t === "keywords" ? "Keywords" : t === "members" ? "Members" : "Stats"}
                 </button>
               ))}
             </div>
@@ -573,6 +575,15 @@ export default function Projects() {
                                   {(paper.authors ?? []).slice(0, 3).join(", ")}{(paper.authors ?? []).length > 3 ? " …" : ""}
                                 </span>
                               )}
+                              {paper.added_by && (
+                                <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-500">
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                                    style={{ backgroundColor: resolveUserColor(paper.added_by, paper.added_by_color) }}
+                                  />
+                                  {paper.added_by}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <button
@@ -628,6 +639,17 @@ export default function Projects() {
                   <p className="text-[10px] text-gray-400 mt-2">
                     {kwText.split("\n").filter(l => l.trim() && !l.trim().startsWith("#")).length} active keyword(s)
                   </p>
+                </div>
+              )}
+
+              {/* ── Members tab ── */}
+              {detailTab === "members" && (
+                <div className="max-w-3xl mx-auto px-8 py-6">
+                  <ProjectMembers
+                    projectId={selected.id}
+                    currentUser={localStorage.getItem("pm_username") || ""}
+                    userRole={undefined}
+                  />
                 </div>
               )}
 
@@ -732,4 +754,15 @@ export default function Projects() {
       )}
     </div>
   );
+}
+
+function resolveUserColor(name?: string, explicitColor?: string): string {
+  if (explicitColor) return explicitColor;
+  if (!name?.trim()) return "#94a3b8";
+  const palette = [
+    "#7c3aed", "#2563eb", "#0d9488", "#ea580c", "#db2777",
+    "#16a34a", "#4f46e5", "#d97706", "#0891b2", "#be123c",
+  ];
+  const hash = [...name.trim().toLowerCase()].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return palette[hash % palette.length];
 }

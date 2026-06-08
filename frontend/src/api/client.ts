@@ -607,6 +607,46 @@ export async function saveProjectKeywords(projectId: string, content: string): P
   });
 }
 
+// Project Membership
+export interface ProjectMember {
+  username: string;
+  user_id: string;
+  color?: string;
+  role: "read" | "write" | "admin";
+  joined_at: string;
+  updated_at?: string;
+}
+
+export async function getProjectMembers(projectId: string): Promise<ProjectMember[]> {
+  return apiFetch(`/projects/${projectId}/members`);
+}
+
+export async function addProjectMember(projectId: string, username: string, role: "read" | "write" | "admin" = "read"): Promise<ProjectMember> {
+  return apiFetch(`/projects/${projectId}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, role }),
+  });
+}
+
+export async function updateProjectMemberRole(projectId: string, username: string, role: "read" | "write" | "admin"): Promise<ProjectMember> {
+  return apiFetch(`/projects/${projectId}/members/${encodeURIComponent(username)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeProjectMember(projectId: string, username: string): Promise<void> {
+  return apiFetch(`/projects/${projectId}/members/${encodeURIComponent(username)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function getMyProjects(): Promise<{id: string; name: string; description?: string; status?: string; role: string}[]> {
+  return apiFetch("/projects/my-projects");
+}
+
 export function projectBibtexUrl(projectId: string): string {
   return `${BASE}/projects/${projectId}/export/bibtex`;
 }
