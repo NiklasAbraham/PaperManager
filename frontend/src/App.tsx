@@ -19,7 +19,6 @@ import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 import { UserProvider } from "./contexts/UserContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
-import UserPicker from "./components/UserPicker";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
 const Graph         = lazy(() => import("./pages/Graph"));
@@ -71,7 +70,6 @@ function NavBar() {
           </svg>
           {settings.debugMode && <span>DEBUG</span>}
         </button>
-        <UserPicker />
         <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-300">
           <span className="text-sm text-gray-600">
             {username}

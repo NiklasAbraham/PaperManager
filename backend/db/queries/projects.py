@@ -29,14 +29,19 @@ def get_project(driver: Driver, project_id: str) -> dict | None:
 
 
 def list_projects(driver: Driver) -> list[dict]:
+    from db.queries.visibility import project_visibility_clause
+
+    vis_clause, vis_params = project_visibility_clause("proj")
     with driver.session() as session:
         result = session.run(
-            """
+            f"""
             MATCH (proj:Project)
+            WHERE {vis_clause}
             OPTIONAL MATCH (p:Paper)-[:IN_PROJECT]->(proj)
             RETURN proj, count(p) AS paper_count
             ORDER BY proj.created_at DESC
-            """
+            """,
+            **vis_params,
         )
         return [{**dict(r["proj"]), "paper_count": r["paper_count"]} for r in result]
 
@@ -134,10 +139,11 @@ def add_project_member(driver: Driver, project_id: str, user_name: str, role: st
             MATCH (proj:Project {id: $pid})
             MERGE (u:User {name: $name})
             ON CREATE SET u.id = $uid, u.created_at = $now
+            SET u.id = coalesce(u.id, $uid)
             MERGE (u)-[m:MEMBER_OF]->(proj)
             ON CREATE SET m.role = $role, m.joined_at = $now
             ON MATCH SET m.role = $role, m.updated_at = $now
-            RETURN m, u.name AS username
+            RETURN m, u.name AS username, u.id AS user_id, u.color AS color
             """,
             pid=project_id,
             name=user_name,
@@ -150,6 +156,8 @@ def add_project_member(driver: Driver, project_id: str, user_name: str, role: st
             raise ValueError("Project not found")
         rel = dict(rec["m"])
         rel["username"] = rec["username"]
+        rel["user_id"] = rec["user_id"]
+        rel["color"] = rec["color"]
         return rel
 
 

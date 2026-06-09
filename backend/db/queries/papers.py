@@ -161,11 +161,15 @@ def get_paper(driver: Driver, paper_id: str) -> dict | None:
 
 
 def list_papers(driver: Driver, skip: int = 0, limit: int = 10000) -> list[dict]:
+    from db.queries.visibility import paper_visibility_clause
+
+    vis_clause, vis_params = paper_visibility_clause("p")
     with driver.session() as session:
         result = session.run(
-            """
+            f"""
             MATCH (p:Paper)
-            WHERE NOT (p)-[:TAGGED]->(:Tag {name: 'from-references'})
+            WHERE NOT (p)-[:TAGGED]->(:Tag {{name: 'from-references'}})
+              AND {vis_clause}
             OPTIONAL MATCH (u:User)-[:ADDED]->(p)
             WITH p, head(collect(u)) AS added_user
             RETURN p, added_user.name AS added_by, added_user.color AS added_by_color
@@ -173,6 +177,7 @@ def list_papers(driver: Driver, skip: int = 0, limit: int = 10000) -> list[dict]
             """,
             skip=skip,
             limit=limit,
+            **vis_params,
         )
         rows: list[dict] = []
         for r in result:
@@ -210,26 +215,33 @@ def delete_paper(driver: Driver, paper_id: str) -> bool:
 
 def random_paper(driver: Driver, reading_status: str | None = None) -> dict | None:
     """Return a single random Paper node, optionally filtered by reading_status."""
+    from db.queries.visibility import paper_visibility_clause
+
+    vis_clause, vis_params = paper_visibility_clause("p")
     with driver.session() as session:
         if reading_status:
             result = session.run(
-                """
+                f"""
                 MATCH (p:Paper)
                 WHERE p.reading_status = $status
-                  AND NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
+                  AND NOT ((p)-[:TAGGED]->(:Tag {{name: 'from-references'}}) AND p.drive_file_id IS NULL)
+                  AND {vis_clause}
                 WITH p, rand() AS r ORDER BY r LIMIT 1
                 RETURN p
                 """,
                 status=reading_status,
+                **vis_params,
             )
         else:
             result = session.run(
-                """
+                f"""
                 MATCH (p:Paper)
-                WHERE NOT ((p)-[:TAGGED]->(:Tag {name: 'from-references'}) AND p.drive_file_id IS NULL)
+                WHERE NOT ((p)-[:TAGGED]->(:Tag {{name: 'from-references'}}) AND p.drive_file_id IS NULL)
+                  AND {vis_clause}
                 WITH p, rand() AS r ORDER BY r LIMIT 1
                 RETURN p
-                """
+                """,
+                **vis_params,
             )
         record = result.single()
         return dict(record["p"]) if record else None

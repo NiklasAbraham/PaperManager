@@ -42,10 +42,15 @@ def list_all():
 
 @router.get("/{project_id}")
 def get_one(project_id: str):
-    project = get_project(get_driver(), project_id)
+    from db.queries.visibility import can_see_project
+
+    driver = get_driver()
+    project = get_project(driver, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    papers = get_project_papers(get_driver(), project_id)
+    if not can_see_project(driver, project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    papers = get_project_papers(driver, project_id)
     return {**project, "papers": papers}
 
 
