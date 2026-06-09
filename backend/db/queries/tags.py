@@ -114,9 +114,14 @@ def get_tags_for_person(driver: Driver, person_id: str) -> list[dict]:
 
 
 def papers_by_tag(driver: Driver, tag_name: str) -> list[dict]:
+    from db.queries.visibility import paper_visibility_clause
+
+    vis_clause, vis_params = paper_visibility_clause("p")
     with driver.session() as session:
         result = session.run(
-            "MATCH (p:Paper)-[:TAGGED]->(t:Tag {name: $name}) RETURN p ORDER BY p.created_at DESC",
+            f"MATCH (p:Paper)-[:TAGGED]->(t:Tag {{name: $name}}) "
+            f"WHERE {vis_clause} RETURN p ORDER BY p.created_at DESC",
             name=tag_name,
+            **vis_params,
         )
         return [dict(r["p"]) for r in result]

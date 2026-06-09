@@ -57,23 +57,27 @@ def _fulltext_search(
     limit: int,
 ) -> list[dict]:
     """Search paper_search and note_search fulltext indexes, merge, deduplicate."""
+    from db.queries.visibility import paper_visibility_clause
+
+    vis_clause, vis_params = paper_visibility_clause("p")
     seen: dict[str, dict] = {}
     fetch_limit = max(skip + limit, limit)
 
     # Paper-level index
     with driver.session() as session:
         result = session.run(
-            """
+            f"""
             CALL db.index.fulltext.queryNodes("paper_search", $q)
             YIELD node AS p, score
-            WHERE ($tag IS NULL       OR (p)-[:TAGGED]->(:Tag {name: $tag}))
-              AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {name: $topic}))
-              AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {id: $pid}))
-              AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {id: $person}))
+            WHERE ($tag IS NULL       OR (p)-[:TAGGED]->(:Tag {{name: $tag}}))
+              AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {{name: $topic}}))
+              AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {{id: $pid}}))
+              AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {{id: $person}}))
               AND ($year_min IS NULL  OR p.year >= $year_min)
               AND ($year_max IS NULL  OR p.year <= $year_max)
               AND ($status IS NULL    OR p.reading_status = $status)
               AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
+              AND {vis_clause}
             OPTIONAL MATCH (u:User)-[:ADDED]->(p)
             WITH p, score, head(collect(u)) AS added_user
             RETURN p, score, "paper" AS matched_in,
@@ -85,6 +89,7 @@ def _fulltext_search(
             year_min=year_min, year_max=year_max,
             status=reading_status, bookmarked=bookmarked,
             limit=fetch_limit,
+            **vis_params,
         )
         for r in result:
             _merge_hit(seen, r)
@@ -92,18 +97,19 @@ def _fulltext_search(
     # Note-level index — find papers via HAS_NOTE
     with driver.session() as session:
         result = session.run(
-            """
+            f"""
             CALL db.index.fulltext.queryNodes("note_search", $q)
             YIELD node AS n, score
             MATCH (p:Paper)-[:HAS_NOTE]->(n)
-            WHERE ($tag IS NULL       OR (p)-[:TAGGED]->(:Tag {name: $tag}))
-              AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {name: $topic}))
-              AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {id: $pid}))
-              AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {id: $person}))
+            WHERE ($tag IS NULL       OR (p)-[:TAGGED]->(:Tag {{name: $tag}}))
+              AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {{name: $topic}}))
+              AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {{id: $pid}}))
+              AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {{id: $person}}))
               AND ($year_min IS NULL  OR p.year >= $year_min)
               AND ($year_max IS NULL  OR p.year <= $year_max)
               AND ($status IS NULL    OR p.reading_status = $status)
               AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
+              AND {vis_clause}
             OPTIONAL MATCH (u:User)-[:ADDED]->(p)
             WITH p, score, head(collect(u)) AS added_user
             RETURN p, score, "note" AS matched_in,
@@ -115,6 +121,7 @@ def _fulltext_search(
             year_min=year_min, year_max=year_max,
             status=reading_status, bookmarked=bookmarked,
             limit=fetch_limit,
+            **vis_params,
         )
         for r in result:
             _merge_hit(seen, r)
@@ -162,18 +169,22 @@ def _filter_search(
     limit: int,
 ) -> list[dict]:
     """Filter-only search — no full-text query."""
+    from db.queries.visibility import paper_visibility_clause
+
+    vis_clause, vis_params = paper_visibility_clause("p")
     with driver.session() as session:
         result = session.run(
-            """
+            f"""
             MATCH (p:Paper)
-            WHERE ($tag IS NULL       OR (p)-[:TAGGED]->(:Tag {name: $tag}))
-              AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {name: $topic}))
-              AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {id: $pid}))
-              AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {id: $person}))
+            WHERE ($tag IS NULL       OR (p)-[:TAGGED]->(:Tag {{name: $tag}}))
+              AND ($topic IS NULL     OR (p)-[:ABOUT]->(:Topic {{name: $topic}}))
+              AND ($pid IS NULL       OR (p)-[:IN_PROJECT]->(:Project {{id: $pid}}))
+              AND ($person IS NULL    OR (p)-[:AUTHORED_BY|INVOLVES]->(:Person {{id: $person}}))
               AND ($year_min IS NULL  OR p.year >= $year_min)
               AND ($year_max IS NULL  OR p.year <= $year_max)
               AND ($status IS NULL    OR p.reading_status = $status)
               AND ($bookmarked IS NULL OR p.bookmarked = $bookmarked)
+              AND {vis_clause}
             OPTIONAL MATCH (u:User)-[:ADDED]->(p)
             WITH p, head(collect(u)) AS added_user
             RETURN p, 0.0 AS score, "filter" AS matched_in,
@@ -185,6 +196,7 @@ def _filter_search(
             year_min=year_min, year_max=year_max,
             status=reading_status, bookmarked=bookmarked,
             skip=skip, limit=limit,
+            **vis_params,
         )
         rows = []
         for r in result:

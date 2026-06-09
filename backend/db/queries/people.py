@@ -186,15 +186,20 @@ def link_specializes(driver: Driver, person_id: str, topic_id: str):
 
 
 def get_papers_by_person(driver: Driver, person_id: str) -> list[dict]:
+    from db.queries.visibility import paper_visibility_clause
+
+    vis_clause, vis_params = paper_visibility_clause("paper")
     with driver.session() as session:
         result = session.run(
-            """
-            MATCH (paper:Paper)-[r:AUTHORED_BY|INVOLVES]->(person:Person {id: $id})
+            f"""
+            MATCH (paper:Paper)-[r:AUTHORED_BY|INVOLVES]->(person:Person {{id: $id}})
+            WHERE {vis_clause}
             RETURN paper, type(r) AS rel_type,
                    CASE WHEN type(r) = 'INVOLVES' THEN r.role ELSE null END AS role
             ORDER BY paper.created_at DESC
             """,
             id=person_id,
+            **vis_params,
         )
         papers = []
         for r in result:

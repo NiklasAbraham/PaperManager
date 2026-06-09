@@ -911,7 +911,11 @@ def list_all(skip: int = 0, limit: int = 10000):
 
 @router.get("/{paper_id}/projects")
 def get_paper_projects(paper_id: str):
+    from db.queries.visibility import can_see_paper
+
     driver = get_driver()
+    if not can_see_paper(driver, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
     with driver.session() as session:
         result = session.run(
             "MATCH (p:Paper {id: $id})-[:IN_PROJECT]->(proj:Project) RETURN proj",
@@ -922,7 +926,12 @@ def get_paper_projects(paper_id: str):
 
 @router.get("/{paper_id}", response_model=PaperOut)
 def get_one(paper_id: str):
-    paper = get_paper(get_driver(), paper_id)
+    from db.queries.visibility import can_see_paper
+
+    driver = get_driver()
+    if not can_see_paper(driver, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    paper = get_paper(driver, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
     return paper

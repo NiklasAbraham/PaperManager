@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
 import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, validateSnapshot, clearPapers, seedDefaults, listLitellmModels, getMyAiKeyStatus, updateMyAiKeys, type MyAiKeyStatus, type SnapshotValidation } from "../api/client";
-import UserManagement from "../components/UserManagement";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures" | "claims" | "embeddings";
@@ -904,9 +903,6 @@ export default function Settings() {
           )}
         </Row>
       </Section>
-
-      {/* ── User Management (Admin Only) ── */}
-      <UserManagement />
     </div>
   );
 }

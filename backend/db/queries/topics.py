@@ -65,10 +65,15 @@ def get_topics_for_paper(driver: Driver, paper_id: str) -> list[dict]:
 
 
 def papers_by_topic(driver: Driver, topic_name: str) -> list[dict]:
+    from db.queries.visibility import paper_visibility_clause
+
+    vis_clause, vis_params = paper_visibility_clause("p")
     with driver.session() as session:
         result = session.run(
-            "MATCH (p:Paper)-[:ABOUT]->(t:Topic {name: $name}) RETURN p ORDER BY p.created_at DESC",
+            f"MATCH (p:Paper)-[:ABOUT]->(t:Topic {{name: $name}}) "
+            f"WHERE {vis_clause} RETURN p ORDER BY p.created_at DESC",
             name=topic_name,
+            **vis_params,
         )
         return [dict(r["p"]) for r in result]
 

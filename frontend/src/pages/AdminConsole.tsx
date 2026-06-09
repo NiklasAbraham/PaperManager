@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 import { apiFetch, type ProjectMember, getProjectMembers, getMyAiKeyStatus, type MyAiKeyStatus } from "../api/client";
+import { useAuth } from "../contexts/AuthContext";
+import UserManagement from "../components/UserManagement";
+import ProjectMembers from "../components/ProjectMembers";
 
 interface User {
   name: string;
@@ -27,16 +30,22 @@ interface ProjectMembership {
 }
 
 export default function AdminConsole() {
+  const { username } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [memberships, setMemberships] = useState<ProjectMembership[]>([]);
   const [aiKeyStatuses, setAiKeyStatuses] = useState<Record<string, MyAiKeyStatus>>({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"overview" | "users" | "projects" | "ai-keys">("overview");
+  const [expandedProject, setExpandedProject] = useState<string | null>(null);
+
+  const canViewAdmin = username?.toLowerCase() === "niklas";
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (canViewAdmin) {
+      loadData();
+    }
+  }, [canViewAdmin]);
 
   async function loadData() {
     setLoading(true);
@@ -78,6 +87,10 @@ export default function AdminConsole() {
   const totalPapers = users.reduce((sum, u) => sum + (u.paper_count || 0), 0);
   const totalConversations = users.reduce((sum, u) => sum + (u.conversation_count || 0), 0);
   const totalNotes = users.reduce((sum, u) => sum + (u.note_count || 0), 0);
+
+  if (!canViewAdmin) {
+    return <div className="min-h-screen bg-white" />;
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
@@ -220,44 +233,7 @@ export default function AdminConsole() {
 
           {/* Users Tab */}
           {activeTab === "users" && (
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">User</th>
-                    <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Admin</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">Papers</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">Conversations</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">Notes</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">Total Activity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((user) => {
-                    const color = getUserColor(user.name, user.color);
-                    return (
-                      <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-                            <span className="font-medium text-gray-900">{user.name}</span>
-                          </div>
-                        </td>
-                        <td className="text-center py-3 px-4">
-                          {user.is_admin && (
-                            <span className="text-xs px-2 py-1 bg-violet-100 text-violet-700 rounded-full">Yes</span>
-                          )}
-                        </td>
-                        <td className="text-right py-3 px-4 text-gray-600">{user.paper_count || 0}</td>
-                        <td className="text-right py-3 px-4 text-gray-600">{user.conversation_count || 0}</td>
-                        <td className="text-right py-3 px-4 text-gray-600">{user.note_count || 0}</td>
-                        <td className="text-right py-3 px-4 font-semibold text-violet-700">{user.connection_count || 0}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <UserManagement />
           )}
 
           {/* Projects Tab */}
@@ -303,6 +279,26 @@ export default function AdminConsole() {
                         })}
                       </div>
                     )}
+
+                    <div className="mt-4 pt-3 border-t border-gray-100">
+                      <button
+                        onClick={() =>
+                          setExpandedProject(expandedProject === project.id ? null : project.id)
+                        }
+                        className="text-xs font-medium text-violet-700 hover:text-violet-800 transition-colors"
+                      >
+                        {expandedProject === project.id ? "Hide member management" : "Manage members"}
+                      </button>
+                      {expandedProject === project.id && (
+                        <div className="mt-3">
+                          <ProjectMembers
+                            projectId={project.id}
+                            currentUser={username ?? ""}
+                            userRole="admin"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}

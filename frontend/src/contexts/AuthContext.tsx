@@ -54,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((data) => {
           setToken(storedToken);
           setUsername(storedUsername);
+          localStorage.setItem("pm_current_user", storedUsername);
           setIsAdmin(data.is_admin || false);
         })
         .catch(() => {
@@ -84,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     localStorage.setItem(TOKEN_KEY, access_token);
     localStorage.setItem(USERNAME_KEY, returnedUsername);
+    localStorage.setItem("pm_current_user", returnedUsername);
     setToken(access_token);
     setUsername(returnedUsername);
     setIsAdmin(is_admin || false);
@@ -92,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USERNAME_KEY);
+    localStorage.removeItem("pm_current_user");
     setToken(null);
     setUsername(null);
     setIsAdmin(false);

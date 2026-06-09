@@ -63,34 +63,47 @@ def get_graph(
     nodes: dict[str, dict] = {}
     links: list[dict] = []
 
+    from db.queries.visibility import node_visibility_clause
+
+    vis_n, vis_params = node_visibility_clause("n")
+    vis_m, _ = node_visibility_clause("m")
+    vis_center, _ = node_visibility_clause("center")
+    vis_neighbor, _ = node_visibility_clause("neighbor")
+
     with driver.session() as session:
         if mode == "paper" and id:
-            cypher = """
-                MATCH (center:Paper {id: $id})
+            cypher = f"""
+                MATCH (center:Paper {{id: $id}})
+                WHERE {vis_center}
                 OPTIONAL MATCH (center)-[r]-(neighbor)
+                WHERE neighbor IS NULL OR ({vis_neighbor})
                 RETURN center, r, neighbor
             """
-            result = session.run(cypher, id=id)
+            result = session.run(cypher, id=id, **vis_params)
 
         elif mode == "papers":
-            cypher = """
+            cypher = f"""
                 MATCH (n)
-                WHERE n:Paper OR n:Person OR n:Topic OR n:Project
+                WHERE (n:Paper OR n:Person OR n:Topic OR n:Project)
+                  AND {vis_n}
                 WITH n LIMIT $max_nodes
                 OPTIONAL MATCH (n)-[r]-(m)
-                WHERE m:Paper OR m:Person OR m:Topic OR m:Project
+                WHERE (m:Paper OR m:Person OR m:Topic OR m:Project)
+                  AND ({vis_m})
                 RETURN n, r, m
             """
-            result = session.run(cypher, max_nodes=max_nodes)
+            result = session.run(cypher, max_nodes=max_nodes, **vis_params)
 
         else:  # full
-            cypher = """
+            cypher = f"""
                 MATCH (n)
+                WHERE {vis_n}
                 WITH n LIMIT $max_nodes
                 OPTIONAL MATCH (n)-[r]->(m)
+                WHERE m IS NULL OR ({vis_m})
                 RETURN n, r, m
             """
-            result = session.run(cypher, max_nodes=max_nodes)
+            result = session.run(cypher, max_nodes=max_nodes, **vis_params)
 
         for record in result:
             n = record.get("n") or record.get("center")
