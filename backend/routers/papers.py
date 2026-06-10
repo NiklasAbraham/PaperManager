@@ -127,6 +127,11 @@ def preanalyze_status(analysis_key: str):
         result = load_result(analysis_key)
         if result:
             st["tag_suggestions"] = result.get("tag_suggestions")
+            meta = result.get("meta")
+            if isinstance(meta, dict):
+                # Keep queued-status payload light while still returning the
+                # improved Gemma metadata (title/authors/etc.) for UI upgrades.
+                st["meta"] = {k: v for k, v in meta.items() if k != "raw_text"}
     return st
 
 
