@@ -190,13 +190,20 @@ def update_paper(driver: Driver, paper_id: str, data: dict) -> dict | None:
             """
             MATCH (p:Paper {id: $id})
             SET p += $props
-            RETURN p
+            OPTIONAL MATCH (u:User)-[:ADDED]->(p)
+            WITH p, head(collect(u)) AS added_user
+            RETURN p, added_user.name AS added_by, added_user.color AS added_by_color
             """,
             id=paper_id,
             props=data,
         )
         record = result.single()
-        return dict(record["p"]) if record else None
+        if not record:
+            return None
+        d = dict(record["p"])
+        d["added_by"] = record["added_by"]
+        d["added_by_color"] = record["added_by_color"]
+        return d
 
 
 def delete_paper(driver: Driver, paper_id: str) -> bool:
