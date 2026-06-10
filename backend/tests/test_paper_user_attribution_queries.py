@@ -1,4 +1,4 @@
-from db.queries.papers import list_papers, get_paper
+from db.queries.papers import list_papers, get_paper, update_paper
 from db.queries.projects import get_project_papers
 
 
@@ -71,3 +71,13 @@ def test_get_project_papers_includes_added_by_metadata():
     assert rows == [
         {"id": "p1", "title": "Paper 1", "added_by": "Niklas", "added_by_color": "#7c3aed"}
     ]
+
+
+def test_update_paper_includes_added_by_metadata():
+    driver = _FakeDriver([
+        {"p": {"id": "p1", "title": "Paper 1"}, "added_by": "Niklas", "added_by_color": "#7c3aed"}
+    ])
+
+    row = update_paper(driver, "p1", {"reading_status": "reading"})
+
+    assert row == {"id": "p1", "title": "Paper 1", "added_by": "Niklas", "added_by_color": "#7c3aed"}
