@@ -124,6 +124,7 @@ export interface AnalysisStatus {
   status: "pending" | "running" | "ready" | "error" | "missing";
   error?: string;
   tag_suggestions?: TagSuggestions;
+  meta?: ParsedMeta;
 }
 
 export async function preanalyzePdf(file: File, signal?: AbortSignal): Promise<AnalysisStatus> {
