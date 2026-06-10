@@ -202,11 +202,12 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
       pending.forEach((item) => {
         if (!item.analysisKey) return;
         getPreanalysisStatus(item.analysisKey)
-          .then(({ status, tag_suggestions }) => {
+          .then(({ status, tag_suggestions, meta }) => {
             if (status === item.analysisStatus) return;
             updateItem(item.id, {
               analysisStatus: status as QueuedPdf["analysisStatus"],
               ...(tag_suggestions ? { tagSuggestions: tag_suggestions } : {}),
+              ...(meta?.title ? { meta } : {}),
             });
           })
           .catch(() => {});
@@ -291,11 +292,12 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
     let analysisOk = false;
     if (item.analysisKey && item.analysisStatus === "ready") {
       try {
-        const { status, tag_suggestions } = await getPreanalysisStatus(item.analysisKey);
+        const { status, tag_suggestions, meta } = await getPreanalysisStatus(item.analysisKey);
         analysisOk = status === "ready";
         updateItem(item.id, {
           analysisStatus: status as QueuedPdf["analysisStatus"],
           ...(tag_suggestions ? { tagSuggestions: tag_suggestions } : {}),
+          ...(meta?.title ? { meta } : {}),
         });
       } catch {
         analysisOk = false;
