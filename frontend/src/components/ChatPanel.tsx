@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import {
   listPaperConversations, getPaperConversationMessages,
   renamePaperConversation, compactPaperConversation,
@@ -15,6 +18,11 @@ const MODEL_LABELS: Record<Model, string> = {
   "claude-work": "Claude (Work)",
   litellm: "Gemma (LiteLLM)",
 };
+
+const mdPlugins = {
+  remarkPlugins: [remarkGfm, remarkMath],
+  rehypePlugins: [rehypeKatex],
+} as const;
 
 interface Props {
   paperId: string;
@@ -352,7 +360,7 @@ export default function ChatPanel({ paperId }: Props) {
                 <div className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                   <span className="font-semibold text-amber-800">Compacted summary</span>
                   <div className="mt-1 prose prose-xs max-w-none overflow-x-auto">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown {...mdPlugins}>{msg.content}</ReactMarkdown>
                   </div>
                 </div>
               ) : (
@@ -364,7 +372,7 @@ export default function ChatPanel({ paperId }: Props) {
                   {msg.role === "assistant" ? (
                     <>
                       <div className="prose prose-sm max-w-none overflow-x-auto">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown {...mdPlugins}>{msg.content}</ReactMarkdown>
                       </div>
                       <div className="flex items-center gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => navigator.clipboard.writeText(msg.content)}
