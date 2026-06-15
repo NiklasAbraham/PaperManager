@@ -31,6 +31,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Handle session expiry from API client without a hard page reload
+  useEffect(() => {
+    const handler = () => {
+      setToken(null);
+      setUsername(null);
+      setIsAdmin(false);
+    };
+    window.addEventListener("auth:expired", handler);
+    return () => window.removeEventListener("auth:expired", handler);
+  }, []);
+
   // Load token from localStorage on mount
   useEffect(() => {
     const storedToken = localStorage.getItem(TOKEN_KEY);

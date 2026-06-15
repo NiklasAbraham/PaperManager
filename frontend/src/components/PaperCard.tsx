@@ -61,38 +61,56 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
   const toggleBookmark = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const newVal = !paper.bookmarked;
-    const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bookmarked: newVal }),
-    });
-    setPaper(updated);
-    onUpdated?.(updated);
+    const prev = paper;
+    setPaper({ ...paper, bookmarked: newVal });
+    try {
+      const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookmarked: newVal }),
+      });
+      setPaper(updated);
+      onUpdated?.(updated);
+    } catch {
+      setPaper(prev);
+    }
   };
 
   const cycleStatus = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const cycle: Array<Paper["reading_status"]> = ["unread", "reading", "read"];
     const next = cycle[(cycle.indexOf(currentStatus) + 1) % cycle.length];
-    const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reading_status: next }),
-    });
-    setPaper(updated);
-    onUpdated?.(updated);
+    const prev = paper;
+    setPaper({ ...paper, reading_status: next });
+    try {
+      const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reading_status: next }),
+      });
+      setPaper(updated);
+      onUpdated?.(updated);
+    } catch {
+      setPaper(prev);
+    }
   };
 
   const setRating = async (e: React.MouseEvent, stars: number) => {
     e.stopPropagation();
     const newRating = paper.rating === stars ? null : stars;
-    const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rating: newRating }),
-    });
-    setPaper(updated);
-    onUpdated?.(updated);
+    const prev = paper;
+    setPaper({ ...paper, rating: newRating ?? undefined });
+    try {
+      const updated = await apiFetch<Paper>(`/papers/${paper.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: newRating }),
+      });
+      setPaper(updated);
+      onUpdated?.(updated);
+    } catch {
+      setPaper(prev);
+    }
   };
 
   const colorDot = paper.color ? (
@@ -114,6 +132,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
         {/* Action buttons — appear on hover */}
         <div className="absolute top-2 right-2 hidden group-hover:flex gap-1" onClick={(e) => e.stopPropagation()}>
           <button
+            type="button"
             onClick={handleEdit}
             title="Edit metadata"
             className="p-1 rounded bg-white border border-gray-200 text-gray-400 hover:text-violet-600 hover:border-violet-300 transition-colors"
@@ -121,6 +140,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
             <PencilIcon />
           </button>
           <button
+            type="button"
             onClick={handleDelete}
             disabled={deleting}
             title={confirmDel ? "Click again to confirm" : "Delete paper"}
@@ -173,6 +193,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
 
           {/* Reading status badge — clickable to cycle */}
           <button
+            type="button"
             onClick={cycleStatus}
             title="Click to cycle reading status"
             className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${STATUS_STYLES[currentStatus]}`}
@@ -182,6 +203,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
 
           {/* Bookmark */}
           <button
+            type="button"
             onClick={toggleBookmark}
             title={paper.bookmarked ? "Remove bookmark" : "Bookmark this paper"}
             className={`text-sm leading-none ${paper.bookmarked ? "text-amber-400" : "text-gray-300 hover:text-amber-300"} transition-colors`}
@@ -208,6 +230,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
           {[1, 2, 3, 4, 5].map((star) => (
             <button
               key={star}
+              type="button"
               onClick={(e) => setRating(e, star)}
               title={`Rate ${star} star${star > 1 ? "s" : ""}`}
               className={`text-sm leading-none transition-colors ${
