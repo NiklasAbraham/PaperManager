@@ -677,33 +677,52 @@ export default function PaperDetail() {
     const cycle: Array<Paper["reading_status"]> = ["unread", "reading", "read"];
     const current = paper.reading_status ?? "unread";
     const next = cycle[(cycle.indexOf(current) + 1) % cycle.length];
-    const updated = await apiFetch<typeof paper>(`/papers/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reading_status: next }),
-    });
-    setPaper(updated);
+    const prev = paper;
+    setPaper((p) => p ? { ...p, reading_status: next } : p);
+    try {
+      const updated = await apiFetch<Paper>(`/papers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reading_status: next }),
+      });
+      setPaper((p) => p ? { ...p, ...updated } : p);
+    } catch {
+      setPaper(prev);
+    }
   };
 
   const toggleBookmark = async () => {
     if (!id) return;
-    const updated = await apiFetch<typeof paper>(`/papers/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bookmarked: !paper.bookmarked }),
-    });
-    setPaper(updated);
+    const newVal = !paper.bookmarked;
+    const prev = paper;
+    setPaper((p) => p ? { ...p, bookmarked: newVal } : p);
+    try {
+      const updated = await apiFetch<Paper>(`/papers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookmarked: newVal }),
+      });
+      setPaper((p) => p ? { ...p, ...updated } : p);
+    } catch {
+      setPaper(prev);
+    }
   };
 
   const setRating = async (stars: number) => {
     if (!id) return;
     const newRating = paper.rating === stars ? null : stars;
-    const updated = await apiFetch<typeof paper>(`/papers/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rating: newRating }),
-    });
-    setPaper(updated);
+    const prev = paper;
+    setPaper((p) => p ? { ...p, rating: newRating ?? undefined } : p);
+    try {
+      const updated = await apiFetch<Paper>(`/papers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: newRating }),
+      });
+      setPaper((p) => p ? { ...p, ...updated } : p);
+    } catch {
+      setPaper(prev);
+    }
   };
 
   const downloadBibtex = async () => {
@@ -782,6 +801,7 @@ export default function PaperDetail() {
         <div className="flex items-center gap-2 shrink-0">
           {/* Reading status */}
           <button
+            type="button"
             onClick={cycleStatus}
             title="Click to cycle reading status"
             className={`text-xs px-2 py-1 rounded-full font-medium transition-colors ${STATUS_STYLES[currentStatus]}`}
@@ -794,6 +814,7 @@ export default function PaperDetail() {
             {[1, 2, 3, 4, 5].map((star) => (
               <button
                 key={star}
+                type="button"
                 onClick={() => setRating(star)}
                 title={`Rate ${star} star${star > 1 ? "s" : ""}`}
                 className={`text-base leading-none transition-colors ${
@@ -820,6 +841,7 @@ export default function PaperDetail() {
 
           {/* Bookmark */}
           <button
+            type="button"
             onClick={toggleBookmark}
             title={paper.bookmarked ? "Remove bookmark" : "Bookmark"}
             className={`text-lg leading-none transition-colors ${paper.bookmarked ? "text-amber-400" : "text-gray-300 hover:text-amber-300"}`}
@@ -1636,8 +1658,14 @@ export default function PaperDetail() {
                         onChange={async (e) => {
                           if (!id) return;
                           const newType = e.target.value as Paper["document_type"];
-                          const updated = await updatePaper(id, { document_type: newType ?? null });
-                          setPaper((p) => p ? { ...p, ...updated } : p);
+                          const prev = paper;
+                          setPaper((p) => p ? { ...p, document_type: newType } : p);
+                          try {
+                            const updated = await updatePaper(id, { document_type: newType ?? null });
+                            setPaper((p) => p ? { ...p, ...updated } : p);
+                          } catch {
+                            setPaper(prev);
+                          }
                         }}
                         className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white"
                       >

@@ -30,11 +30,12 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   };
   const res = await fetch(`${BASE}${path}`, merged);
   
-  // Handle 401 Unauthorized - redirect to login
+  // Handle 401 Unauthorized - signal auth expiry without a hard page reload
   if (res.status === 401) {
     localStorage.removeItem("pm_auth_token");
     localStorage.removeItem("pm_username");
-    window.location.href = "/login";
+    localStorage.removeItem("pm_current_user");
+    window.dispatchEvent(new CustomEvent("auth:expired"));
     throw new Error("Session expired. Please login again.");
   }
   
