@@ -20,6 +20,13 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Statuses that the backend asks us to retry (Neo4j Aura reconnects return 503,
+// see Neo4jReconnectMiddleware). 502/504 cover proxy/gateway blips.
+const TRANSIENT_STATUSES = new Set([502, 503, 504]);
+const MAX_RETRIES = 2;
+
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const merged: RequestInit = {
     ...options,
@@ -28,8 +35,31 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
       ...(options?.headers ?? {}),
     },
   };
-  const res = await fetch(`${BASE}${path}`, merged);
-  
+
+  let res: Response | undefined;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      res = await fetch(`${BASE}${path}`, merged);
+    } catch (err) {
+      // Network-level failure (dropped connection, DNS, etc.) — retry transparently.
+      if (attempt < MAX_RETRIES) {
+        await sleep(300 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+
+    // Transient server errors (e.g. Neo4j Aura connection reset → 503) — retry.
+    if (TRANSIENT_STATUSES.has(res.status) && attempt < MAX_RETRIES) {
+      await sleep(300 * (attempt + 1));
+      continue;
+    }
+    break;
+  }
+
+  // res is always assigned here (loop runs at least once or throws).
+  res = res!;
+
   // Handle 401 Unauthorized - signal auth expiry without a hard page reload
   if (res.status === 401) {
     localStorage.removeItem("pm_auth_token");
@@ -38,7 +68,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     window.dispatchEvent(new CustomEvent("auth:expired"));
     throw new Error("Session expired. Please login again.");
   }
-  
+
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`API ${res.status}: ${detail}`);

@@ -19,6 +19,8 @@ import { SettingsProvider, useAppSettings } from "./contexts/SettingsContext";
 import { UserProvider } from "./contexts/UserContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ErrorBoundary from "./components/ErrorBoundary";
+import Toaster from "./components/Toaster";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
 const Graph         = lazy(() => import("./pages/Graph"));
@@ -109,6 +111,7 @@ function AppLayout() {
         )
       )}
       <div className={isKnowledge ? "h-screen" : "flex-1 min-h-0 overflow-auto"}>
+        <ErrorBoundary key={pathname}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/*" element={
@@ -135,6 +138,7 @@ function AppLayout() {
             </ProtectedRoute>
           } />
         </Routes>
+        </ErrorBoundary>
       </div>
         </div>
   );
@@ -147,6 +151,7 @@ export default function App() {
         <SettingsProvider>
           <UserProvider>
             <AppLayout />
+            <Toaster />
           </UserProvider>
         </SettingsProvider>
       </AuthProvider>
