@@ -13,6 +13,7 @@ import { SpecialZoomLevel } from "@react-pdf-viewer/core";
 import UploadConfirmModal from "../components/UploadConfirmModal";
 import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
+import { notify } from "../lib/notify";
 import type { Paper, Person, Topic, Tag, Reference, Figure, PaperTable, GraphData, ParsedMeta, T_IngestOut, Claim, RelatedPaper, Annotation, AnnotationColor } from "../types";
 
 const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
@@ -688,6 +689,7 @@ export default function PaperDetail() {
       setPaper((p) => p ? { ...p, ...updated } : p);
     } catch {
       setPaper(prev);
+      notify("Couldn't update reading status. Please try again.");
     }
   };
 
@@ -705,6 +707,7 @@ export default function PaperDetail() {
       setPaper((p) => p ? { ...p, ...updated } : p);
     } catch {
       setPaper(prev);
+      notify("Couldn't update bookmark. Please try again.");
     }
   };
 
@@ -722,6 +725,7 @@ export default function PaperDetail() {
       setPaper((p) => p ? { ...p, ...updated } : p);
     } catch {
       setPaper(prev);
+      notify("Couldn't update rating. Please try again.");
     }
   };
 
@@ -1665,6 +1669,7 @@ export default function PaperDetail() {
                             setPaper((p) => p ? { ...p, ...updated } : p);
                           } catch {
                             setPaper(prev);
+                            notify("Couldn't change document type. Please try again.");
                           }
                         }}
                         className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white"

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { deletePaper, apiFetch } from "../api/client";
 import EditPaperModal from "./EditPaperModal";
+import { notify } from "../lib/notify";
 import type { Paper } from "../types";
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -73,6 +74,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
       onUpdated?.(updated);
     } catch {
       setPaper(prev);
+      notify("Couldn't update bookmark. Please try again.");
     }
   };
 
@@ -92,6 +94,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
       onUpdated?.(updated);
     } catch {
       setPaper(prev);
+      notify("Couldn't update reading status. Please try again.");
     }
   };
 
@@ -110,6 +113,7 @@ export default function PaperCard({ paper: initial, showAbstract = true, onDelet
       onUpdated?.(updated);
     } catch {
       setPaper(prev);
+      notify("Couldn't update rating. Please try again.");
     }
   };
 
