@@ -43,6 +43,7 @@ vi.mock('../contexts/SettingsContext', () => ({
   useAppSettings: () => ({ settings: { figureCaptionMethod: 'docling', debugMode: false } }),
 }));
 vi.mock('force-graph', () => ({ default: () => ({}) }));
+vi.mock('../lib/notify', () => ({ notify: vi.fn() }));
 
 const basePaper: Paper = {
   id: 'paper-1',
@@ -134,6 +135,30 @@ describe('PaperDetail — reading status', () => {
     // Should show Reading immediately, before API resolves
     expect(screen.getByTitle('Click to cycle reading status')).toHaveTextContent('Reading');
     resolve!({ ...basePaper, reading_status: 'reading' });
+  });
+
+  // Regression: when the PATCH fails (e.g. the backend returned HTTP 500 from a
+  // broken Cypher query), the optimistic change must roll back to the original
+  // status — this is the "clicking read/unread does nothing" symptom.
+  it('reverts status on API error', async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.apiFetch).mockImplementation((path, opts) => {
+      if (opts?.method === 'PATCH') return Promise.reject(new Error('API 500'));
+      if (path === `/papers/${basePaper.id}`) return Promise.resolve(basePaper);
+      if (path === `/papers/${basePaper.id}/authors`) return Promise.resolve([]);
+      if (path === `/papers/${basePaper.id}/topics`) return Promise.resolve([]);
+      if (path === `/papers/${basePaper.id}/tags`) return Promise.resolve([]);
+      if (path === '/people') return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+
+    await renderDetail();
+    await user.click(screen.getByTitle('Click to cycle reading status'));
+
+    // After the failed PATCH it must fall back to the original "Unread".
+    await waitFor(() => {
+      expect(screen.getByTitle('Click to cycle reading status')).toHaveTextContent('Unread');
+    });
   });
 });
 

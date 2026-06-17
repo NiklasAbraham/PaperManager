@@ -1,0 +1,9 @@
+# Lightweight deps for the query-layer regression tests run in CI.
+# Deliberately excludes heavy ML deps (docling/torch) — the Cypher regression
+# tests talk to the query layer directly and only need a Neo4j driver + config.
+neo4j
+pydantic
+pydantic-settings
+python-dotenv
+pytest
+pytest-asyncio
