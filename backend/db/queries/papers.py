@@ -195,6 +195,7 @@ def update_paper(driver: Driver, paper_id: str, data: dict) -> dict | None:
             """
             MATCH (p:Paper {id: $id})
             SET p += $props
+            WITH p
             OPTIONAL MATCH (u:User)-[:ADDED]->(p)
             WITH p, head(collect(u)) AS added_user
             RETURN p, added_user.name AS added_by, added_user.color AS added_by_color

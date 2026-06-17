@@ -147,7 +147,7 @@ def get_involves_for_paper(driver: Driver, paper_id: str) -> list[dict]:
     with driver.session() as session:
         result = session.run(
             "MATCH (paper:Paper {id: $id})-[r:INVOLVES]->(person:Person) "
-            "RETURN person, r.role AS role, r.years_known AS years_known",
+            "RETURN person, r.role AS role, properties(r).years_known AS years_known",
             id=paper_id,
         )
         rows = []
