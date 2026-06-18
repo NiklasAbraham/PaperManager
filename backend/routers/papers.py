@@ -6,7 +6,10 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 from db.connection import get_driver
-from db.queries.papers import create_paper, merge_paper_by_doi, get_paper, list_papers, update_paper, delete_paper, find_duplicate, random_paper
+from db.queries.papers import (
+    create_paper, merge_paper_by_doi, get_paper, list_papers, update_paper,
+    delete_paper, find_duplicate, random_paper, merge_reference_stubs_into_paper,
+)
 from db.queries.notes import get_paper_note, upsert_note, set_mentions
 from db.queries.people import get_or_create_person, get_or_create_person_with_affiliation, link_author
 from db.queries.topics import get_or_create_topic, link_paper_topic
@@ -49,8 +52,25 @@ def check_duplicate(doi: Optional[str] = None, title: Optional[str] = None):
     """Return {duplicate: paper | null} — used by the frontend before confirming upload."""
     if not doi and not title:
         return {"duplicate": None}
-    existing = find_duplicate(get_driver(), doi=doi or None, title=title or None)
+    driver = get_driver()
+    existing = find_duplicate(driver, doi=doi or None, title=title or None)
     if existing:
+        if existing.get("drive_file_id"):
+            try:
+                moved = merge_reference_stubs_into_paper(
+                    driver,
+                    keep_id=existing["id"],
+                    doi=doi or existing.get("doi"),
+                    title=title or existing.get("title", ""),
+                )
+                if moved:
+                    log.info(
+                        "Duplicate check cleanup merged reference stubs | keep=%s moved=%d",
+                        existing["id"],
+                        moved,
+                    )
+            except Exception as exc:
+                log.warning("Duplicate check cleanup failed (non-fatal) | %s", exc)
         existing.pop("raw_text", None)
         return {"duplicate": existing}
     return {"duplicate": None}
