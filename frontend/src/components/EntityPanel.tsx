@@ -15,9 +15,10 @@ interface Props {
   type: EntityType;
   onClose: () => void;
   onStatsChanged: () => void;
+  onTagClick?: (name: string) => void;
 }
 
-export default function EntityPanel({ type, onClose, onStatsChanged }: Props) {
+export default function EntityPanel({ type, onClose, onStatsChanged, onTagClick }: Props) {
   const [items, setItems]     = useState<unknown[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -57,7 +58,7 @@ export default function EntityPanel({ type, onClose, onStatsChanged }: Props) {
               {type === "papers"   && <PaperList   items={items as Paper[]}   reload={reload} onStatsChanged={onStatsChanged} />}
               {type === "authors"  && <PersonList  items={items as Person[]}  reload={reload} onStatsChanged={onStatsChanged} />}
               {type === "topics"   && <TopicList   items={items as Topic[]}   reload={reload} onStatsChanged={onStatsChanged} />}
-              {type === "tags"     && <TagList     items={items as Tag[]}     reload={reload} onStatsChanged={onStatsChanged} />}
+              {type === "tags"     && <TagList     items={items as Tag[]}     reload={reload} onStatsChanged={onStatsChanged} onTagClick={onTagClick} />}
               {type === "projects" && <ProjectList items={items as Project[]} reload={reload} onStatsChanged={onStatsChanged} />}
             </>
           )}
@@ -260,7 +261,9 @@ function TopicList({ items, reload, onStatsChanged }: { items: Topic[]; reload: 
 
 // ── Tags ─────────────────────────────────────────────────────────────────────
 
-function TagList({ items, reload, onStatsChanged }: { items: Tag[]; reload: () => void; onStatsChanged: () => void }) {
+function TagList({
+  items, reload, onStatsChanged, onTagClick,
+}: { items: Tag[]; reload: () => void; onStatsChanged: () => void; onTagClick?: (name: string) => void }) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -303,9 +306,19 @@ function TagList({ items, reload, onStatsChanged }: { items: Tag[]; reload: () =
       </div>
       {items.map((t) => (
         <div key={t.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50">
-          <span className="flex-1 text-sm font-medium text-gray-800">{t.name}</span>
+          <button
+            onClick={() => onTagClick?.(t.name)}
+            className="flex-1 text-left text-sm font-medium text-gray-800 hover:text-violet-700 transition-colors"
+          >
+            {t.name}
+          </button>
           {t.paper_count != null && (
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{t.paper_count} papers</span>
+            <button
+              onClick={() => onTagClick?.(t.name)}
+              className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full hover:text-violet-700 hover:bg-violet-50 transition-colors"
+            >
+              {t.paper_count} papers
+            </button>
           )}
           <ConfirmDelete onDelete={() => remove(t.name)} />
         </div>

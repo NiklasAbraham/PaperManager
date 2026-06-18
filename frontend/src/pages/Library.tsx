@@ -353,6 +353,12 @@ export default function Library() {
           type={activePanel}
           onClose={() => setActivePanel(null)}
           onStatsChanged={refreshStats}
+          onTagClick={(name) => {
+            setActivePanel(null);
+            const next = new URLSearchParams(searchParams);
+            next.set("tag", name);
+            setSearchParams(next);
+          }}
         />
       )}
 
