@@ -1,4 +1,6 @@
-from db.queries.papers import find_duplicate
+from unittest.mock import patch
+
+from db.queries.papers import find_duplicate, merge_reference_stubs_into_paper
 
 
 class _FakeResult:
@@ -10,6 +12,9 @@ class _FakeResult:
 
     def data(self):
         return self._rows
+
+    def __iter__(self):
+        return iter(self._rows)
 
 
 class _FakeSession:
@@ -69,3 +74,31 @@ def test_find_duplicate_prefers_existing_full_paper_for_normalized_title_match()
     assert found is not None
     assert found["id"] == "paper-1"
     assert found["drive_file_id"] == "drive-123"
+
+
+def test_merge_reference_stubs_into_paper_merges_unique_stub_ids():
+    driver = _FakeDriver([
+        [
+            {"id": "stub-1"},
+            {"id": "stub-2"},
+        ],
+        [
+            {"id": "stub-1", "title": "Sample Paper"},
+            {"id": "stub-3", "title": "Sample Paper!"},
+            {"id": "other", "title": "Different Title"},
+        ],
+    ])
+
+    with patch("db.queries.papers._merge_paper_into_keep", side_effect=[2, 4, 1]) as mock_merge:
+        moved = merge_reference_stubs_into_paper(
+            driver,
+            keep_id="paper-1",
+            doi="10.1000/sample",
+            title="Sample Paper",
+        )
+
+    assert moved == 7
+    assert mock_merge.call_count == 3
+    mock_merge.assert_any_call(driver, "paper-1", "stub-1")
+    mock_merge.assert_any_call(driver, "paper-1", "stub-2")
+    mock_merge.assert_any_call(driver, "paper-1", "stub-3")
