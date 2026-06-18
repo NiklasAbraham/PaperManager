@@ -99,6 +99,26 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
             detail="Could not detect any chapters in this document. Try uploading a document with clearer chapter headings.",
         )
 
+    # Density sanity check: estimate page count from raw_text length
+    # (avg ~3000 chars/page for academic text) and reject overcrowded results.
+    estimated_pages = max(1, len(raw_text) // 3000)
+    if len(chapter_dicts) / estimated_pages > 3:
+        log.warning(
+            "Chapter density too high after detection (%.1f chapters/est. page, %d chapters, ~%d pages) "
+            "— trimming to keep only the largest chapters",
+            len(chapter_dicts) / estimated_pages, len(chapter_dicts), estimated_pages,
+        )
+        # Keep only chapters with substantial text content (top 50% by length, min 3)
+        by_length = sorted(chapter_dicts, key=lambda c: len(c.get("text", "")), reverse=True)
+        keep_count = max(3, len(by_length) // 2)
+        # Re-sort by original order (number / position)
+        kept = sorted(by_length[:keep_count], key=lambda c: c.get("number", 0))
+        # Re-number sequentially
+        for i, ch in enumerate(kept):
+            ch["number"] = i + 1
+        chapter_dicts = kept
+        log.info("Trimmed to %d chapters after density filter", len(chapter_dicts))
+
     log.info("Detected %d chapters for paper %s", len(chapter_dicts), paper_id)
 
     # Detection succeeded — now replace existing chapters

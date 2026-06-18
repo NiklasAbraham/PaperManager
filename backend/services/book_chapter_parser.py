@@ -179,6 +179,61 @@ def _enforce_monotone_pages(chapters: list[dict], total_pages: int) -> list[dict
     return clean
 
 
+# ── Density-based chapter merging ─────────────────────────────────────────────
+
+def _merge_overcrowded_chapters(
+    raw_chapters: list[dict], total_pages: int, max_per_page: float = 3.0
+) -> list[dict]:
+    """Merge chapters that share the same page into their first chapter on that page.
+
+    When the chapter detector returns an unrealistic number of chapters (e.g.
+    every sub-section heading treated as a chapter), this function groups them
+    by their start page and keeps only the first heading on each page as a
+    real chapter, folding subsequent headings' text into it.
+
+    After merging, if the density is *still* too high, we keep only the
+    chapters that span at least 2 pages (i.e. large enough to be real
+    chapters).
+    """
+    if not raw_chapters:
+        return raw_chapters
+
+    # Pass 1: group by start_page — keep first heading per page as parent
+    merged: list[dict] = []
+    for ch in raw_chapters:
+        sp = ch.get("start_page")
+        if merged and sp is not None and merged[-1].get("start_page") == sp:
+            # Same page as previous chapter — fold in as sub-content
+            merged[-1]["_text_parts"].extend(
+                [ch.get("title", "")] + ch.get("_text_parts", [])
+            )
+        else:
+            merged.append(ch)
+
+    # Pass 2: if still too dense, keep only chapters spanning ≥ 2 pages
+    if total_pages > 0 and len(merged) / total_pages > max_per_page:
+        wide = []
+        for i, ch in enumerate(merged):
+            sp = ch.get("start_page")
+            next_sp = merged[i + 1].get("start_page") if i + 1 < len(merged) else total_pages + 1
+            if sp is not None and next_sp is not None and next_sp - sp >= 2:
+                wide.append(ch)
+            elif wide:
+                # Fold into previous real chapter
+                wide[-1]["_text_parts"].extend(
+                    [ch.get("title", "")] + ch.get("_text_parts", [])
+                )
+            else:
+                wide.append(ch)
+        merged = wide
+
+    log.info(
+        "Chapter merge: %d → %d chapters (total_pages=%d)",
+        len(raw_chapters), len(merged), total_pages,
+    )
+    return merged
+
+
 # ── Primary: Docling-based detection ─────────────────────────────────────────
 
 def _chapters_from_docling_document(doc) -> list[dict]:
@@ -238,6 +293,19 @@ def _chapters_from_docling_document(doc) -> list[dict]:
     if not raw_chapters:
         log.info("Docling found no section headers in this PDF")
         return []
+
+    # Sanity check: more than 3 chapters per page is unrealistic — the
+    # detector is likely treating sub-sections as top-level chapters.
+    # Merge the excess chapters back into their preceding real chapter.
+    if total_pages > 0:
+        chapters_per_page = len(raw_chapters) / total_pages
+        if chapters_per_page > 3:
+            log.warning(
+                "Chapter density too high (%.1f chapters/page, %d chapters in %d pages) "
+                "— merging likely sub-chapters back into parent chapters",
+                chapters_per_page, len(raw_chapters), total_pages,
+            )
+            raw_chapters = _merge_overcrowded_chapters(raw_chapters, total_pages)
 
     # Finalise text
     for ch in raw_chapters:
