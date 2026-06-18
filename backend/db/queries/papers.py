@@ -9,6 +9,16 @@ def _normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", title.lower())).strip()
 
 
+def _prefer_full_paper(rows: list[dict]) -> dict | None:
+    if not rows:
+        return None
+    for row in rows:
+        paper = row.get("p") or {}
+        if paper.get("drive_file_id"):
+            return dict(paper)
+    return dict(rows[0]["p"])
+
+
 def find_duplicate(
     driver: Driver,
     doi: str | None = None,
@@ -36,8 +46,9 @@ def find_duplicate(
                 "MATCH (p:Paper) WHERE toLower(p.title) = toLower($title) RETURN p LIMIT 5",
                 title=title,
             ).data()
-        for row in rows:
-            return dict(row["p"])
+        preferred = _prefer_full_paper(rows)
+        if preferred:
+            return preferred
 
         # Normalized match (strips punctuation) — compare in Python against a
         # small window of recently added papers to avoid full-scan in huge libraries
@@ -45,9 +56,13 @@ def find_duplicate(
             rows = session.run(
                 "MATCH (p:Paper) RETURN p ORDER BY p.created_at DESC LIMIT 2000"
             ).data()
+        matched: list[dict] = []
         for row in rows:
             if _normalize_title(row["p"].get("title", "")) == norm:
-                return dict(row["p"])
+                matched.append(row)
+        preferred = _prefer_full_paper(matched)
+        if preferred:
+            return preferred
 
     return None
 
