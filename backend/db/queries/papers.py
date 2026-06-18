@@ -9,6 +9,16 @@ def _normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", title.lower())).strip()
 
 
+def _prefer_full_paper(rows: list[dict]) -> dict | None:
+    if not rows:
+        return None
+    for row in rows:
+        paper = row.get("p") or {}
+        if paper.get("drive_file_id"):
+            return dict(paper)
+    return dict(rows[0]["p"])
+
+
 def find_duplicate(
     driver: Driver,
     doi: str | None = None,
@@ -36,8 +46,9 @@ def find_duplicate(
                 "MATCH (p:Paper) WHERE toLower(p.title) = toLower($title) RETURN p LIMIT 5",
                 title=title,
             ).data()
-        for row in rows:
-            return dict(row["p"])
+        preferred = _prefer_full_paper(rows)
+        if preferred:
+            return preferred
 
         # Normalized match (strips punctuation) — compare in Python against a
         # small window of recently added papers to avoid full-scan in huge libraries
@@ -45,11 +56,166 @@ def find_duplicate(
             rows = session.run(
                 "MATCH (p:Paper) RETURN p ORDER BY p.created_at DESC LIMIT 2000"
             ).data()
+        matched: list[dict] = []
         for row in rows:
             if _normalize_title(row["p"].get("title", "")) == norm:
-                return dict(row["p"])
+                matched.append(row)
+        preferred = _prefer_full_paper(matched)
+        if preferred:
+            return preferred
 
     return None
+
+
+def _merge_paper_into_keep(driver: Driver, keep_id: str, remove_id: str) -> int:
+    if keep_id == remove_id:
+        return 0
+
+    with driver.session() as session:
+        k = session.run("MATCH (p:Paper {id: $id}) RETURN p.id", id=keep_id).single()
+        r = session.run("MATCH (p:Paper {id: $id}) RETURN p.id", id=remove_id).single()
+        if not k or not r:
+            return 0
+
+        moved = 0
+
+        res = session.run("""
+            MATCH (remove:Paper {id: $rid})-[rel:AUTHORED_BY]->(person:Person)
+            MATCH (keep:Paper {id: $kid})
+            MERGE (keep)-[:AUTHORED_BY]->(person)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        res = session.run("""
+            MATCH (remove:Paper {id: $rid})-[rel:TAGGED]->(tag:Tag)
+            MATCH (keep:Paper {id: $kid})
+            MERGE (keep)-[:TAGGED]->(tag)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        res = session.run("""
+            MATCH (remove:Paper {id: $rid})-[rel:ABOUT]->(topic:Topic)
+            MATCH (keep:Paper {id: $kid})
+            MERGE (keep)-[:ABOUT]->(topic)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        res = session.run("""
+            MATCH (project:Project)-[rel:CONTAINS]->(remove:Paper {id: $rid})
+            MATCH (keep:Paper {id: $kid})
+            MERGE (project)-[:CONTAINS]->(keep)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        res = session.run("""
+            MATCH (remove:Paper {id: $rid})-[rel:CITES]->(cited:Paper)
+            WHERE cited.id <> $kid
+            MATCH (keep:Paper {id: $kid})
+            MERGE (keep)-[:CITES]->(cited)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        res = session.run("""
+            MATCH (citer:Paper)-[rel:CITES]->(remove:Paper {id: $rid})
+            WHERE citer.id <> $kid
+            MATCH (keep:Paper {id: $kid})
+            MERGE (citer)-[:CITES]->(keep)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        res = session.run("""
+            MATCH (note:Note)-[rel:ABOUT]->(remove:Paper {id: $rid})
+            MATCH (keep:Paper {id: $kid})
+            MERGE (note)-[:ABOUT]->(keep)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        res = session.run("""
+            MATCH (person:Person)-[rel:INVOLVES]->(remove:Paper {id: $rid})
+            MATCH (keep:Paper {id: $kid})
+            MERGE (person)-[:INVOLVES]->(keep)
+            DELETE rel
+            RETURN count(rel) AS n
+        """, rid=remove_id, kid=keep_id)
+        moved += res.single()["n"]
+
+        session.run("""
+            MATCH (p:Paper {id: $rid})
+            DETACH DELETE p
+        """, rid=remove_id)
+
+    return moved
+
+
+def merge_reference_stubs_into_paper(
+    driver: Driver,
+    keep_id: str,
+    doi: str | None = None,
+    title: str | None = None,
+) -> int:
+    """
+    Merge duplicate reference-only stubs (no PDF) into keep_id and delete stubs.
+    Returns the number of moved relationships across all merged stubs.
+    """
+    stub_ids: list[str] = []
+
+    if doi:
+        with driver.session() as session:
+            rows = session.run(
+                """
+                MATCH (p:Paper {doi: $doi})
+                WHERE p.id <> $keep_id
+                  AND (p.drive_file_id IS NULL OR p.drive_file_id = '')
+                RETURN p.id AS id
+                """,
+                doi=doi,
+                keep_id=keep_id,
+            )
+            for r in rows:
+                pid = r["id"]
+                if pid:
+                    stub_ids.append(pid)
+
+    if title:
+        norm = _normalize_title(title)
+        if norm:
+            with driver.session() as session:
+                rows = session.run(
+                    """
+                    MATCH (p:Paper)
+                    WHERE p.id <> $keep_id
+                      AND (p.drive_file_id IS NULL OR p.drive_file_id = '')
+                    RETURN p.id AS id, p.title AS title
+                    ORDER BY p.created_at DESC
+                    LIMIT 2000
+                    """,
+                    keep_id=keep_id,
+                )
+                for row in rows:
+                    title_value = row["title"] or ""
+                    if _normalize_title(title_value) == norm:
+                        pid = row["id"]
+                        if pid:
+                            stub_ids.append(pid)
+
+    moved_total = 0
+    for stub_id in sorted(set(stub_ids)):
+        moved_total += _merge_paper_into_keep(driver, keep_id, stub_id)
+    return moved_total
 
 
 def _now() -> str:
