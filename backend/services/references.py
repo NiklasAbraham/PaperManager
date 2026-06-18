@@ -325,6 +325,9 @@ def extract_references(raw_text: str, doi: str | None) -> list[dict]:
     Strategy B: Claude AI on the references section — good quality, handles all styles.
     Strategy C: Regex — last resort when Claude is unavailable or fails.
 
+    After extraction, applies a sanity check: if the result is suspiciously
+    low (0-1 references for a paper that likely has more), retries with AI.
+
     Returns list of dicts: {title, authors, year, doi, arxiv_id}
     """
     # Strategy A: Semantic Scholar (best — structured, complete DOI/author data)
@@ -341,11 +344,26 @@ def extract_references(raw_text: str, doi: str | None) -> list[dict]:
     ref_section = _get_ref_section_text(raw_text)
     if ref_section:
         ai_refs = _extract_references_with_ai(ref_section)
-        if ai_refs:
+        if ai_refs and len(ai_refs) >= 2:
             log.debug("References via Claude AI | count=%d", len(ai_refs))
             return ai_refs
 
     # Strategy C: Regex fallback
     regex_refs = _extract_references_from_text(raw_text)
     log.debug("References via regex | count=%d", len(regex_refs))
+
+    # Sanity check: a paper with a References section but only 0-1 results
+    # is suspicious — the PDF-to-text conversion likely mangled the text.
+    # Retry with full-text AI extraction as a fallback.
+    if len(regex_refs) <= 1 and ref_section and len(ref_section.strip()) > 200:
+        log.info(
+            "Reference sanity check: only %d refs from regex but ref section has %d chars "
+            "— retrying with full AI extraction",
+            len(regex_refs), len(ref_section),
+        )
+        ai_retry = _extract_references_with_ai(ref_section)
+        if ai_retry and len(ai_retry) > len(regex_refs):
+            log.debug("References via AI retry | count=%d (was %d)", len(ai_retry), len(regex_refs))
+            return ai_retry
+
     return regex_refs
