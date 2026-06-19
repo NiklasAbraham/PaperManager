@@ -307,6 +307,7 @@ export default function KnowledgeChat() {
         const res = await fetch(`${BASE}/users/${encodeURIComponent(userName)}/ask`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({ question: stripped || question }),
         });
         const data = await res.json();

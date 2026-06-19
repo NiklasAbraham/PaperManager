@@ -1,10 +1,10 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
-const TOKEN_KEY = "pm_auth_token";
+// Username is a non-sensitive display value; the session token itself lives only
+// in an httpOnly cookie set by the backend and is never stored in JS/localStorage.
 const USERNAME_KEY = "pm_username";
 
 interface AuthContextValue {
-  token: string | null;
   username: string | null;
   isAdmin: boolean;
   isAuthenticated: boolean;
@@ -14,7 +14,6 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue>({
-  token: null,
   username: null,
   isAdmin: false,
   isAuthenticated: false,
@@ -26,63 +25,49 @@ const AuthContext = createContext<AuthContextValue>({
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  const clearSession = () => {
+    setUsername(null);
+    setIsAdmin(false);
+    setIsAuthenticated(false);
+    localStorage.removeItem(USERNAME_KEY);
+    localStorage.removeItem("pm_current_user");
+  };
 
   // Handle session expiry from API client without a hard page reload
   useEffect(() => {
-    const handler = () => {
-      setToken(null);
-      setUsername(null);
-      setIsAdmin(false);
-    };
+    const handler = () => clearSession();
     window.addEventListener("auth:expired", handler);
     return () => window.removeEventListener("auth:expired", handler);
   }, []);
 
-  // Load token from localStorage on mount
+  // Validate the existing session cookie on mount.
   useEffect(() => {
-    const storedToken = localStorage.getItem(TOKEN_KEY);
-    const storedUsername = localStorage.getItem(USERNAME_KEY);
-    
-    if (storedToken && storedUsername) {
-      // Verify token is still valid
-      fetch(`${BASE_URL}/auth/me`, {
-        headers: { Authorization: `Bearer ${storedToken}` },
+    fetch(`${BASE_URL}/auth/me`, { credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error("Not authenticated");
+        return res.json();
       })
-        .then((res) => {
-          if (res.ok) {
-            return res.json();
-          } else {
-            // Token invalid, clear storage
-            localStorage.removeItem(TOKEN_KEY);
-            localStorage.removeItem(USERNAME_KEY);
-            throw new Error("Invalid token");
-          }
-        })
-        .then((data) => {
-          setToken(storedToken);
-          setUsername(storedUsername);
-          localStorage.setItem("pm_current_user", storedUsername);
-          setIsAdmin(data.is_admin || false);
-        })
-        .catch(() => {
-          // Network error or invalid token, clear storage
-          localStorage.removeItem(TOKEN_KEY);
-          localStorage.removeItem(USERNAME_KEY);
-        })
-        .finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
+      .then((data) => {
+        setUsername(data.username);
+        setIsAdmin(data.is_admin || false);
+        setIsAuthenticated(true);
+        localStorage.setItem(USERNAME_KEY, data.username);
+        localStorage.setItem("pm_current_user", data.username);
+      })
+      .catch(() => clearSession())
+      .finally(() => setIsLoading(false));
   }, []);
 
   const login = async (username: string, password: string) => {
     const response = await fetch(`${BASE_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ username, password }),
     });
 
@@ -91,33 +76,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(error.detail || "Login failed");
     }
 
+    // The backend sets the session as an httpOnly cookie; we only keep the
+    // username (for display) and admin flag in memory/localStorage.
     const data = await response.json();
-    const { access_token, username: returnedUsername, is_admin } = data;
+    const { username: returnedUsername, is_admin } = data;
 
-    localStorage.setItem(TOKEN_KEY, access_token);
     localStorage.setItem(USERNAME_KEY, returnedUsername);
     localStorage.setItem("pm_current_user", returnedUsername);
-    setToken(access_token);
     setUsername(returnedUsername);
     setIsAdmin(is_admin || false);
+    setIsAuthenticated(true);
   };
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USERNAME_KEY);
-    localStorage.removeItem("pm_current_user");
-    setToken(null);
-    setUsername(null);
-    setIsAdmin(false);
+    // Best-effort cookie clear on the server; clear local state regardless.
+    fetch(`${BASE_URL}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => {});
+    clearSession();
   };
 
   return (
     <AuthContext.Provider
       value={{
-        token,
         username,
         isAdmin,
-        isAuthenticated: !!token,
+        isAuthenticated,
         isLoading,
         login,
         logout,
@@ -130,10 +112,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   return useContext(AuthContext);
-}
-
-// Helper to get auth header for API requests
-export function getAuthHeader(): Record<string, string> {
-  const token = localStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }

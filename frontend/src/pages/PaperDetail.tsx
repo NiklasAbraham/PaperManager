@@ -730,7 +730,7 @@ export default function PaperDetail() {
   };
 
   const downloadBibtex = async () => {
-    const res = await fetch(`${BASE}/papers/${id}/bibtex`);
+    const res = await fetch(`${BASE}/papers/${id}/bibtex`, { credentials: "include" });
     if (!res.ok) return;
     const text = await res.text();
     const blob = new Blob([text], { type: "text/plain" });

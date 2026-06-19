@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     rate_limit_auth_requests: int = 10
     rate_limit_auth_window_seconds: int = 60
     rate_limit_exempt_paths: str = "/docs,/redoc,/openapi.json"
-    rate_limit_auth_paths: str = "/auth/login"
+    rate_limit_auth_paths: str = "/auth/login,/auth/register,/auth/admin/create-user"
 
     # LiteLLM proxy (replaces local Ollama)
     litellm_endpoint: str = ""

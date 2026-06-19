@@ -134,12 +134,14 @@ export default function ChatPanel({ paperId }: Props) {
   const saveToNote = async (content: string, idx: number) => {
     try {
       const note = await (await fetch(
-        `${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/papers/${paperId}/note`
+        `${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/papers/${paperId}/note`,
+        { credentials: "include" }
       )).json() as { content: string };
       const append = `\n\n---\n**Claude (${new Date().toLocaleDateString()}):**\n\n${content}`;
       await fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/papers/${paperId}/note`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ content: (note.content ?? "") + append }),
       });
       setSavedMsgIdx(idx);

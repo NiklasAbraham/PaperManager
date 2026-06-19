@@ -2,23 +2,10 @@ import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, Knowl
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  
-  // Add JWT token if available
-  const token = localStorage.getItem("pm_auth_token");
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  
-  // Keep username header for backward compatibility
-  const name = localStorage.getItem("pm_current_user");
-  if (name) {
-    headers["X-User-Name"] = name;
-  }
-  
-  return headers;
-}
+// The session JWT lives in an httpOnly cookie set by the backend on login, so it
+// is never exposed to JavaScript (no localStorage) and cannot be stolen via XSS.
+// Every request must opt in to sending cookies with `credentials: "include"`.
+const CREDENTIALS: RequestCredentials = "include";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -30,8 +17,8 @@ const MAX_RETRIES = 2;
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const merged: RequestInit = {
     ...options,
+    credentials: CREDENTIALS,
     headers: {
-      ...authHeaders(),
       ...(options?.headers ?? {}),
     },
   };
@@ -62,7 +49,6 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
   // Handle 401 Unauthorized - signal auth expiry without a hard page reload
   if (res.status === 401) {
-    localStorage.removeItem("pm_auth_token");
     localStorage.removeItem("pm_username");
     localStorage.removeItem("pm_current_user");
     window.dispatchEvent(new CustomEvent("auth:expired"));
@@ -110,7 +96,7 @@ export async function updateMyAiKeys(body: UpdateMyAiKeysBody): Promise<MyAiKeyS
 export async function parsePdf(file: File, signal?: AbortSignal): Promise<ParsedMeta> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/papers/parse`, { method: "POST", body: form, signal });
+  const res = await fetch(`${BASE}/papers/parse`, { method: "POST", body: form, signal, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Parse failed ${res.status}: ${detail}`);
@@ -132,7 +118,7 @@ export async function preprocessPdf(
   const form = new FormData();
   form.append("file", file);
   form.append("caption_method", captionMethod);
-  const res = await fetch(`${BASE}/papers/preprocess`, { method: "POST", body: form, signal });
+  const res = await fetch(`${BASE}/papers/preprocess`, { method: "POST", body: form, signal, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Preprocess failed ${res.status}: ${detail}`);
@@ -161,7 +147,7 @@ export interface AnalysisStatus {
 export async function preanalyzePdf(file: File, signal?: AbortSignal): Promise<AnalysisStatus> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/papers/preanalyze`, { method: "POST", body: form, signal });
+  const res = await fetch(`${BASE}/papers/preanalyze`, { method: "POST", body: form, signal, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Preanalyze failed ${res.status}: ${detail}`);
@@ -199,7 +185,7 @@ export async function uploadPdf(
   // Pass empty string to skip claims extraction; omit to use backend default
   if (claimsModel !== undefined) form.append("claims_model", claimsModel);
   if (generateEmbedding === false) form.append("skip_embedding", "true");
-  const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form, headers: authHeaders() });
+  const res = await fetch(`${BASE}/papers/upload`, { method: "POST", body: form, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Upload failed ${res.status}: ${detail}`);
@@ -249,7 +235,7 @@ export async function countDebugPapers(): Promise<number> {
 }
 
 export async function exportPaperMarkdown(paperId: string): Promise<void> {
-  const res = await fetch(`${BASE}/export/papers/${paperId}/markdown`, { headers: userHeader() });
+  const res = await fetch(`${BASE}/export/papers/${paperId}/markdown`, { credentials: CREDENTIALS });
   if (!res.ok) throw new Error(`Export failed ${res.status}`);
   const blob = await res.blob();
   const cd = res.headers.get("Content-Disposition") ?? "";
@@ -262,7 +248,7 @@ export async function exportPaperMarkdown(paperId: string): Promise<void> {
 }
 
 export async function exportRdf(): Promise<void> {
-  const res = await fetch(`${BASE}/export/rdf`);
+  const res = await fetch(`${BASE}/export/rdf`, { credentials: CREDENTIALS });
   if (!res.ok) throw new Error(`Export failed ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -272,7 +258,7 @@ export async function exportRdf(): Promise<void> {
 }
 
 export async function exportCsv(): Promise<void> {
-  const res = await fetch(`${BASE}/export/csv`);
+  const res = await fetch(`${BASE}/export/csv`, { credentials: CREDENTIALS });
   if (!res.ok) throw new Error(`Export failed ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -282,7 +268,7 @@ export async function exportCsv(): Promise<void> {
 }
 
 export async function exportSnapshot(): Promise<void> {
-  const res = await fetch(`${BASE}/export/snapshot`);
+  const res = await fetch(`${BASE}/export/snapshot`, { credentials: CREDENTIALS });
   if (!res.ok) throw new Error(`Export failed ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -298,7 +284,7 @@ export async function exportSnapshot(): Promise<void> {
 export async function importRdf(file: File): Promise<{ imported: Record<string, number> }> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/export/import/rdf`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}/export/import/rdf`, { method: "POST", body: form, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Import failed ${res.status}: ${detail}`);
@@ -309,7 +295,7 @@ export async function importRdf(file: File): Promise<{ imported: Record<string, 
 export async function importSnapshot(file: File, replace = true): Promise<{ imported: Record<string, number>; replaced: boolean }> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/export/import/snapshot?replace=${replace ? "true" : "false"}`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}/export/import/snapshot?replace=${replace ? "true" : "false"}`, { method: "POST", body: form, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Import failed ${res.status}: ${detail}`);
@@ -344,7 +330,7 @@ export interface SnapshotValidation {
 export async function validateSnapshot(file: File): Promise<SnapshotValidation> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/export/import/snapshot/validate`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}/export/import/snapshot/validate`, { method: "POST", body: form, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Validation failed ${res.status}: ${detail}`);
@@ -387,7 +373,7 @@ export async function refetchPdf(paperId: string): Promise<{ authors: string[]; 
 export async function uploadPdfForPaper(paperId: string, file: File): Promise<{ drive_url?: string; authors_added: string[]; raw_text_len: number }> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/papers/${paperId}/upload-pdf`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}/papers/${paperId}/upload-pdf`, { method: "POST", body: form, credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`PDF upload failed ${res.status}: ${detail}`);
@@ -396,7 +382,7 @@ export async function uploadPdfForPaper(paperId: string, file: File): Promise<{ 
 }
 
 export async function deletePaper(paperId: string): Promise<void> {
-  const res = await fetch(`${BASE}/papers/${paperId}`, { method: "DELETE" });
+  const res = await fetch(`${BASE}/papers/${paperId}`, { method: "DELETE", credentials: CREDENTIALS });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Delete failed ${res.status}: ${detail}`);
@@ -553,7 +539,7 @@ export async function updatePerson(personId: string, data: Partial<{
 }
 
 export async function removeAuthor(paperId: string, personId: string): Promise<void> {
-  const res = await fetch(`${BASE}/papers/${paperId}/authors/${personId}`, { method: "DELETE" });
+  const res = await fetch(`${BASE}/papers/${paperId}/authors/${personId}`, { method: "DELETE", credentials: CREDENTIALS });
   if (!res.ok) throw new Error(`Remove author failed ${res.status}`);
 }
 
@@ -774,6 +760,7 @@ export async function* streamKnowledgeChat(body: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    credentials: CREDENTIALS,
   });
   if (!res.ok || !res.body) throw new Error(`API ${res.status}`);
 
@@ -808,6 +795,7 @@ export async function* bulkImport(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal,
+    credentials: CREDENTIALS,
   });
   if (!res.ok || !res.body) throw new Error(`API ${res.status}`);
 
@@ -856,6 +844,7 @@ export async function* searchLiterature(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal,
+    credentials: CREDENTIALS,
   });
   if (!res.ok || !res.body) throw new Error(`API ${res.status}`);
 
@@ -1141,6 +1130,7 @@ export function updateAnnotation(
 export async function deleteAnnotation(paperId: string, annotationId: string): Promise<void> {
   const res = await fetch(`${BASE}/papers/${paperId}/annotations/${annotationId}`, {
     method: "DELETE",
+    credentials: CREDENTIALS,
   });
   if (!res.ok) throw new Error(`Delete annotation failed ${res.status}`);
 }
@@ -1201,7 +1191,7 @@ export async function interpretSearch(query: string): Promise<SearchInterpretRes
 // ── Users / Teammates ─────────────────────────────────────────────────────────
 
 export async function deleteUser(name: string): Promise<void> {
-  const res = await fetch(`${BASE}/users/${encodeURIComponent(name)}`, { method: "DELETE" });
+  const res = await fetch(`${BASE}/users/${encodeURIComponent(name)}`, { method: "DELETE", credentials: CREDENTIALS });
   if (!res.ok) throw new Error(`Delete user failed ${res.status}`);
 }
 

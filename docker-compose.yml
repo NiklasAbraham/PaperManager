@@ -38,11 +38,11 @@ services:
       - GOOGLE_CREDENTIALS_FILE=${GOOGLE_CREDENTIALS_FILE:-}
       - GOOGLE_TOKEN_FILE=${GOOGLE_TOKEN_FILE:-}
       - BACKEND_PORT=8000
-      - FRONTEND_URL=https://niklas-abraham.de
+      - FRONTEND_URL=https://papermanager.niklas-abraham.de
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - DEFAULT_USER_NAME=${DEFAULT_USER_NAME:-niklas}
       - DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD}
-      - TRUSTED_HOSTS=niklas-abraham.de,localhost,127.0.0.1
+      - TRUSTED_HOSTS=papermanager.niklas-abraham.de,localhost,127.0.0.1
       - TRUST_PROXY_HEADERS=true
       - SSL_VERIFY=${SSL_VERIFY:-true}
       - SSL_CA_BUNDLE=${SSL_CA_BUNDLE:-}
@@ -63,7 +63,7 @@ services:
       - RATE_LIMIT_AUTH_REQUESTS=${RATE_LIMIT_AUTH_REQUESTS:-10}
       - RATE_LIMIT_AUTH_WINDOW_SECONDS=${RATE_LIMIT_AUTH_WINDOW_SECONDS:-60}
       - RATE_LIMIT_EXEMPT_PATHS=${RATE_LIMIT_EXEMPT_PATHS:-/docs,/redoc,/openapi.json}
-      - RATE_LIMIT_AUTH_PATHS=${RATE_LIMIT_AUTH_PATHS:-/auth/login}
+      - RATE_LIMIT_AUTH_PATHS=${RATE_LIMIT_AUTH_PATHS:-/auth/login,/auth/register,/auth/admin/create-user}
     depends_on:
       - neo4j
     networks:
@@ -86,7 +86,7 @@ services:
     labels:
       - "traefik.enable=true"
       # HTTPS router
-      - "traefik.http.routers.papermanager.rule=Host(`niklas-abraham.de`)"
+      - "traefik.http.routers.papermanager.rule=Host(`papermanager.niklas-abraham.de`)"
       - "traefik.http.routers.papermanager.entrypoints=websecure"
       - "traefik.http.routers.papermanager.tls=true"
       - "traefik.http.routers.papermanager.tls.certresolver=letsencrypt"

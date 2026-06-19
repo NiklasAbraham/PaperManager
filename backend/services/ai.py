@@ -759,8 +759,10 @@ def chat_with_chapter(
 def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
     """
     Use LiteLLM to propose a chapter structure from a book/lecture PDF text.
-    Returns a list of dicts: [{number, title, level}, ...].
-    Falls back to [] on any error.
+    Returns a list of top-level (logical) chapters: [{number, title, level}, ...].
+
+    Sub-chapters / sub-sections are intentionally NOT returned — only the main
+    logical chapters of the book. Falls back to [] on any error.
     """
     import json, re
 
@@ -769,9 +771,12 @@ def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
 
     prompt = (
         "You are a book indexer. Given the following text from a book or lecture deck, "
-        "identify the main chapters (and sub-chapters if clearly present). "
+        "identify ONLY the main, top-level logical chapters of the document. "
+        "Do NOT include sub-chapters, sub-sections, or numbered sub-divisions "
+        "(e.g. '2.1', '2.1.3', or a subsection nested under a chapter) — list a "
+        "chapter only once at its highest level. "
         "Return a JSON object with key 'chapters', each item having: "
-        "number (int), title (str), level (1=chapter, 2=sub-chapter).\n\n"
+        "number (int), title (str), level (always 1).\n\n"
         f"Document title: {title or '(unknown)'}\n\n"
         f"Document text (first 6000 words):\n{text[:15000]}"
     )
@@ -782,15 +787,24 @@ def detect_chapters_with_ai(title: str, text: str) -> list[dict]:
     try:
         data = json.loads(match.group())
         chapters = data.get("chapters") or []
-        return [
-            {
-                "number": int(c.get("number", i + 1)),
-                "title": str(c.get("title", f"Chapter {i + 1}")),
-                "level": int(c.get("level", 1)),
-            }
-            for i, c in enumerate(chapters)
-            if c.get("title")
-        ]
+        # Keep only top-level chapters — drop anything the model still tags as a
+        # sub-chapter (level >= 2) or whose title looks like a numbered subsection
+        # such as "2.1 Foo" or "3.4.1 Bar".
+        result: list[dict] = []
+        for c in chapters:
+            raw_title = str(c.get("title", "")).strip()
+            if not raw_title:
+                continue
+            if int(c.get("level", 1)) >= 2:
+                continue
+            if re.match(r"^\d+\.\d+", raw_title):
+                continue
+            result.append({
+                "number": len(result) + 1,
+                "title": raw_title,
+                "level": 1,
+            })
+        return result
     except Exception:
         return []
 

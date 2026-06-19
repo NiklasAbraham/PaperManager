@@ -2,11 +2,19 @@
 from __future__ import annotations
 import logging
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Response
 
 from db.connection import get_driver
 from db.queries.users import create_user_with_password, get_user_by_name, is_user_admin, list_users, update_user_password, delete_user, merge_users, update_user_ai_keys
-from services.auth import hash_password, verify_password, create_access_token, get_current_user
+from services.auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_user,
+    set_auth_cookie,
+    clear_auth_cookie,
+    validate_password_strength,
+)
 from services.user_ai_config import get_masked_ai_config
 
 log = logging.getLogger(__name__)
@@ -68,8 +76,8 @@ def _require_niklas_admin(current_user: str) -> None:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest):
-    """Authenticate a user and return a JWT token."""
+def login(body: LoginRequest, response: Response):
+    """Authenticate a user and return a JWT token (also set as an httpOnly cookie)."""
     # Get user from database
     user = get_user_by_name(get_driver(), body.username)
     
@@ -99,14 +107,25 @@ def login(body: LoginRequest):
     
     # Create JWT token
     access_token = create_access_token(data={"sub": user["name"]})
-    
+
+    # Browser clients use the httpOnly cookie; the token is also returned in the
+    # body for programmatic (curl/SDK) callers that send it as a bearer header.
+    set_auth_cookie(response, access_token)
+
     log.info(f"User '{body.username}' logged in successfully")
-    
+
     return TokenResponse(
         access_token=access_token,
         username=user["name"],
         is_admin=user.get("is_admin", False)
     )
+
+
+@router.post("/logout")
+def logout(response: Response):
+    """Clear the session cookie."""
+    clear_auth_cookie(response)
+    return {"message": "Logged out"}
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -128,18 +147,14 @@ def register(body: RegisterRequest, current_user: str = Depends(get_current_user
         )
     
     # Validate password
-    if len(body.password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters"
-        )
-    
+    validate_password_strength(body.password)
+
     # Hash password and create user
     password_hash = hash_password(body.password)
     user = create_user_with_password(get_driver(), body.username, password_hash, is_admin=False)
-    
+
     log.info(f"Admin '{current_user}' created new user '{body.username}'")
-    
+
     return {"message": f"User '{body.username}' created successfully"}
 
 
@@ -157,18 +172,14 @@ def admin_create_user(body: CreateUserRequest, current_user: str = Depends(get_c
         )
     
     # Validate password
-    if len(body.password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters long"
-        )
-    
+    validate_password_strength(body.password)
+
     # Hash password and create user
     password_hash = hash_password(body.password)
     user = create_user_with_password(get_driver(), body.username, password_hash, is_admin=False)
-    
+
     log.info(f"Admin '{current_user}' created new user '{body.username}'")
-    
+
     return {"message": "User created successfully", "username": user["name"]}
 
 
@@ -191,12 +202,8 @@ def admin_update_password(body: UpdatePasswordRequest, current_user: str = Depen
         )
     
     # Validate password
-    if len(body.new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters long"
-        )
-    
+    validate_password_strength(body.new_password)
+
     # Hash and update password
     password_hash = hash_password(body.new_password)
     success = update_user_password(get_driver(), body.username, password_hash)

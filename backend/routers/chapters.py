@@ -86,8 +86,11 @@ def detect_and_create_chapters(paper_id: str, body: ChapterDetectRequest):
     # Strategy 3: Ollama AI fallback (use_ai flag, last resort)
     if body.use_ai and not chapter_dicts:
         ai_chapters = detect_chapters_with_ai(paper.get("title", ""), raw_text)
+        # Keep only top-level (logical) chapters — never persist sub-chapters.
+        ai_chapters = [ch for ch in ai_chapters if ch.get("level", 1) == 1]
         if ai_chapters:
-            for ch in ai_chapters:
+            for i, ch in enumerate(ai_chapters):
+                ch["number"] = i + 1
                 title = ch.get("title", "")
                 idx = raw_text.find(title) if title else -1
                 ch["text"] = raw_text[idx:idx + 8000] if idx != -1 else ""

@@ -18,7 +18,7 @@ export default function Teammates() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${BASE}/users`)
+    fetch(`${BASE}/users`, { credentials: "include" })
       .then((r) => r.json())
       .then(setUsers)
       .catch(() => {});
@@ -33,6 +33,7 @@ export default function Teammates() {
       const res = await fetch(`${BASE}/users/${encodeURIComponent(selectedUser)}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ question: question.trim() }),
       });
       if (!res.ok) throw new Error(await res.text());

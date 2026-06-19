@@ -32,32 +32,27 @@ def _mock_client(response_text: str):
 
 
 def test_summarize_calls_claude_api():
-    mock_client = _mock_client("## Summary\n\nThis paper proposes X.")
-    with patch("services.ai.anthropic.Anthropic", return_value=mock_client):
+    with patch("services.ai.chat_completion", return_value="## Summary\n\nThis paper proposes X.") as mock_cc:
         result = summarize_paper("Some paper text here.", title="Test Paper")
     assert "Summary" in result
-    mock_client.messages.create.assert_called_once()
+    mock_cc.assert_called_once()
 
 
 def test_summarize_passes_title_in_prompt():
-    mock_client = _mock_client("Summary content")
-    with patch("services.ai.anthropic.Anthropic", return_value=mock_client):
+    with patch("services.ai.chat_completion", return_value="Summary content") as mock_cc:
         summarize_paper("paper text", title="My Amazing Paper")
 
-    call_kwargs = mock_client.messages.create.call_args
-    prompt_content = call_kwargs[1]["messages"][0]["content"]
+    prompt_content = mock_cc.call_args.kwargs["messages"][0]["content"]
     assert "My Amazing Paper" in prompt_content
 
 
 def test_summarize_truncates_long_text():
-    """Text longer than 40k chars should be truncated in the prompt."""
+    """Text longer than the model cap should be truncated in the prompt."""
     long_text = "word " * 20000  # ~100k chars
-    mock_client = _mock_client("Summary")
-    with patch("services.ai.anthropic.Anthropic", return_value=mock_client):
+    with patch("services.ai.chat_completion", return_value="Summary") as mock_cc:
         summarize_paper(long_text)
 
-    call_kwargs = mock_client.messages.create.call_args
-    prompt_content = call_kwargs[1]["messages"][0]["content"]
+    prompt_content = mock_cc.call_args.kwargs["messages"][0]["content"]
     assert len(prompt_content) < len(long_text)
 
 

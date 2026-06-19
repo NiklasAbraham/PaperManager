@@ -69,8 +69,10 @@ def clear_papers(current_user: str = Depends(get_current_user)):
 
 
 @router.post("/seed-defaults")
-def seed_defaults():
-    """Re-seed the default tags (idempotent — safe to run any time)."""
+def seed_defaults(current_user: str = Depends(get_current_user)):
+    """Re-seed the default tags (idempotent — safe to run any time). ADMIN ONLY."""
+    if not is_user_admin(get_driver(), current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators can seed defaults")
     from routers.tags import seed_default_tags, DEFAULT_TAGS
     seed_default_tags(get_driver())
     return {"seeded": len(DEFAULT_TAGS)}

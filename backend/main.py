@@ -13,7 +13,7 @@ from db.connection import get_driver, close_driver, reset_driver
 from db.schema import run_schema_setup
 from models.schemas import HealthResponse
 from services.rate_limit import LimitRule, RateLimitMiddleware, parse_csv_paths
-from services.auth import extract_user_from_auth_header, reset_request_user, set_request_user
+from services.auth import extract_user_from_request, reset_request_user, set_request_user
 
 log = logging.getLogger(__name__)
 from routers import papers
@@ -94,7 +94,7 @@ from neo4j.exceptions import ServiceUnavailable, SessionExpired
 class Neo4jReconnectMiddleware(BaseHTTPMiddleware):
     """Catch dead-connection errors from Neo4j Aura, reset the driver, and return 503."""
     async def dispatch(self, request: Request, call_next):
-        request_user = extract_user_from_auth_header(request.headers.get("Authorization"))
+        request_user = extract_user_from_request(request)
         ctx_token = set_request_user(request_user)
         try:
             return await call_next(request)

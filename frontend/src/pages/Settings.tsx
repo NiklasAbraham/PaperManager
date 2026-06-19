@@ -69,7 +69,7 @@ export default function Settings() {
   const exportBibtex = async () => {
     setExporting("bibtex");
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/export/bibtex`);
+      const res = await fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/export/bibtex`, { credentials: "include" });
       const text = await res.text();
       download(text, "papers.bib", "text/plain");
     } finally {

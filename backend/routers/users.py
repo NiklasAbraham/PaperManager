@@ -2,13 +2,23 @@
 from __future__ import annotations
 import logging
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from db.connection import get_driver
-from db.queries.users import get_or_create_user, list_users, get_user_conversations_for_ask, delete_user, rename_user
+from db.queries.users import get_or_create_user, list_users, get_user_conversations_for_ask, delete_user, rename_user, is_user_admin
+from services.auth import get_current_user
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _require_admin(current_user: str) -> None:
+    """Raise 403 unless the caller is an administrator."""
+    if not is_user_admin(get_driver(), current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can perform this action",
+        )
 
 
 class IdentifyBody(BaseModel):
@@ -23,13 +33,25 @@ class RenameBody(BaseModel):
     name: str
 
 
+_SENSITIVE_USER_FIELDS = {
+    "password_hash",
+    "anthropic_api_key",
+    "anthropic_work_api_key",
+    "anthropic_work_base_url",
+}
+
+
 @router.get("")
-def get_users():
-    return list_users(get_driver())
+def get_users(current_user: str = Depends(get_current_user)):
+    users = list_users(get_driver())
+    for user in users:
+        for field in _SENSITIVE_USER_FIELDS:
+            user.pop(field, None)
+    return users
 
 
 @router.post("/identify")
-def identify(body: IdentifyBody):
+def identify(body: IdentifyBody, current_user: str = Depends(get_current_user)):
     """Get or create a user by name. Called on app load to register the current user."""
     if not body.name.strip():
         raise HTTPException(status_code=422, detail="Name cannot be empty")
@@ -37,14 +59,16 @@ def identify(body: IdentifyBody):
 
 
 @router.delete("/{name}", status_code=204)
-def remove_user(name: str):
-    """Delete a user and all their graph relationships."""
+def remove_user(name: str, current_user: str = Depends(get_current_user)):
+    """Delete a user and all their graph relationships. ADMIN ONLY."""
+    _require_admin(current_user)
     delete_user(get_driver(), name)
 
 
 @router.patch("/{name}")
-def update_user(name: str, body: RenameBody):
-    """Rename a user."""
+def update_user(name: str, body: RenameBody, current_user: str = Depends(get_current_user)):
+    """Rename a user. ADMIN ONLY."""
+    _require_admin(current_user)
     new_name = body.name.strip()
     if not new_name:
         raise HTTPException(status_code=422, detail="Name cannot be empty")
@@ -55,7 +79,7 @@ def update_user(name: str, body: RenameBody):
 
 
 @router.post("/{name}/ask")
-def ask_user(name: str, body: AskBody):
+def ask_user(name: str, body: AskBody, current_user: str = Depends(get_current_user)):
     """
     Ask Claude what a specific user has been thinking about a topic,
     based on their conversation history.

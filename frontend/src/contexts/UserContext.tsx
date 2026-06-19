@@ -26,6 +26,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/users/identify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ name }),
     }).catch(() => {});
   };
@@ -41,6 +42,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/users/identify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ name: currentUser }),
       }).catch(() => {});
     }

@@ -3,9 +3,10 @@ from datetime import datetime, timedelta, timezone
 from contextvars import ContextVar, Token
 from typing import Optional
 import logging
+import re
 from jose import JWTError, jwt
 import bcrypt
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Request, Response, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 from config import settings
@@ -22,8 +23,66 @@ if not settings.jwt_secret_key.strip():
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
-security = HTTPBearer()
+# Name of the httpOnly cookie that carries the session JWT for browser clients.
+# Keeping the token in an httpOnly cookie (instead of localStorage) means it is
+# never readable from JavaScript, so an XSS bug cannot exfiltrate the session.
+ACCESS_COOKIE_NAME = "pm_session"
+
+# auto_error=False so requests without a bearer header fall through to the cookie.
+security = HTTPBearer(auto_error=False)
 _request_user_ctx: ContextVar[Optional[str]] = ContextVar("request_user", default=None)
+
+# Password policy: minimum length plus required character classes.
+PASSWORD_MIN_LENGTH = 8
+_PASSWORD_REQUIREMENTS = [
+    (re.compile(r"[a-z]"), "a lowercase letter"),
+    (re.compile(r"[A-Z]"), "an uppercase letter"),
+    (re.compile(r"[0-9]"), "a digit"),
+]
+
+
+def validate_password_strength(password: str) -> None:
+    """Raise HTTP 400 if the password does not meet the strength policy."""
+    problems: list[str] = []
+    if len(password) < PASSWORD_MIN_LENGTH:
+        problems.append(f"at least {PASSWORD_MIN_LENGTH} characters")
+    for pattern, description in _PASSWORD_REQUIREMENTS:
+        if not pattern.search(password):
+            problems.append(description)
+    if problems:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must contain " + ", ".join(problems) + ".",
+        )
+
+
+def _cookie_is_secure() -> bool:
+    """Mark the session cookie Secure when the app is served over HTTPS."""
+    return settings.frontend_url.strip().lower().startswith("https")
+
+
+def set_auth_cookie(response: Response, token: str) -> None:
+    """Store the session JWT in an httpOnly, SameSite=Lax cookie."""
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=token,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=_cookie_is_secure(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def clear_auth_cookie(response: Response) -> None:
+    """Remove the session cookie (logout)."""
+    response.delete_cookie(
+        key=ACCESS_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=_cookie_is_secure(),
+        samesite="lax",
+    )
 
 
 def hash_password(password: str) -> str:
@@ -102,9 +161,35 @@ def extract_user_from_auth_header(authorization_header: Optional[str]) -> Option
     return payload.get("sub")
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
-    """Extract the current user from the JWT token."""
-    token = credentials.credentials
+def extract_user_from_request(request: Request) -> Optional[str]:
+    """Resolve the request user from the Authorization header or session cookie."""
+    user = extract_user_from_auth_header(request.headers.get("Authorization"))
+    if user:
+        return user
+    cookie_token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if not cookie_token:
+        return None
+    payload = decode_token_optional(cookie_token)
+    return payload.get("sub") if payload else None
+
+
+def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
+) -> str:
+    """Extract the current user from the bearer token or the session cookie."""
+    if credentials and credentials.credentials:
+        token = credentials.credentials
+    else:
+        token = request.cookies.get(ACCESS_COOKIE_NAME)
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     payload = decode_token(token)
     username: str = payload.get("sub")
     if username is None:
