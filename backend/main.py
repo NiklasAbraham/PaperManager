@@ -46,6 +46,7 @@ from routers.discover import router as discover_router
 from routers.author_tracker import router as author_tracker_router
 from routers.merge import router as merge_router
 from routers.audit_log import router as audit_log_router
+from routers.ideogram import router as ideogram_router
 
 
 @asynccontextmanager
@@ -181,6 +182,7 @@ app.include_router(discover_router)
 app.include_router(author_tracker_router)
 app.include_router(merge_router)
 app.include_router(audit_log_router)
+app.include_router(ideogram_router)
 
 
 @app.get("/litellm/models", response_model=list[str])

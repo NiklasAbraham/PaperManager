@@ -934,6 +934,7 @@ def export_paper_markdown(paper_id: str, driver: Driver = Depends(get_driver)):
         ("DOI",             _s(paper.get("doi"))),
         ("Venue",           _s(paper.get("venue"))),
         ("Document type",   _s(paper.get("document_type"))),
+        ("Published date",  _s(paper.get("published_date"))),
         ("Metadata source", _s(paper.get("metadata_source"))),
         ("Reading status",  _s(paper.get("reading_status"))),
         ("Rating",          _s(paper.get("rating"))),

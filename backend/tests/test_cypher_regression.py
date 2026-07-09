@@ -50,6 +50,8 @@ def paper(driver):
         ("document_type", "paper"),
         ("document_type", "book"),
         ("document_type", "lecture_deck"),
+        ("document_type", "news_article"),
+        ("published_date", "2026-03-14"),
         ("bookmarked", True),
         ("rating", 4),
         ("title", "Renamed"),

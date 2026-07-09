@@ -1047,8 +1047,8 @@ export default function PaperDetail() {
                       </p>
                     ) : null}
                     {paper.document_type && paper.document_type !== "paper" && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${paper.document_type === "book" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
-                        {paper.document_type === "book" ? "📚 Book" : "🎓 Lecture deck"}
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${paper.document_type === "book" ? "bg-amber-100 text-amber-700" : paper.document_type === "news_article" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"}`}>
+                        {paper.document_type === "book" ? "📚 Book" : paper.document_type === "news_article" ? "📰 News article" : "🎓 Lecture deck"}
                       </span>
                     )}
                   </div>
@@ -1677,6 +1677,7 @@ export default function PaperDetail() {
                         <option value="paper">📄 Paper</option>
                         <option value="book">📚 Book</option>
                         <option value="lecture_deck">🎓 Lecture deck</option>
+                        <option value="news_article">📰 News article</option>
                       </select>
                     </div>
                   </div>

@@ -28,6 +28,7 @@ export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor
   const [metadataSource, setMetadataSource] = useState(paper.metadata_source ?? "");
   const [reading_status, setReadingStatus]  = useState<Paper["reading_status"]>(paper.reading_status ?? "unread");
   const [document_type,  setDocumentType]   = useState<Paper["document_type"]>(paper.document_type ?? "paper");
+  const [publishedDate,  setPublishedDate]  = useState(paper.published_date ?? "");
   const [color,          setColor]          = useState(paper.color ?? "");
   const [tagNames, setTagNames]             = useState(() => metadataEditor?.tags.map((tag) => tag.name) ?? []);
   const [topicNames, setTopicNames]         = useState(() => metadataEditor?.topics.map((topic) => topic.name) ?? []);
@@ -71,6 +72,7 @@ export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor
         metadata_source: metadataSource.trim() || null,
         reading_status:  reading_status ?? null,
         document_type:   document_type ?? null,
+        published_date:  publishedDate.trim() || null,
         color:           color || null,
       });
 
@@ -155,8 +157,20 @@ export default function EditPaperModal({ paper, onSaved, onClose, metadataEditor
                 <option value="paper">📄 Paper</option>
                 <option value="book">📚 Book</option>
                 <option value="lecture_deck">🎓 Lecture deck</option>
+                <option value="news_article">📰 News article</option>
               </select>
             </Field>
+
+            {document_type === "news_article" && (
+              <Field label="Published date" className="flex-1">
+                <input
+                  type="date"
+                  value={publishedDate}
+                  onChange={(e) => setPublishedDate(e.target.value)}
+                  className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+                />
+              </Field>
+            )}
 
             <Field label="Reading status" className="flex-1">
               <select

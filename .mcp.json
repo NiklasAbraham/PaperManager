@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "paperManager": {
-      "command": "/Users/you/miniforge3/envs/papermanager/bin/python",
-      "args": ["backend/mcp_server.py"],
-      "cwd": "/Users/you/Desktop/PaperManager"
+      "command": "docker",
+      "args": ["exec", "-i", "papermanager-backend-1", "python", "mcp_server.py"]
     }
   }
 }

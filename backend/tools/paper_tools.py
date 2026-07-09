@@ -55,8 +55,14 @@ def register(mcp: FastMCP):
         doi: str | None = None,
         abstract: str | None = None,
         venue: str | None = None,
+        document_type: str | None = None,
+        published_date: str | None = None,
     ) -> dict:
         """Add a paper to the library without a PDF (e.g. from a citation or URL).
+
+        document_type is one of "paper" (default), "book", "lecture_deck", or
+        "news_article". For a news article, put the outlet in `venue` and the
+        full publication date (YYYY-MM-DD) in `published_date`.
         Returns the new paper with its id that you can use with other tools."""
         return create_paper(get_driver(), {
             "title": title,
@@ -64,6 +70,8 @@ def register(mcp: FastMCP):
             "doi": doi,
             "abstract": abstract,
             "venue": venue,
+            "document_type": document_type,
+            "published_date": published_date,
             "metadata_source": "manual",
         })
 

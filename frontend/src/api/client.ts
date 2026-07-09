@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, PaperTable, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim } from "../types";
+import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, PaperTable, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim , IdeogramCaption, IdeogramSessionStatus, IdeogramGenerateBody, IdeogramGenerateResult} from "../types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -171,6 +171,7 @@ export async function uploadPdf(
   generateEmbedding?: boolean,
   preprocessKey?: string,
   analysisKey?: string,
+  publishedDate?: string,
 ): Promise<T_IngestOut> {
   const form = new FormData();
   form.append("file", file);
@@ -180,6 +181,7 @@ export async function uploadPdf(
   if (summaryInstructions) form.append("summary_instructions", summaryInstructions);
   if (debug) form.append("debug", "true");
   if (documentType) form.append("document_type", documentType);
+  if (publishedDate) form.append("published_date", publishedDate);
   if (preprocessKey) form.append("preprocess_key", preprocessKey);
   if (analysisKey) form.append("analysis_key", analysisKey);
   // Pass empty string to skip claims extraction; omit to use backend default
@@ -409,7 +411,7 @@ export async function updatePaper(paperId: string, data: Partial<{
   metadata_source: string | null;
   reading_status: string | null; rating: number | null;
   bookmarked: boolean | null; color: string | null;
-  document_type: string | null;
+  document_type: string | null; published_date: string | null;
 }>): Promise<Paper> {
   return apiFetch<Paper>(`/papers/${paperId}`, {
     method: "PATCH",
@@ -1362,5 +1364,40 @@ export async function executeMerge(keepId: string, removeId: string): Promise<{ 
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ keep_id: keepId, remove_id: removeId }),
+  });
+}
+
+// ── Ideogram (text-to-image tool) ─────────────────────────────────────────────
+
+export async function startIdeogramSession(): Promise<IdeogramSessionStatus> {
+  return apiFetch("/ideogram/session/start", { method: "POST" });
+}
+
+export async function getIdeogramStatus(): Promise<IdeogramSessionStatus> {
+  return apiFetch("/ideogram/session/status");
+}
+
+export async function stopIdeogramSession(): Promise<{ stopped: boolean }> {
+  return apiFetch("/ideogram/session/stop", { method: "POST" });
+}
+
+export async function ideogramMagicPrompt(
+  prompt: string,
+  width: number,
+  height: number,
+  model: "gemma" | "claude" = "gemma",
+): Promise<{ caption: IdeogramCaption | string }> {
+  return apiFetch("/ideogram/magic-prompt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, width, height, model }),
+  });
+}
+
+export async function ideogramGenerate(body: IdeogramGenerateBody): Promise<IdeogramGenerateResult> {
+  return apiFetch("/ideogram/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }

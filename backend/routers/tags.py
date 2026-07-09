@@ -14,7 +14,7 @@ DEFAULT_TAGS = [
     "pdf-upload", "from-url", "from-references", "bulk-import", "debug",
     "from-linkedin", "from-twitter", "from-email",
     "from-conference", "from-newsletter", "from-google-scholar",
-    "from-google", "from-ai-chat", "from-arxiv",
+    "from-google", "from-ai-chat", "from-arxiv", "from-newspaper",
 
     # ── Workflow & personal status ─────────────────────────────────────────────
     "to-read", "reading", "read", "important", "revisit",

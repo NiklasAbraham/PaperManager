@@ -15,7 +15,8 @@ class PaperCreate(BaseModel):
     doi: str | None = None
     abstract: str | None = None
     venue: str | None = None
-    document_type: str | None = None   # "paper" | "book" | "lecture_deck"
+    document_type: str | None = None   # "paper" | "book" | "lecture_deck" | "news_article"
+    published_date: str | None = None  # ISO date (YYYY-MM-DD); day-level precision for news articles
 
 
 class PaperUpdate(BaseModel):
@@ -30,7 +31,8 @@ class PaperUpdate(BaseModel):
     rating: int | None = None           # 1-5
     bookmarked: bool | None = None
     color: str | None = None            # hex color string or named color
-    document_type: str | None = None   # "paper" | "book" | "lecture_deck"
+    document_type: str | None = None   # "paper" | "book" | "lecture_deck" | "news_article"
+    published_date: str | None = None  # ISO date (YYYY-MM-DD)
 
 
 class PaperOut(BaseModel):
@@ -49,7 +51,8 @@ class PaperOut(BaseModel):
     rating: int | None = None
     bookmarked: bool | None = None
     color: str | None = None
-    document_type: str | None = None   # "paper" | "book" | "lecture_deck"
+    document_type: str | None = None   # "paper" | "book" | "lecture_deck" | "news_article"
+    published_date: str | None = None  # ISO date (YYYY-MM-DD)
     added_by: str | None = None
     added_by_color: str | None = None
 

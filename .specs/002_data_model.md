@@ -25,8 +25,9 @@ The central entity. Every paper, book, or lecture deck is a `Paper` node.
 | `rating` | integer | 1–5 star rating |
 | `bookmarked` | boolean | |
 | `color` | string | Colour label (hex or name) |
-| `document_type` | string | `"paper"` / `"book"` / `"lecture_deck"` |
-| `venue` | string | Journal or conference name |
+| `document_type` | string | `"paper"` / `"book"` / `"lecture_deck"` / `"news_article"` |
+| `published_date` | string | ISO date `YYYY-MM-DD`; day-level precision for news articles (papers only store `year`) |
+| `venue` | string | Journal or conference name — for a news article, the outlet (e.g. "The New York Times") |
 | `embedding` | float[] | 768-dim Ollama vector (nomic-embed-text) |
 | `created_at` | datetime | |
 | `updated_at` | datetime | |
@@ -37,6 +38,7 @@ The central entity. Every paper, book, or lecture deck is a `Paper` node.
 - `paper` — gets summary, figures, references, claims (default)
 - `book` — skips summary/figures/refs/claims; supports chapters
 - `lecture_deck` — same as book
+- `news_article` — gets summary + claims + embedding + topics, but skips academic references and figures (they don't apply to news). Use `venue` for the outlet and `published_date` for the full date. Scanned newspaper PDFs are OCR'd by Docling like any upload; auto-tagged `from-newspaper`.
 
 ### Person
 Authors, collaborators, colleagues.
@@ -253,7 +255,7 @@ Paper.id, Person.id, Topic.id, Topic.name, Tag.id, Tag.name, Note.id, Project.id
 
 Categories seeded on startup:
 
-- **Source:** `pdf-upload`, `from-url`, `from-references`, `bulk-import`, `from-linkedin`, `from-twitter`, `from-email`, `from-conference`, `from-newsletter`, `from-google-scholar`, `from-colleague`
+- **Source:** `pdf-upload`, `from-url`, `from-references`, `bulk-import`, `from-linkedin`, `from-twitter`, `from-email`, `from-conference`, `from-newsletter`, `from-google-scholar`, `from-colleague`, `from-newspaper`
 - **Workflow:** `to-read`, `reading`, `read`, `important`, `revisit`, `needs-review`, `relevant`, `in-bibliography`, `reproduced`, `code-available`
 - **Content type:** `review`, `benchmark`, `dataset`, `method`, `theory`, `negative-result`, `foundational`, `highly-cited`, `sota`
 - **Math:** algebra, topology, differential geometry, probability, statistics, optimization, graph theory, information theory, and more

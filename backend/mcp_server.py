@@ -20,7 +20,11 @@ Configure in Claude Code by adding to ~/.claude/settings.json:
 Or use the project-level .mcp.json at the repo root.
 """
 from mcp.server.fastmcp import FastMCP
+from config import settings
+from services.auth import set_request_user
 from tools import paper_tools, note_tools, tag_tools, person_tools, project_tools, ai_tools
+
+set_request_user(settings.default_user_name)
 
 mcp = FastMCP("PaperManager")
 

@@ -133,8 +133,18 @@ def extract_abstract_with_ai(text: str, document_type: str | None = None) -> str
     - 'paper' (default): look for the abstract section
     - 'book': look for the back-cover description, preface, or introduction overview
     - 'lecture_deck': look for the overview, objectives, or opening slide summary
+    - 'news_article': use the standfirst/lede (opening paragraph) as the description
     """
     _PROMPTS = {
+        "news_article": (
+            "This is text from a news article (it may come from a scanned or OCR'd newspaper).\n"
+            "Extract a concise description of what the article is about — prefer the standfirst / "
+            "lede (the opening paragraph), or write a one-sentence summary of the story if none exists.\n"
+            "Ignore surrounding noise from other articles on the same page.\n"
+            "Return ONLY the description text itself — no label or prefix.\n"
+            "If nothing suitable exists, return an empty string.\n\n"
+            f"Article text:\n{text[:5000]}"
+        ),
         "book": (
             "This is text from a book. Extract a concise description of the book — "
             "this may come from a preface, introduction, back-cover blurb, or an 'About this book' section.\n"

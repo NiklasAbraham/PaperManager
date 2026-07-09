@@ -43,7 +43,8 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
   const [year, setYear]         = useState(meta.year?.toString() ?? "");
   const [doi, setDoi]           = useState(meta.doi ?? "");
   const [abstract, setAbstract] = useState(meta.abstract ?? "");
-  const [documentType, setDocumentType] = useState<"paper" | "book" | "lecture_deck">("paper");
+  const [documentType, setDocumentType] = useState<"paper" | "book" | "lecture_deck" | "news_article">("paper");
+  const [publishedDate, setPublishedDate] = useState(meta.published_date ?? "");
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<Paper | null>(null);
@@ -311,6 +312,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
           settings.generateEmbeddingsOnUpload,
           documentType === "paper" ? preprocessKey : undefined,
           documentType === "paper" ? analysisKey : undefined,
+          documentType === "news_article" ? (publishedDate || undefined) : undefined,
         );
       }
       await applySource(paper.id);
@@ -985,7 +987,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
           {!urlMode && (
             <Field label="Document type">
               <div className="flex gap-2">
-                {([ ["paper", "📄 Paper"], ["book", "📚 Book"], ["lecture_deck", "🎓 Lecture deck"] ] as const).map(([val, label]) => (
+                {([ ["paper", "📄 Paper"], ["book", "📚 Book"], ["lecture_deck", "🎓 Lecture deck"], ["news_article", "📰 News"] ] as const).map(([val, label]) => (
                   <button
                     key={val}
                     type="button"
@@ -996,7 +998,22 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
                   </button>
                 ))}
               </div>
-              {documentType !== "paper" && (
+              {documentType === "news_article" && (
+                <p className="mt-1.5 text-xs text-accent">
+                  📰 Reference & figure extraction will be skipped, but you still get an AI summary and claims. Set the outlet under <strong>Venue</strong> and the publication date below.
+                </p>
+              )}
+              {documentType === "news_article" && (
+                <Field label="Published date" className="mt-2">
+                  <input
+                    type="date"
+                    value={publishedDate}
+                    onChange={(e) => setPublishedDate(e.target.value)}
+                    className="w-full border border-line rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                </Field>
+              )}
+              {(documentType === "book" || documentType === "lecture_deck") && (
                 <p className="mt-1.5 text-xs text-accent">
                   📌 References & figure extraction will be skipped. After upload, use the <strong>Chapters</strong> tab to auto-detect chapter structure and summaries.
                 </p>

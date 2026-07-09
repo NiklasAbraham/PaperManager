@@ -168,6 +168,7 @@ def upload(
     caption_method: Optional[str] = Form("ollama"),
     summary_instructions: Optional[str] = Form(None),
     document_type: Optional[str] = Form(None),
+    published_date: Optional[str] = Form(None),
     claims_model: Optional[str] = Form("litellm"),
     skip_embedding: bool = Form(False),
     preprocess_key: Optional[str] = Form(None),
@@ -185,10 +186,17 @@ def upload(
     When document_type is 'book' or 'lecture_deck', references and figure
     extraction are skipped — chapter detection is available separately via
     POST /papers/{id}/chapters/detect.
+
+    A 'news_article' behaves like a paper (summary + claims + embedding +
+    topics) but skips academic references and figure extraction, which don't
+    apply to news. Scanned newspaper PDFs are OCR'd by Docling like any upload.
     """
     pdf_bytes = file.file.read()
 
     is_book = document_type in ("book", "lecture_deck")
+    is_news = document_type == "news_article"
+    # References and figures are academic scaffolding that news articles lack.
+    skip_refs_and_figures = is_book or is_news
     log.info("UPLOAD START | filename=%s | bytes=%d | document_type=%s",
              file.filename, len(pdf_bytes), document_type)
 
@@ -284,6 +292,7 @@ def upload(
             "raw_text": raw_text,
             "venue": meta.get("venue") or existing.get("venue"),
             "document_type": document_type or existing.get("document_type"),
+            "published_date": published_date or existing.get("published_date"),
         })
         if not paper:
             raise HTTPException(status_code=500, detail="Failed to enrich existing paper")
@@ -301,6 +310,7 @@ def upload(
             "raw_text": raw_text,
             "venue": meta.get("venue"),
             "document_type": document_type,
+            "published_date": published_date,
         })
     else:
         paper = create_paper(driver, {
@@ -315,6 +325,7 @@ def upload(
             "raw_text": raw_text,
             "venue": meta.get("venue"),
             "document_type": document_type,
+            "published_date": published_date,
         })
 
     log.info("Paper saved | id=%s | title=%.60s", paper["id"], paper.get("title"))
@@ -330,6 +341,8 @@ def upload(
     tag_paper(driver, paper["id"], "pdf-upload")
     if is_book:
         tag_paper(driver, paper["id"], document_type or "book")
+    if is_news:
+        tag_paper(driver, paper["id"], "from-newspaper")
     if debug:
         tag_paper(driver, paper["id"], "debug")
 
@@ -416,9 +429,9 @@ def upload(
         except Exception:
             pass  # project not found — don't fail the whole ingestion
 
-    # Step 10: Extract references (best-effort — skipped for books/lecture decks)
+    # Step 10: Extract references (best-effort — skipped for books/lecture decks/news)
     references_found = []
-    if not is_book:
+    if not skip_refs_and_figures:
         try:
             if analysis and analysis.get("references") is not None:
                 references_found = analysis["references"]
@@ -430,8 +443,8 @@ def upload(
     else:
         log.info("Skipping reference extraction for document_type=%s | paper_id=%s", document_type, paper["id"])
 
-    # Step 11: Figures + tables (best-effort — skipped for books/lecture decks)
-    if not is_book:
+    # Step 11: Figures + tables (best-effort — skipped for books/lecture decks/news)
+    if not skip_refs_and_figures:
         try:
             from services.ingest_preprocess_cache import wait_for_result, consume_result
             from services.ingest_assets import save_figures_and_tables
