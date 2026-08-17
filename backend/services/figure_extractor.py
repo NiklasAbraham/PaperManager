@@ -287,6 +287,13 @@ def _collect_figures_tables_from_doc(doc, caption_method: str) -> dict:
 
             log.info("Docling: PictureItem size=%dx%d", pil_image.width, pil_image.height)
             png = _pil_to_png(pil_image)
+            # Release the decoded pixel buffer now; at images_scale=2 these run tens
+            # of MB each and a paper can hold dozens.
+            try:
+                pil_image.close()
+            except Exception:
+                pass
+            del pil_image
             if png is None:
                 log.info("Docling: skipped (too small or conversion failed)")
                 continue
@@ -388,6 +395,10 @@ def _extract_figures_docling_remote(
     log.info("Docling remote: converting PDF (%d bytes) via %s...", len(pdf_bytes), base_url)
     payload = convert_pdf(pdf_bytes, base_url, via_manager_proxy=via_manager_proxy)
     doc = load_document_from_response(payload)
+    # The payload dict holds a base64 data URI for every picture, which the
+    # DoclingDocument has now copied into its own ImageRefs. Drop it before the
+    # walk below so we aren't holding two copies while decoding a third.
+    del payload
     log.info("Docling remote: conversion done, scanning for figures and tables...")
     return _collect_figures_tables_from_doc(doc, caption_method)
 
@@ -508,6 +519,18 @@ def extract_figures(
         "ollama"       — Docling + Ollama to supplement missing captions
         "claude-vision"— Docling + Claude Haiku vision to supplement missing captions
     """
+    from services.mem import trim_memory
+
+    try:
+        return _extract_figures_dispatch(pdf_bytes, caption_method)
+    finally:
+        # Extraction just churned through the zip body, base64 data URIs and PIL
+        # buffers for every picture. Python has freed them; make glibc give the
+        # arenas back instead of carrying them as RSS until the next restart.
+        trim_memory("figure extraction")
+
+
+def _extract_figures_dispatch(pdf_bytes: bytes, caption_method: str) -> dict:
     from config import settings
 
     n_pages = _count_pdf_pages(pdf_bytes)

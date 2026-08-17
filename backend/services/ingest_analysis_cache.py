@@ -188,6 +188,10 @@ def _run_analysis(key: str) -> None:
             _write_status(key, "error", error=str(exc))
         finally:
             _event_for(key).set()
+            # Result is on disk; the PDF bytes and full raw text can go back to the OS.
+            from services.mem import trim_memory
+
+            trim_memory(f"preanalyze {key[:12]}")
 
 
 # Bytes are handed to the worker thread in-memory (avoids re-reading the upload).
