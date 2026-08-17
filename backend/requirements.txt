@@ -10,9 +10,15 @@ anthropic
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
-mcp[cli]
+# Pinned: mcp 2.0 dropped mcp.server.fastmcp, which mcp_server.py is built on.
+mcp[cli]==1.28.1
 openai
 docling>=2.0.0
+# Pulled in by docling. Pinned so a docling upgrade can't resolve a torch version
+# that isn't already installed and drag the CUDA wheel back in; the Dockerfile
+# installs these same versions from PyTorch's CPU index.
+torch==2.12.1
+torchvision==0.27.1
 httpx
 beautifulsoup4
 lxml

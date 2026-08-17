@@ -134,6 +134,11 @@ def _run_docling(key: str, pdf_bytes: bytes, caption_method: str) -> None:
             _write_status(key, "error", error=str(exc), caption_method=caption_method)
         finally:
             _event_for(key).set()
+            # Figures are on disk now, so nothing from this job needs to stay
+            # resident. Hand the freed arenas back to the OS.
+            from services.mem import trim_memory
+
+            trim_memory(f"preprocess {key[:12]}")
 
 
 def ensure_started(pdf_bytes: bytes, caption_method: str = "docling") -> dict[str, Any]:
