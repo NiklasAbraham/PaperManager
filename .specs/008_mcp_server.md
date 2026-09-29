@@ -37,11 +37,31 @@ The MCP server runs as a separate process from the FastAPI backend and communica
 | `get_paper_detail` | Full paper metadata including reading_status, rating, bookmarked, venue |
 | `get_random_paper` | Random paper (optionally filtered by reading_status) |
 
+### Reading the library (no model calls)
+
+`tools/library_tools.py`. Read-only tools for a client that does its own reading — Claude Code
+over a research repository — so the library acts as a database. None of them calls a language
+model, so they cost nothing on the PaperManager side. Every result carries `paper_id`, `title`
+and `url` (the frontend's `/paper/<id>`) so a client UI can show which papers entered a
+conversation. Results stay under ~31 KB: Claude Code moves larger MCP results into a file.
+
+| Tool | Description |
+|---|---|
+| `library_search` | One query across metadata, notes, highlights and their comments, claims and extracted full text; each hit says where it matched, with snippets. `project` filters by project name or id |
+| `get_paper_context` | Metadata, authors, tags, topics, projects, the note (own text split from saved chat answers), every highlight with page, colour and comment, claims, `text_chars` |
+| `read_paper_text` | Extracted full text, 30 000 characters per call from `offset`; page with `next_offset` |
+| `find_in_paper` | Passages in one paper's text for a phrase, else ranked by how many query words co-occur; returns offsets for `read_paper_text` |
+| `list_highlights` | Highlights, filterable by project, paper or text |
+| `list_notes` | Notes, filterable by project or text; own text in full, saved answers only counted |
+
+A paper note is the user's own text followed by chat answers the frontend saved below it
+(`---` / `**Claude (date):**`); the library tools return the two separately.
+
 ### Paper Interaction
 
 | Tool | Description |
 |---|---|
-| `chat_with_paper` | Ask a question about a paper's content |
+| `chat_with_paper` | Ask a question about a paper's content. Calls the Anthropic API (or LiteLLM) with the configured key — billed per token; prefer `read_paper_text` from a client that is itself a model |
 | `add_note` | Write or update a paper's markdown note |
 | `get_note` | Read a paper's markdown note |
 | `tag_paper_with` | Add a tag to a paper |
