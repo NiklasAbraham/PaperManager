@@ -436,7 +436,9 @@ def export_csv(driver: Driver = Depends(get_driver)):
                     zf.writestr(filename, "")
                     return
                 s = io.StringIO()
-                w = csv.DictWriter(s, fieldnames=list(rows[0].keys()))
+                # Nodes carry different property sets; the header is their union.
+                fieldnames = list(dict.fromkeys(k for row in rows for k in row))
+                w = csv.DictWriter(s, fieldnames=fieldnames)
                 w.writeheader()
                 w.writerows(rows)
                 zf.writestr(filename, s.getvalue())
