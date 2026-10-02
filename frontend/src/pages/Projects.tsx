@@ -8,6 +8,8 @@ import {
 } from "../api/client";
 import ResearchGapPanel from "../components/ResearchGapPanel";
 import ProjectMembers from "../components/ProjectMembers";
+import PaperKindFilter from "../components/PaperKindFilter";
+import { isVisible, typeKind, TYPE_LABELS, useHiddenKinds } from "../lib/paperKinds";
 
 const STATUS_OPTIONS = ["active", "paused", "done"] as const;
 const STATUS_COLORS: Record<string, string> = {
@@ -20,6 +22,7 @@ interface PaperRow {
   id: string; title: string; year?: number; doi?: string;
   authors?: string[]; abstract?: string; metadata_source?: string;
   added_by?: string; added_by_color?: string;
+  document_type?: string; has_pdf?: boolean;
 }
 
 interface ProjectDetail {
@@ -77,6 +80,7 @@ export default function Projects() {
 
   // Research gaps
   const [showResearchGaps, setShowResearchGaps] = useState(false);
+  const [hiddenKinds, toggleKind, showAllKinds] = useHiddenKinds();
 
   // Load list on mount
   useEffect(() => {
@@ -554,8 +558,15 @@ export default function Projects() {
                   {selected.papers.length === 0 ? (
                     <p className="text-sm text-gray-400 text-center py-10">No papers in this project yet.</p>
                   ) : (
+                    <>
+                    <PaperKindFilter
+                      papers={selected.papers}
+                      hidden={hiddenKinds}
+                      onToggle={toggleKind}
+                      onReset={showAllKinds}
+                    />
                     <div className="space-y-2">
-                      {selected.papers.map((paper) => (
+                      {selected.papers.filter((p) => isVisible(p, hiddenKinds)).map((paper) => (
                         <div
                           key={paper.id}
                           className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-start justify-between gap-3 hover:border-violet-200 transition-colors group"
@@ -568,6 +579,16 @@ export default function Projects() {
                               {paper.title}
                             </Link>
                             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              {TYPE_LABELS[typeKind(paper)] && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-100">
+                                  {TYPE_LABELS[typeKind(paper)]}
+                                </span>
+                              )}
+                              {paper.has_pdf === false && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">
+                                  No PDF
+                                </span>
+                              )}
                               {paper.year && <span className="text-[11px] text-gray-400">{paper.year}</span>}
                               {paper.doi && <span className="text-[11px] text-gray-400 font-mono truncate max-w-[200px]">{paper.doi}</span>}
                               {(paper.authors ?? []).length > 0 && (
@@ -596,6 +617,7 @@ export default function Projects() {
                         </div>
                       ))}
                     </div>
+                    </>
                   )}
                 </div>
               )}

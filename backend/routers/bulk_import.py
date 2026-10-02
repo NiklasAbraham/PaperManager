@@ -131,7 +131,7 @@ def _process_entry(driver, entry: BulkEntry, project_id: str | None, fetch_pdf: 
     # Add to project
     if project_id:
         try:
-            add_paper_to_project(driver, project_id, paper["id"])
+            add_paper_to_project(driver, paper_id=paper["id"], project_id=project_id)
         except Exception:
             pass
 

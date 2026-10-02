@@ -120,6 +120,37 @@ Endpoint: `POST /papers/bulk-import` (SSE stream)
 
 ---
 
+## Scripted Project Import (with PDFs)
+
+`backend/scripts/import_to_project.py` imports a manifest of papers into a project through the
+same `POST /papers/upload` pipeline as a drag-and-drop upload (Docling text, Drive, summary,
+embedding, topics, claims, references, figures). Unlike Bulk Import it stores full text.
+
+```bash
+docker exec -w /app papermanager-backend-1 \
+    python scripts/import_to_project.py scripts/imports/<manifest>.json [--dry-run]
+```
+
+The manifest lives in `backend/scripts/imports/` and is the record of what was imported:
+
+```json
+{"project": "MasterThesis",
+ "papers": [{"arxiv": "2210.02747", "note": "why it is here"},
+            {"biorxiv": "10.64898/2026.01.23.701250"},
+            {"doi": "10.1103/zfn9-18y7"},
+            {"pdf_url": "https://..."}, {"pdf_path": "/tmp/x.pdf"}]}
+```
+
+Per entry: skip if a paper with that DOI (`arXiv:<id>`, `10.48550/arXiv.<id>`, bare id or the DOI,
+case-insensitive) already has PDF and text; otherwise download the PDF (arXiv; bioRxiv/medRxiv
+trying `v1`–`v4`; Unpaywall for other DOIs), backing off on 403/429/Cloudflare 1015
+(`--attempts`, `--backoff`); upload; on no PDF fall back to `/papers/from-url-full` metadata
+(`--no-metadata-fallback` to skip); link to the project; regenerate a failed summary. Re-running
+is idempotent, so a later run picks up papers that hit a rate limit. Results append to
+`<manifest>.results.jsonl`.
+
+---
+
 ## Literature Search
 
 Go to **Literature** page. Set keywords, run search across arXiv / PubMed / bioRxiv. Results streamed via SSE. Papers already in your library are marked. Click to add any result.

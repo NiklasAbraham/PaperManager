@@ -50,8 +50,20 @@ def get_one(project_id: str):
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_see_project(driver, project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    papers = get_project_papers(driver, project_id)
+    papers = [_list_row(p) for p in get_project_papers(driver, project_id)]
     return {**project, "papers": papers}
+
+
+# Large per-paper fields the project list never shows (full text, vectors).
+_HEAVY_FIELDS = ("raw_text", "embedding")
+
+
+def _list_row(paper: dict) -> dict:
+    """Trim a paper for the project list and add the fields its type filter uses."""
+    row = {k: v for k, v in paper.items() if k not in _HEAVY_FIELDS}
+    row["document_type"] = paper.get("document_type") or "paper"
+    row["has_pdf"] = bool(paper.get("drive_file_id"))
+    return row
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)

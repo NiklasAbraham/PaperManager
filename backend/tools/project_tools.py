@@ -24,7 +24,7 @@ def register(mcp: FastMCP):
     def add_to_project(paper_id: str, project_id: str) -> dict:
         """Add a paper to a project. Use list_projects to find project ids.
         Returns status ok if successful."""
-        _add_paper(get_driver(), project_id, paper_id)
+        _add_paper(get_driver(), paper_id=paper_id, project_id=project_id)
         return {"status": "ok", "paper_id": paper_id, "project_id": project_id}
 
     @mcp.tool()

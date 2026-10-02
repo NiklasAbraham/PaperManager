@@ -425,7 +425,7 @@ def upload(
     # Step 9: Link to project if provided
     if project_id:
         try:
-            add_paper_to_project(driver, project_id, paper["id"])
+            add_paper_to_project(driver, paper_id=paper["id"], project_id=project_id)
         except Exception:
             pass  # project not found — don't fail the whole ingestion
 
@@ -626,7 +626,7 @@ def ingest_from_url(body: IngestFromUrlBody, x_user_name: Optional[str] = Header
 
     if body.project_id:
         try:
-            add_paper_to_project(driver, body.project_id, paper["id"])
+            add_paper_to_project(driver, paper_id=paper["id"], project_id=body.project_id)
         except Exception:
             pass
 
@@ -770,7 +770,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
 
         if body.project_id:
             try:
-                add_paper_to_project(driver, body.project_id, paper["id"])
+                add_paper_to_project(driver, paper_id=paper["id"], project_id=body.project_id)
             except Exception:
                 pass
 
@@ -866,7 +866,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
 
         if body.project_id:
             try:
-                add_paper_to_project(driver, body.project_id, paper["id"])
+                add_paper_to_project(driver, paper_id=paper["id"], project_id=body.project_id)
             except Exception:
                 pass
 
