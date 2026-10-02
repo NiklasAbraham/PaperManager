@@ -1,0 +1,154 @@
+{
+ "project": "MasterThesis",
+ "description": "2 Oct 2026: Holderrieth's arXiv papers, the 29 Sep literature-check prior art, model landscape and 'seen' papers, MIT 6.S184 refs [1,16,25,27]. Blog/news entries were added by hand as news_article (no DOI).",
+ "papers": [
+  {
+   "arxiv": "2606.08375",
+   "note": "Holderrieth; DeCAF, thesis prior art RQ3"
+  },
+  {
+   "arxiv": "2604.09784",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2602.05993",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2602.02310",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2509.25170",
+   "note": "Holderrieth; GLASS Flows"
+  },
+  {
+   "arxiv": "2509.00316",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2506.02070",
+   "note": "Holderrieth; MIT 6.S184 lecture notes"
+  },
+  {
+   "arxiv": "2502.10843",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2412.06264",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2412.03487",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2410.20587",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2410.20470",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2011.12916",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "1910.11429",
+   "note": "Holderrieth"
+  },
+  {
+   "arxiv": "2604.18559",
+   "note": "ConforNets, RQ3 lever"
+  },
+  {
+   "biorxiv": "10.64898/2026.08.05.742877",
+   "note": "Boltz-Perturb, RQ2"
+  },
+  {
+   "biorxiv": "10.64898/2026.07.01.730981",
+   "note": "SCALE, RQ2"
+  },
+  {
+   "biorxiv": "10.64898/2026.08.20.745880",
+   "note": "HuMonoAg-Bench, RQ2"
+  },
+  {
+   "biorxiv": "10.64898/2026.01.23.701250",
+   "note": "Pair Representation Scaling, RQ3"
+  },
+  {
+   "arxiv": "2609.15552",
+   "note": "SoupFold"
+  },
+  {
+   "arxiv": "2510.24670",
+   "note": "Pearl"
+  },
+  {
+   "arxiv": "2607.03787",
+   "note": "OpenDDE"
+  },
+  {
+   "arxiv": "2509.18480",
+   "note": "SimpleFold"
+  },
+  {
+   "arxiv": "2412.10743",
+   "note": "NeuralPLexer3"
+  },
+  {
+   "arxiv": "2601.01740",
+   "note": "fold-switching, seen"
+  },
+  {
+   "arxiv": "2607.16087",
+   "note": "neural spectroscopy AF2, seen"
+  },
+  {
+   "arxiv": "2605.09832",
+   "note": "Boltz-2 cryo-EM test-time supervision, seen"
+  },
+  {
+   "arxiv": "2605.20235",
+   "note": "collapse-and-refine, seen"
+  },
+  {
+   "arxiv": "2606.26408",
+   "note": "score-Jacobian ID inverse kinematics, seen"
+  },
+  {
+   "arxiv": "2602.13303",
+   "note": "spectral collapse diffusion inversion, seen"
+  },
+  {
+   "arxiv": "2512.10339",
+   "note": "marginal path collapse steering, seen"
+  },
+  {
+   "arxiv": "2608.12192",
+   "note": "oracle budget guidance, seen"
+  },
+  {
+   "doi": "10.1103/zfn9-18y7",
+   "note": "AF2Dock, PRX Life (APS blocks automated PDF download)"
+  },
+  {
+   "arxiv": "2303.08797",
+   "note": "MIT 6.S184 ref [1], stochastic interpolants"
+  },
+  {
+   "arxiv": "2407.15595",
+   "note": "MIT 6.S184 ref [16], discrete flow matching"
+  },
+  {
+   "arxiv": "2210.02747",
+   "note": "MIT 6.S184 ref [25], flow matching"
+  },
+  {
+   "arxiv": "2209.03003",
+   "note": "MIT 6.S184 ref [27], rectified flow"
+  }
+ ]
+}
