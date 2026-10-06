@@ -58,6 +58,7 @@ services:
       - LITELLM_MODEL=${LITELLM_MODEL:-google/gemma-4-26b-a4b-it}
       # Empty = embeddings disabled (proxy has no working embedding model).
       - LITELLM_EMBED_MODEL=${LITELLM_EMBED_MODEL:-}
+      - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
       - DOCLING_MODE=${DOCLING_MODE:-on_demand}
       - INFERENCE_MANAGER_URL=${INFERENCE_MANAGER_URL:-https://inference-manager.example.internal}
       - HERMIONE_HOST=${HERMIONE_HOST:-203.0.113.10}

@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     # and logs an error. Set to a valid model id to re-enable.
     litellm_embed_model: str = ""
 
+    # Optional Semantic Scholar API key: raises the shared anonymous rate limit
+    # that otherwise 429s reference lookups during bulk imports.
+    semantic_scholar_api_key: str = ""
+
     # Docling: "local" (in-process, needs docling package) or "on_demand" (GPU via Inference Manager)
     docling_mode: str = "on_demand"
     inference_manager_url: str = ""

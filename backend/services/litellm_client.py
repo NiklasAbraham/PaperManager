@@ -64,11 +64,20 @@ def chat_completion(
     json_mode: bool = False,
     tools: list[dict[str, Any]] | None = None,
     max_tokens: int | None = None,
+    timeout: float | None = None,
+    max_retries: int | None = None,
 ) -> str:
-    """Run a chat completion and return the assistant message text."""
+    """Run a chat completion and return the assistant message text.
+
+    ``timeout`` overrides the client's 20 s default for long generations;
+    ``max_retries`` overrides the SDK's automatic retries (2 by default).
+    """
     import time as _time
 
     client = get_litellm_client()
+    overrides = {k: v for k, v in (("timeout", timeout), ("max_retries", max_retries)) if v is not None}
+    if overrides:
+        client = client.with_options(**overrides)
     resolved = resolve_chat_model(model)
     kwargs: dict[str, Any] = {"model": resolved, "messages": messages}
     if json_mode:

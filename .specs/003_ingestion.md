@@ -48,7 +48,7 @@ A **confirmation modal** shows the extracted metadata. You can review and overri
 5. Ollama `nomic-embed-text` generates embedding (if enabled in Settings)
 6. Authors linked as `Person` nodes; affiliation extraction runs if affiliations missing
 7. Topics suggested by Claude Haiku (3–6 title-case), linked via `ABOUT`
-8. References extracted and shown for review (S2 API → regex → Claude Haiku)
+8. References extracted and shown for review (S2 API → chunked LLM → parser; see Reference Import)
 9. Figures extracted from PDF pages (Docling / Ollama / Claude Vision per settings)
 10. Paper auto-tagged `pdf-upload`
 
@@ -181,10 +181,10 @@ Endpoint: `POST /blogs`, `POST /blogs/{id}/fetch-posts`
 
 From a paper's detail view → **References** tab → **Extract References**. The system runs the three-strategy pipeline and shows results for review. Click **Save** to create stub `Paper` nodes linked via `CITES`. If a stub's DOI matches a later full import, the stub is enriched.
 
-**Three-strategy pipeline:**
-1. Semantic Scholar `/references` API (requires DOI) — preferred
-2. Regex on the `REFERENCES` section of `raw_text`
-3. Claude Haiku on the last 30% of `raw_text` (when strategies 1+2 give < 3 results)
+**Three-strategy pipeline** (`backend/services/references.py`):
+1. Semantic Scholar `/references` API (needs a DOI or arXiv ID). Retries on 429/5xx with backoff, follows pagination past 100, sends `SEMANTIC_SCHOLAR_API_KEY` when set. Accepted only if it reaches 80% of the parser's count, since S2 is empty or partial for recent preprints and publisher-elided lists.
+2. LLM over every reference section, in ~6k-character chunks on entry boundaries, run in parallel: LiteLLM first (120 s timeout, no SDK retry), Claude Work → personal for a chunk LiteLLM could not do. Results are merged and deduplicated by title.
+3. Deterministic parser: collects every reference section (main list, Nature Methods list, appendix lists), each ending at the next back-matter or appendix heading, and splits numbered (`[1]`, `1.`, `(1)`), labelled (`[ACDE12]`, `[Smith et al., 2020]`) and author-year lists. It doubles as the completeness yardstick for 1 and 2. When nothing reaches it, the longest list wins.
 
 All reference stubs are auto-tagged `from-references`.
 
