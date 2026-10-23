@@ -250,7 +250,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../user-guide/first-steps/" class="md-tabs__link">
+        <a href="../agent-setup/" class="md-tabs__link">
           
   
   
@@ -416,6 +416,29 @@
             Get started
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Set up with your agent
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1152,6 +1175,12 @@
 
 
 <h1 id="hosting-your-own-papermanager">Hosting your own PaperManager<a class="headerlink" href="#hosting-your-own-papermanager" title="Permanent link">&para;</a></h1>
+<div class="admonition tip">
+<p class="admonition-title">Easiest: let your coding agent do it</p>
+<p>Tell Claude Code, Codex or another coding agent: <em>"Set up PaperManager for me by following
+https://github.com/NiklasAbraham/PaperManager/blob/main/DEPLOY.md"</em>. It asks a few questions
+and runs the local setup below for you. See <a href="../agent-setup/">Set up with your agent</a>.</p>
+</div>
 <p>This guide sets up your own instance with your own database and your own keys. You can run it on
 your own computer (localhost) or on Heroku. Both use the same container image,
 <code>Dockerfile.selfhost</code>. It holds the React frontend, served by nginx, and the FastAPI backend, and
@@ -1175,19 +1204,19 @@ a remote GPU machine). Don't use it. Use <code>docker-compose.selfhost.yml</code
 <td>building and running the app</td>
 </tr>
 <tr>
+<td>An Anthropic API key (<a href="https://console.anthropic.com">console.anthropic.com</a>) <strong>or</strong> an OpenAI API key (<a href="https://platform.openai.com/api-keys">platform.openai.com</a>)</td>
+<td>one of them</td>
+<td>summaries, topics, chat. With Anthropic the fast tasks run on Claude Haiku 4.5; with OpenAI everything runs on GPT-5 mini</td>
+</tr>
+<tr>
 <td>A Google account plus a Google Cloud project</td>
-<td><strong>yes</strong></td>
-<td>PDFs are stored in your Google Drive; uploading fails without it</td>
+<td>only for Drive storage, and always on Heroku</td>
+<td>PDFs in Google Drive. Locally, <code>STORAGE_BACKEND=local</code> keeps them in a Docker volume</td>
 </tr>
 <tr>
-<td>An Anthropic API key (<a href="https://console.anthropic.com">console.anthropic.com</a>)</td>
-<td>strongly recommended</td>
-<td>summaries, paper chat, Knowledge Chat, topic suggestions</td>
-</tr>
-<tr>
-<td>An OpenAI-compatible endpoint (e.g. OpenRouter)</td>
+<td>An OpenAI-compatible endpoint (LiteLLM, OpenRouter, Ollama)</td>
 <td>optional</td>
-<td>the "Gemma (LiteLLM)" model option, claim extraction</td>
+<td>runs the fast tasks on your own model</td>
 </tr>
 <tr>
 <td>A Heroku account plus the Heroku CLI</td>
@@ -1214,17 +1243,20 @@ values and leave everything else at its default:</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">JWT_SECRET_KEY</span><span class="o">=</span>&lt;output<span class="w"> </span>of:<span class="w"> </span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span>&gt;
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">DEFAULT_USER_NAME</span><span class="o">=</span>&lt;your<span class="w"> </span>login<span class="w"> </span>name&gt;<span class="w">             </span><span class="c1"># the owner/admin account</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nv">DEFAULT_USER_PASSWORD</span><span class="o">=</span><span class="w">                          </span><span class="c1"># leave empty; you set it in step 4</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>sk-ant-...
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nv">GOOGLE_DRIVE_FOLDER_ID</span><span class="o">=</span>&lt;from<span class="w"> </span>step<span class="w"> </span><span class="m">2</span>&gt;
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># The maintainer&#39;s private infrastructure: switch it off</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="nv">DOCLING_MODE</span><span class="o">=</span><span class="nb">local</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="nv">INFERENCE_MANAGER_URL</span><span class="o">=</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="nv">HERMIONE_HOST</span><span class="o">=</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="nv">LITELLM_ENDPOINT</span><span class="o">=</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="nv">LITELLM_EMBED_MODEL</span><span class="o">=</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>sk-ant-...<span class="w">                    </span><span class="c1"># or OPENAI_API_KEY=sk-...</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nv">STORAGE_BACKEND</span><span class="o">=</span><span class="nb">local</span><span class="w">                           </span><span class="c1"># or drive, with GOOGLE_DRIVE_FOLDER_ID from step 2</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="nv">UI_ACCENT</span><span class="o">=</span>violet<span class="w">                                </span><span class="c1"># or blue, teal, green, amber, rose, slate, #RRGGBB</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="c1"># The maintainer&#39;s private infrastructure: switch it off</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="nv">DOCLING_MODE</span><span class="o">=</span><span class="nb">local</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="nv">INFERENCE_MANAGER_URL</span><span class="o">=</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="nv">HERMIONE_HOST</span><span class="o">=</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="nv">LITELLM_ENDPOINT</span><span class="o">=</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="nv">LITELLM_EMBED_MODEL</span><span class="o">=</span>
 </code></pre></div>
-<p>For the optional Gemma model, point LiteLLM at any OpenAI-compatible API, for example
+<p>Keep comments on their own line in the real file: Docker reads <code>KEY=   # note</code> as the value
+<code># note</code>. The comments above are only there to explain each line.</p>
+<p>For your own model on the fast tasks, point LiteLLM at any OpenAI-compatible API, for example
 <code>LITELLM_ENDPOINT=https://openrouter.ai/api/v1</code>, <code>LITELLM_API_KEY=&lt;openrouter key&gt;</code>,
 <code>LITELLM_MODEL=google/gemma-3-27b-it</code>.</p>
 <p>Leave <code>CLAUDE_CODE_USERS</code> and <code>CLAUDE_CODE_OAUTH_TOKEN</code> empty. That feature runs chats on the
@@ -1233,6 +1265,9 @@ Claude Pro/Max plan and want it for yourself, set <code>CLAUDE_CODE_USERS=&lt;yo
 the output of <code>claude setup-token</code> (from <a href="https://claude.com/claude-code">Claude Code</a>) into
 <code>CLAUDE_CODE_OAUTH_TOKEN</code>. Never list other people there.</p>
 <h2 id="step-2-google-drive-access-once-on-your-own-computer">Step 2: Google Drive access (once, on your own computer)<a class="headerlink" href="#step-2-google-drive-access-once-on-your-own-computer" title="Permanent link">&para;</a></h2>
+<p>Skip this step locally with <code>STORAGE_BACKEND=local</code>. On Heroku it is required, because Heroku
+has no disk to keep files on. For Drive locally, also uncomment the two <code>credentials.json</code> /
+<code>token.json</code> lines in <code>docker-compose.selfhost.yml</code>.</p>
 <ol>
 <li>Go to <a href="https://console.cloud.google.com">console.cloud.google.com</a> and create a project.
    Open <strong>APIs &amp; Services → Library</strong>, then enable the <strong>Google Drive API</strong>.</li>
