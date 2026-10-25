@@ -676,6 +676,29 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/conferences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Conference explorer
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -926,6 +949,15 @@
   <a href="#discover-discovertsx" class="md-nav__link">
     <span class="md-ellipsis">
       Discover (Discover.tsx)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conferences-conferencestsx" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conferences (Conferences.tsx)
     </span>
   </a>
   
@@ -1313,6 +1345,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#conferences-conferencestsx" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conferences (Conferences.tsx)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blogs-blogstsx-and-blogpostdetail-blogpostdetailtsx" class="md-nav__link">
     <span class="md-ellipsis">
       Blogs (Blogs.tsx) and BlogPostDetail (BlogPostDetail.tsx)
@@ -1546,6 +1587,16 @@
 <td>Venue browser</td>
 </tr>
 <tr>
+<td><code>/conferences</code></td>
+<td><code>Conferences</code></td>
+<td>Conference explorer: every conference-year</td>
+</tr>
+<tr>
+<td><code>/conferences/:key</code></td>
+<td><code>Conferences</code></td>
+<td>One conference: overview, institutions (<code>?view=institutions&amp;inst=</code>), topics (<code>?view=topics&amp;q=</code>)</td>
+</tr>
+<tr>
 <td><code>/graph</code></td>
 <td><code>Graph</code></td>
 <td>Knowledge graph visualisation</td>
@@ -1621,6 +1672,13 @@
 <p>Streams recent papers from arXiv, PubMed, and bioRxiv using keyword lists. Papers can be added to the library in one click.</p>
 <h3 id="discover-discovertsx">Discover (<code>Discover.tsx</code>)<a class="headerlink" href="#discover-discovertsx" title="Permanent link">&para;</a></h3>
 <p>Unified external search across arXiv, Semantic Scholar, and PubMed. Shows which results are already in the library; adds missing ones via URL ingest.</p>
+<h3 id="conferences-conferencestsx">Conferences (<code>Conferences.tsx</code>)<a class="headerlink" href="#conferences-conferencestsx" title="Permanent link">&para;</a></h3>
+<p>Conference explorer. The landing page lists every conference-year by field with its build
+state (polling while one builds); a conference page has three views kept in the URL:
+overview, a ranked institution table with an institution card (<code>InstitutionsView</code>,
+<code>InstitutionCard</code>), and topic search (<code>TopicView</code>). <code>AreaBar</code> draws an area mix, optionally
+against the conference's; <code>PaperRow</code> expands to the abstract and closest papers and adds a
+paper to the library. Components live in <code>components/conferences/</code>.</p>
 <h3 id="blogs-blogstsx-and-blogpostdetail-blogpostdetailtsx">Blogs (<code>Blogs.tsx</code>) and BlogPostDetail (<code>BlogPostDetail.tsx</code>)<a class="headerlink" href="#blogs-blogstsx-and-blogpostdetail-blogpostdetailtsx" title="Permanent link">&para;</a></h3>
 <p>Register RSS feeds or blog URLs. Posts are fetched, indexed, and browsable alongside papers. Each post supports notes, tags, people links, and project membership.</p>
 <h3 id="mergemanager-mergemanagertsx">MergeManager (<code>MergeManager.tsx</code>)<a class="headerlink" href="#mergemanager-mergemanagertsx" title="Permanent link">&para;</a></h3>

@@ -676,6 +676,29 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/conferences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Conference explorer
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -1371,6 +1394,10 @@
 <tr>
 <td><code>web_search.py</code></td>
 <td>Web search helper used by research gaps and synthesis endpoints</td>
+</tr>
+<tr>
+<td><code>conferences/</code></td>
+<td>Conference explorer (see <code>.specs/011_conferences.md</code>): <code>catalog.py</code> conference-years and sources, <code>sources.py</code> miniconf + Paper Copilot fetchers, <code>institutions.py</code> name normalisation and academia / industry, <code>areas.py</code> the 24-area taxonomy and zero-shot assignment, <code>embedder.py</code> bge-small-en-v1.5 on CPU, <code>store.py</code> build worker, on-disk datasets under <code>/data/conferences</code>, queries</td>
 </tr>
 </tbody>
 </table>

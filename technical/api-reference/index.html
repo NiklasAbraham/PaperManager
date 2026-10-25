@@ -676,6 +676,29 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/conferences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Conference explorer
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -1218,6 +1241,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#conferences-conference-explorer" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conferences (conference explorer)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#merge-duplicate-detection" class="md-nav__link">
     <span class="md-ellipsis">
       Merge (duplicate detection)
@@ -1621,6 +1653,15 @@
   <a href="#discover-external-search" class="md-nav__link">
     <span class="md-ellipsis">
       Discover (external search)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conferences-conference-explorer" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conferences (conference explorer)
     </span>
   </a>
   
@@ -2656,6 +2697,65 @@
 <td><code>POST</code></td>
 <td><code>/discover/add</code></td>
 <td>Add a search result to the library</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="conferences-conference-explorer">Conferences (conference explorer)<a class="headerlink" href="#conferences-conference-explorer" title="Permanent link">&para;</a></h2>
+<p><code>{key}</code> is a conference-year (<code>neurips2026</code>) or a name (<code>ICML 2025</code>, <code>iclr</code> = latest).</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/conferences/catalog</code></td>
+<td>Every known conference-year with its build state, the area taxonomy, the default set</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/conferences/{key}/status</code></td>
+<td>Build state: <code>none</code>, <code>queued</code>, <code>fetching</code>, <code>normalising</code>, <code>embedding</code>, <code>ready</code>, <code>partial</code>, <code>unavailable</code>, <code>error</code> (+ <code>progress</code>)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/conferences/{key}/build</code></td>
+<td>Queue a download + index (also refreshes a loaded one)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/conferences/{key}/overview</code></td>
+<td>Counts, area mix, top universities and companies (409 while not loaded)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/conferences/{key}/institutions</code></td>
+<td>Ranked institutions (<code>?q=&amp;sector=A\|I&amp;area=&amp;offset=&amp;limit=</code>)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/conferences/{key}/institutions/{slug}</code></td>
+<td>One institution: rank, counts, area mix, collaborators, authors, papers</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/conferences/{key}/topic</code></td>
+<td><code>{query, k}</code>: the k closest papers, counted per institution, area mix, top papers</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/conferences/{key}/papers/{pid}</code></td>
+<td>Abstract, authors with institutions, closest papers</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/conferences/{key}/papers/{pid}/add</code></td>
+<td>Add to the library (<code>{project_id?}</code>); returns the existing paper on a title match</td>
 </tr>
 </tbody>
 </table>
