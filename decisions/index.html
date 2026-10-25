@@ -1794,7 +1794,8 @@ institution as one JSON file, so no scraping and no OpenReview profile crawl (Op
 refuses anonymous clients). Paper Copilot's lists cover the other venues and older years.</p>
 <h3 id="bge-small-on-cpu-through-transformers-no-new-dependency">bge-small on CPU through transformers, no new dependency<a class="headerlink" href="#bge-small-on-cpu-through-transformers-no-new-dependency" title="Permanent link">&para;</a></h3>
 <p><code>transformers</code> and <code>torch</code> are already installed for Docling. bge-small-en-v1.5 (33 M parameters)
-embeds a 6,500-paper conference in about two minutes on four CPU threads and needs no API key,
+embeds a 6,500-paper conference in two minutes from titles, or 3,000–6,000 papers with abstracts in
+7–15 minutes, on four CPU threads, in the background, and needs no API key,
 so the feature works in the default self-hosted setup.</p>
 <h3 id="one-area-taxonomy-for-every-conference-assigned-zero-shot">One area taxonomy for every conference, assigned zero-shot<a class="headerlink" href="#one-area-taxonomy-for-every-conference-assigned-zero-shot" title="Permanent link">&para;</a></h3>
 <p>24 hand-described areas instead of per-conference clustering: the same area has the same name
