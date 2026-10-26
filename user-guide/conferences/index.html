@@ -1459,7 +1459,14 @@ typing. Three tabs show three readings of the same query; the page opens the one
 (an author's name that matches no title opens <strong>Authors</strong>, a text of more than twelve words
 opens <strong>Topics</strong>, anything else <strong>Papers</strong>). Filters narrow the search to a field (ML, Vision,
 NLP, ...), a series (NeurIPS) or a range of years. Query, tab and filters are kept in the URL
-(<code>/conferences?q=Charlotte%20Deane&amp;kind=author</code>), so a search can be shared or bookmarked.</p>
+(<code>/conferences?q=Charlotte%20Deane&amp;kind=author</code>), so a search can be shared or bookmarked. A tab
+you pick stays picked for the next query.</p>
+<p>Capital and small letters never matter, nor do accents: <code>CHARLOTTE DEANE</code>, <code>charlotte deane</code>
+and <code>Charlotte Déane</code> give the same results. Matched words are marked in titles and names.
+When a word looks like a typo, the page asks "Did you mean ...?" (the results already include
+the corrected word).</p>
+<p>Keys: <strong>Enter</strong> searches at once, <strong>Esc</strong> clears the box (or returns to it from a result),
+<strong>↑ / ↓</strong> move through the results, <strong>Enter</strong> on a result opens it.</p>
 <h3 id="papers">Papers<a class="headerlink" href="#papers" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Title matches</strong>: titles containing the query's words, best first: the whole title, then
@@ -1526,7 +1533,11 @@ here.</p>
 <li><strong>Academia / industry</strong>: aliases carry it; otherwise a name with "university", "institute",
   "college", "laboratory", "hospital", ... is academia, anything else a company. Non-profit
   institutes (Allen Institute for AI, Mila, Max Planck, Shanghai AI Laboratory) count as academia.
-  "Independent researcher" is not counted.</li>
+  "Independent researcher" is not counted, nor are placeholders and fragments the sources
+  contain: anonymised names ("AXXX", "Anonymous Institution"), bare words ("University", "ML",
+  "Research"), names of one or two letters without an alias ("HY"; "LG" and "HP" are aliases),
+  e-mail addresses and web addresses of universities. "Head of AI @ Squirrel AI" counts as
+  Squirrel AI.</li>
 <li><strong>Research areas</strong> are one fixed taxonomy of 24 areas for every conference, so the mix of
   NeurIPS and ICML can be compared and an area keeps its colour everywhere. Each paper gets the
   area whose description is closest to its embedding, after both are centred on the conference's
