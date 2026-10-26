@@ -785,6 +785,48 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#searching-all-conferences" class="md-nav__link">
+    <span class="md-ellipsis">
+      Searching all conferences
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Searching all conferences">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#papers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Papers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authors" class="md-nav__link">
+    <span class="md-ellipsis">
+      Authors
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Topics
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-things-are-counted" class="md-nav__link">
     <span class="md-ellipsis">
       How things are counted
@@ -1188,6 +1230,48 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#searching-all-conferences" class="md-nav__link">
+    <span class="md-ellipsis">
+      Searching all conferences
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Searching all conferences">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#papers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Papers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authors" class="md-nav__link">
+    <span class="md-ellipsis">
+      Authors
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Topics
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-things-are-counted" class="md-nav__link">
     <span class="md-ellipsis">
       How things are counted
@@ -1239,7 +1323,8 @@ conferences two ways: by <strong>institution</strong> (where does a university, 
 does it publish on, with whom) and by <strong>topic</strong> (type a topic or paste an abstract: which
 universities and companies publish most on it, and which papers are closest). It works for
 every conference-year in the list below, not one fixed conference, and runs entirely on your
-own server.</p>
+own server. A search box on the landing page searches <a href="#searching-all-conferences">all loaded conferences at
+once</a>: papers, authors and where a topic is published.</p>
 <p><img alt="NeurIPS 2026 in the conference explorer" src="../../img/screenshots/conferences.webp" /></p>
 <hr />
 <h2 id="which-conferences">Which conferences<a class="headerlink" href="#which-conferences" title="Permanent link">&para;</a></h2>
@@ -1317,7 +1402,9 @@ indexes it in the background; the page shows the progress and fills in as it goe
    <a href="https://huggingface.co/BAAI/bge-small-en-v1.5">bge-small-en-v1.5</a> on the CPU, which gives the
    research areas and semantic topic search. About two minutes for NeurIPS 2026 (6,500 papers,
    titles only so far); with abstracts 7–15 minutes (ACL 2025, 3,100 papers: 7 min; NeurIPS
-   2025, 5,900 papers: 14 min) on four CPU threads.</li>
+   2025, 5,900 papers: 14 min) on four CPU threads. A conference with abstracts or keywords
+   also gets its titles embedded on their own (20–45 s), which the
+   <a href="#searching-all-conferences">cross-conference search</a> compares conferences on.</li>
 </ol>
 <p>A default set is loaded when the backend starts (see <a href="#settings">Settings</a>), so the main
 conferences are ready without anyone waiting. <strong>refresh</strong> at the bottom of a conference page
@@ -1365,6 +1452,63 @@ venue ("NeurIPS 2026"), year and authors (each with their institution as affilia
 for the abstract, the author list with institutions and the eight closest papers at the same
 conference; ↗ opens the paper on the conference site.</p>
 <hr />
+<h2 id="searching-all-conferences">Searching all conferences<a class="headerlink" href="#searching-all-conferences" title="Permanent link">&para;</a></h2>
+<p>The search box at the top of the Conferences page searches every loaded conference at once.
+Type a title, an author or a topic, or paste an abstract; results update 300 ms after you stop
+typing. Three tabs show three readings of the same query; the page opens the one that fits
+(an author's name that matches no title opens <strong>Authors</strong>, a text of more than twelve words
+opens <strong>Topics</strong>, anything else <strong>Papers</strong>). Filters narrow the search to a field (ML, Vision,
+NLP, ...), a series (NeurIPS) or a range of years. Query, tab and filters are kept in the URL
+(<code>/conferences?q=Charlotte%20Deane&amp;kind=author</code>), so a search can be shared or bookmarked.</p>
+<h3 id="papers">Papers<a class="headerlink" href="#papers" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Title matches</strong>: titles containing the query's words, best first: the whole title, then
+  titles starting with the query, then the query as a phrase, then all its words in any order,
+  then (for queries of three words or more) all but one. A word also matches its plural, the
+  last word matches as a prefix while you type it ("video gen"), and a word of five letters or
+  more matches with one typo ("difusion"). Ties are broken by closeness in meaning.</li>
+<li><strong>Closest by meaning</strong>: the papers whose titles are nearest to the query in embedding space
+  and that did not already match by words. A typo is corrected before embedding.</li>
+</ul>
+<p>Each paper carries a chip with its conference; it expands, links and goes into your library as
+anywhere else in the explorer.</p>
+<h3 id="authors">Authors<a class="headerlink" href="#authors" title="Permanent link">&para;</a></h3>
+<p>Names are matched with case and accents folded, by full name, surname, "Surname, First",
+initials (<code>c deane</code>), the start of a name or with one typo. Each author card shows the number
+of papers, conferences and distinct co-authors, the institutions given on those papers, and
+the papers grouped by conference, newest first, each with the author's position and their
+institution on that paper.</p>
+<p>A name is not a person: two researchers can share one. When an author's papers fall into
+groups that share neither an institution nor a co-author, the card says so and lists the
+groups ("may belong to 2 people: Tsinghua University · Stanford University").</p>
+<h3 id="topics">Topics<a class="headerlink" href="#topics" title="Permanent link">&para;</a></h3>
+<p>Type a topic or paste an abstract to see where it is published:</p>
+<ul>
+<li><strong>Per conference</strong>: how many of the closest papers each conference holds, per 1,000 of its
+  papers, so a conference of 2,700 papers compares with one of 6,600.</li>
+<li><strong>Over the years</strong>: the same rate for every series loaded for more than one year
+  (NeurIPS 2025 → 2026), with the change.</li>
+<li><strong>Universities &amp; institutes</strong> and <strong>companies</strong> counted over all conferences together
+  (hover for the count per conference), and the research-area mix of those papers.</li>
+<li><strong>Closest papers</strong> over all conferences.</li>
+</ul>
+<p>"Closest" means the 100 / 300 / 1,000 papers nearest to the query among all papers of all
+selected conferences together. The similarity of the last of them is one threshold for every
+conference, shown under the heading.</p>
+<p>Conferences are compared on <strong>title</strong> embeddings only. A title-plus-abstract embedding sits
+0.03–0.07 higher in cosine similarity to any query than a title-only one, so NeurIPS 2025 (with
+abstracts) would otherwise hold five times as many "diffusion models for protein structure"
+papers per 1,000 as NeurIPS 2026 (titles only so far) when the papers' titles say they are
+about equally common. For this reason the numbers differ from a single conference's
+<strong>Topics &amp; papers</strong> view, which uses titles and abstracts.</p>
+<p>Example, all nine default conferences, closest 300: "diffusion models for protein structure"
+is densest at ICLR 2026 (12.1 per 1,000) and NeurIPS 2025 (12.0), then ICML 2026 (8.7) and
+NeurIPS 2026 (7.4); MIT and Google lead with 19 papers each. "video generation" is densest at
+ECCV 2026, CVPR 2026 and ICCV 2025 (14–17 per 1,000, against 4–7 at the ML venues), with
+ByteDance (33) and Alibaba (26) the top companies.</p>
+<p><strong>Search all conferences →</strong> next to a single conference's topic result runs the same query
+here.</p>
+<hr />
 <h2 id="how-things-are-counted">How things are counted<a class="headerlink" href="#how-things-are-counted" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Papers</strong>: a paper counts once for every institution with at least one author on it. A paper
@@ -1393,7 +1537,7 @@ conference; ↗ opens the paper on the conference site.</p>
 <code>backend/services/conferences/institutions.py</code>.</p>
 <hr />
 <h2 id="from-claude-mcp">From Claude (MCP)<a class="headerlink" href="#from-claude-mcp" title="Permanent link">&para;</a></h2>
-<p>Three <a href="../mcp-server/">MCP tools</a> expose the same data to Claude Desktop and Claude Code:</p>
+<p>Five <a href="../mcp-server/">MCP tools</a> expose the same data to Claude Desktop and Claude Code:</p>
 <table>
 <thead>
 <tr>
@@ -1408,16 +1552,25 @@ conference; ↗ opens the paper on the conference site.</p>
 </tr>
 <tr>
 <td><code>conference_topic</code></td>
-<td>Who publishes on a topic at a conference: top universities and companies, area mix, closest papers</td>
+<td>Who publishes on a topic at a conference: top universities and companies, area mix, closest papers. With <code>conference="all"</code>: the same over every loaded conference, plus papers per 1,000 per conference and the trend over years</td>
 </tr>
 <tr>
 <td><code>conference_institution</code></td>
 <td>What one institution published at a conference: rank, counts, area mix against the conference, collaborators, authors, papers</td>
 </tr>
+<tr>
+<td><code>conference_search_papers</code></td>
+<td>Papers across all loaded conferences by title words (typos tolerated), then by meaning</td>
+</tr>
+<tr>
+<td><code>conference_search_author</code></td>
+<td>An author across all loaded conferences: papers per conference with their institution on each, co-author count, and whether the name looks like more than one person</td>
+</tr>
 </tbody>
 </table>
-<p><code>conference</code> takes a key (<code>neurips2026</code>), a name (<code>ICML 2025</code>) or a bare series (<code>iclr</code> = its
-latest year). Papers already in your library come back with their <code>library_paper_id</code>.</p>
+<p><code>conference</code> takes a key (<code>neurips2026</code>), a name (<code>ICML 2025</code>), a bare series (<code>iclr</code> = its
+latest year) or, for <code>conference_topic</code>, <code>all</code>. Papers already in your library come back with
+their <code>library_paper_id</code>.</p>
 <hr />
 <h2 id="settings">Settings<a class="headerlink" href="#settings" title="Permanent link">&para;</a></h2>
 <p>All optional; set them in <code>.env</code> and pass them to the backend in <code>docker-compose.yml</code>.</p>
@@ -1454,6 +1607,11 @@ latest year). Papers already in your library come back with their <code>library_
 <td><code>CONFERENCE_EMBED_THREADS</code></td>
 <td><code>4</code></td>
 <td>CPU threads for embedding</td>
+</tr>
+<tr>
+<td><code>CONFERENCE_CACHE_MAX</code></td>
+<td><code>32</code></td>
+<td>Conferences held in memory at once (20–40 MB each); searching all conferences needs every loaded one in memory</td>
 </tr>
 </tbody>
 </table>

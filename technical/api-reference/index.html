@@ -2719,6 +2719,16 @@
 </tr>
 <tr>
 <td><code>GET</code></td>
+<td><code>/conferences/search/query</code></td>
+<td>Across all loaded conferences (<code>?q=&amp;kind=all\|paper\|author&amp;series=&amp;field=&amp;year_min=&amp;year_max=&amp;limit=</code>): <code>papers</code> (<code>title</code> matches with <code>title_match</code>, <code>semantic</code> by meaning, <code>title_total</code>), <code>authors</code> (cards with papers per conference, institutions, <code>identities</code>), <code>suggested</code> tab, <code>ms</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/conferences/search/topic</code></td>
+<td><code>{query, k=300, series?, field?, year_min?, year_max?, papers?}</code>: the k closest papers pooled over all loaded conferences (title vectors); <code>conferences</code> with <code>count</code> and <code>per_1k</code>, <code>trend</code> per series, pooled <code>academia</code> / <code>industry</code>, <code>areas</code>, <code>papers</code>, <code>threshold</code>, <code>skipped</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
 <td><code>/conferences/{key}/status</code></td>
 <td>Build state: <code>none</code>, <code>queued</code>, <code>fetching</code>, <code>normalising</code>, <code>embedding</code>, <code>ready</code>, <code>partial</code>, <code>unavailable</code>, <code>error</code> (+ <code>progress</code>)</td>
 </tr>
