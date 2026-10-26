@@ -2331,7 +2331,17 @@
 <tr>
 <td><code>GET</code></td>
 <td><code>/search</code></td>
-<td>Full-text + filtered search</td>
+<td>Ranked library search (titles, authors, topics, tags, venue, abstracts, notes, highlights, claims, full text; optional semantic blend), or filters only without <code>q</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/search/suggest</code></td>
+<td>Type-ahead: <code>papers</code> (title), <code>authors</code>, <code>topics</code>, <code>tags</code>, <code>projects</code> for a prefix (<code>?q=&amp;limit=5</code>); each entity with its paper count</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/search/status</code></td>
+<td>Semantic index state (<code>state</code>, <code>indexed</code>, <code>done</code>/<code>todo</code> while building) and the full-text indexes' state</td>
 </tr>
 <tr>
 <td><code>GET</code></td>
@@ -2363,17 +2373,17 @@
 <tr>
 <td><code>q</code></td>
 <td>string</td>
-<td>Full-text query</td>
+<td>Query: words (prefix, one typo for 5+ letters), <code>"phrases"</code>, <code>word*</code>, a DOI or arXiv id. Case and accents are ignored</td>
 </tr>
 <tr>
 <td><code>tag</code></td>
 <td>string</td>
-<td>Filter by tag name</td>
+<td>Filter by tag name (case-insensitive)</td>
 </tr>
 <tr>
 <td><code>topic</code></td>
 <td>string</td>
-<td>Filter by topic name</td>
+<td>Filter by topic name (case-insensitive)</td>
 </tr>
 <tr>
 <td><code>project_id</code></td>
@@ -2383,7 +2393,12 @@
 <tr>
 <td><code>person_id</code></td>
 <td>string</td>
-<td>Filter by person ID</td>
+<td>Filter by person ID (authored or involved)</td>
+</tr>
+<tr>
+<td><code>venue</code></td>
+<td>string</td>
+<td>Filter by venue (case-insensitive)</td>
 </tr>
 <tr>
 <td><code>year_min</code></td>
@@ -2400,8 +2415,47 @@
 <td>string</td>
 <td>Filter by reading status</td>
 </tr>
+<tr>
+<td><code>bookmarked</code></td>
+<td>bool</td>
+<td>Only bookmarked papers</td>
+</tr>
+<tr>
+<td><code>include_references</code></td>
+<td>bool</td>
+<td>Include reference stubs (tag <code>from-references</code>); default <code>true</code>, ranked below library papers</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td>string</td>
+<td><code>lexical</code> (default), <code>hybrid</code> (lexical + embedding similarity, reciprocal-rank fusion) or <code>semantic</code>; falls back to lexical while the embedding index is not ready</td>
+</tr>
+<tr>
+<td><code>sort</code></td>
+<td>string</td>
+<td><code>relevance</code> (default with <code>q</code>), <code>date_desc</code> (default without), <code>date_asc</code>, <code>year_desc</code>, <code>year_asc</code>, <code>title_asc</code></td>
+</tr>
+<tr>
+<td><code>snippets</code></td>
+<td>int</td>
+<td>Passages per hit, 0–6 (default 2)</td>
+</tr>
+<tr>
+<td><code>skip</code>, <code>limit</code></td>
+<td>int</td>
+<td>Paging after ranking; <code>limit</code> 1–2000 (default 20)</td>
+</tr>
 </tbody>
 </table>
+<p>Response: <code>{results, total, mode, relaxed, semantic, failed_sources, took_ms}</code>. <code>total</code> counts
+every hit, not just the page. Each hit is the paper plus <code>score</code>, <code>matched_in</code> (coarse, e.g.
+<code>note+paper</code>), <code>matched_fields</code> (<code>doi</code>, <code>title</code>, <code>author</code>, <code>topic</code>, <code>tag</code>, <code>venue</code>, <code>abstract</code>,
+<code>summary</code>, <code>note</code>, <code>highlight</code>, <code>claim</code>, <code>fulltext</code>, <code>semantic</code>), <code>matches</code> (matched author /
+topic / tag / venue names), <code>snippets</code> (<code>{field, text, marks, page?}</code>), <code>title_marks</code>, <code>authors</code>,
+<code>is_reference</code>, <code>similarity</code> (hybrid/semantic), <code>text_chars</code>, <code>has_note</code>, <code>highlight_count</code>,
+<code>projects</code>. <code>marks</code> are <code>[start, end)</code> offsets in code points. <code>relaxed: true</code> means no paper
+contained every word and partial matches are shown. Ranking, weights and indexes:
+<code>.specs/012_search.md</code>.</p>
 <h3 id="graph-query-parameters"><code>/graph</code> Query Parameters<a class="headerlink" href="#graph-query-parameters" title="Permanent link">&para;</a></h3>
 <table>
 <thead>

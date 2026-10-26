@@ -654,6 +654,48 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Search">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-searched" class="md-nav__link">
+    <span class="md-ellipsis">
+      What is searched
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      Syntax
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#suggestions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Suggestions
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modes-sort-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Modes, sort, references
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1179,6 +1221,48 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Search">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-searched" class="md-nav__link">
+    <span class="md-ellipsis">
+      What is searched
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      Syntax
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#suggestions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Suggestions
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modes-sort-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Modes, sort, references
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1306,14 +1390,128 @@
 </ul>
 <hr />
 <h2 id="search">Search<a class="headerlink" href="#search" title="Permanent link">&para;</a></h2>
-<p>The search bar at the top performs full-text search across:</p>
+<p>Type in the search box at the top. Results appear as you type (250 ms after the last
+keystroke, or at once on <strong>Enter</strong>), ranked by relevance, and every row says <strong>why</strong> it matched:
+chips such as <em>Title</em>, <em>Author: Tero Karras</em>, <em>Topic: Diffusion Models</em>, <em>Your note</em>,
+<em>Highlight</em>, <em>Full text</em> or <em>Meaning 0.78</em>, and one or two passages with the matched words
+marked.</p>
+<h3 id="what-is-searched">What is searched<a class="headerlink" href="#what-is-searched" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>Weight</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DOI or arXiv id typed as the query</td>
+<td>exact match, always first</td>
+</tr>
+<tr>
+<td>Title</td>
+<td>highest; extra when every word or the whole query is in the title</td>
+</tr>
+<tr>
+<td>Authors</td>
+<td>high; a query that is someone's name puts their papers first</td>
+</tr>
+<tr>
+<td>Your notes and your PDF highlights (with their comments)</td>
+<td>high</td>
+</tr>
+<tr>
+<td>Topics, tags</td>
+<td>medium</td>
+</tr>
+<tr>
+<td>Abstract, AI summary, extracted claims</td>
+<td>medium</td>
+</tr>
+<tr>
+<td>Venue</td>
+<td>low</td>
+</tr>
+<tr>
+<td>Extracted full text of the PDF</td>
+<td>lowest (every word must occur in it)</td>
+</tr>
+</tbody>
+</table>
+<p>A paper has to contain <strong>every word</strong> of the query somewhere in those fields (one word in the
+author list and another in the title is fine). If no paper does, the papers that contain some
+of the words are shown with a note saying so. Papers cited by many other papers in your
+library rank a little higher among equally good matches.</p>
+<p>Case and accents never matter: <code>edm</code>, <code>EDM</code> and <code>Edm</code> find the same papers, as do <code>Kynkaanniemi</code>
+and <code>Kynkäänniemi</code>, in the search, the suggestions and the filters.</p>
+<h3 id="syntax">Syntax<a class="headerlink" href="#syntax" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>You type</th>
+<th>It finds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>diffusion</code></td>
+<td>diffusion, diffusions, Diffusion-based (every word is also a prefix)</td>
+</tr>
+<tr>
+<td><code>diffus*</code></td>
+<td>any word starting with <em>diffus</em></td>
+</tr>
+<tr>
+<td><code>scroe based</code></td>
+<td>score-based: words of 5+ letters tolerate one typo</td>
+</tr>
+<tr>
+<td><code>"flow matching"</code></td>
+<td>the exact phrase only</td>
+</tr>
+<tr>
+<td><code>alphafold3</code></td>
+<td>AlphaFold3 and AlphaFold 3</td>
+</tr>
+<tr>
+<td><code>over-conditioning</code>, <code>co-folding</code></td>
+<td>the two parts next to each other (over-conditioning, over conditioning) and the joined word (cofolding)</td>
+</tr>
+<tr>
+<td><code>10.1038/s41586-024-07487-w</code>, <code>https://doi.org/…</code>, <code>2210.02747</code>, <code>arXiv:2210.02747</code></td>
+<td>that paper</td>
+</tr>
+<tr>
+<td><code>the</code>, <code>of</code>, <code>for</code> …</td>
+<td>ignored unless the query has nothing else</td>
+</tr>
+</tbody>
+</table>
+<p>Other punctuation (<code>:</code>, brackets, slashes) is treated as a word break, so <code>title: diffusion</code> or
+<code>SE(3)</code> are safe to type.</p>
+<h3 id="suggestions">Suggestions<a class="headerlink" href="#suggestions" title="Permanent link">&para;</a></h3>
+<p>From the second character on, a dropdown lists matching <strong>papers</strong> (by title), <strong>authors</strong>,
+<strong>topics</strong>, <strong>tags</strong> and <strong>projects</strong> with their paper counts. Use ↑ / ↓ and <strong>Enter</strong>, or click:
+a paper opens it; an author, topic, tag or project becomes a filter (and the typed text is
+cleared). <strong>Esc</strong> closes the list.</p>
+<h3 id="modes-sort-references">Modes, sort, references<a class="headerlink" href="#modes-sort-references" title="Permanent link">&para;</a></h3>
+<p>Above the results:</p>
 <ul>
-<li>Paper title</li>
-<li>Abstract</li>
-<li>AI-generated summary</li>
+<li><strong>Exact</strong> matches words only. <strong>Hybrid</strong> (the default) also ranks papers whose title and
+  abstract <em>mean</em> something close to the query, which helps for questions in plain language
+  ("why do co-folding models collapse to one pose"). <strong>Meaning</strong> ranks by meaning alone. Meaning
+  search needs a one-time embedding of the library in the background (a few minutes); until it
+  is ready, the page says so and shows exact matches.</li>
+<li><strong>Sort</strong>: Relevance (default with a query), Newest added, Year, Title. The sort in Settings
+  applies to browsing without a query.</li>
+<li><strong>References</strong>: also search the cited references that have no PDF in your library (hidden by
+  default; they rank below your own papers).</li>
 </ul>
-<p>Results update as you type. The search query is reflected in the URL so you can bookmark filtered views.</p>
-<hr />
+<p>The query, filters, mode, sort and the references switch are kept in the URL, so a search can
+be bookmarked or shared. When nothing matches, the page offers to search the references, to
+search by meaning, or to remove the filters.</p>
+<p>The <strong>✦</strong> button next to the box still turns a plain-language request into filters with the
+AI model.</p>
 <h2 id="filters">Filters<a class="headerlink" href="#filters" title="Permanent link">&para;</a></h2>
 <p>The left sidebar provides filters that narrow down the paper list:</p>
 <table>
@@ -1338,11 +1536,12 @@
 </tr>
 <tr>
 <td><strong>Person</strong></td>
-<td>Shows papers authored by or involving the selected person</td>
+<td>Shows papers authored by or involving the selected person (pick an author in the search suggestions)</td>
 </tr>
 </tbody>
 </table>
-<p>Multiple filters can be combined. Active filters appear as removable chips below the search bar.</p>
+<p>Multiple filters can be combined, with or without a search query. Active filters appear as
+removable chips below the search bar. Tag, topic and venue filters ignore case.</p>
 <h3 id="tag-categories">Tag Categories<a class="headerlink" href="#tag-categories" title="Permanent link">&para;</a></h3>
 <p>157 tags are seeded on startup:</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:8"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><input id="__tabbed_1_5" name="__tabbed_1" type="radio" /><input id="__tabbed_1_6" name="__tabbed_1" type="radio" /><input id="__tabbed_1_7" name="__tabbed_1" type="radio" /><input id="__tabbed_1_8" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Source</label><label for="__tabbed_1_2">Workflow</label><label for="__tabbed_1_3">Content type</label><label for="__tabbed_1_4">Math</label><label for="__tabbed_1_5">ML / AI</label><label for="__tabbed_1_6">Physics / Simulation</label><label for="__tabbed_1_7">Biology</label><label for="__tabbed_1_8">Drug discovery</label></div>

@@ -2861,17 +2861,45 @@
 <tbody>
 <tr>
 <td><code>paper_search</code></td>
-<td>Fulltext</td>
+<td>Fulltext (standard-folding)</td>
 <td>Paper</td>
 <td><code>title</code>, <code>abstract</code>, <code>summary</code></td>
-<td><code>/search</code> endpoint</td>
+<td><code>/search</code>, <code>/search/suggest</code></td>
 </tr>
 <tr>
 <td><code>note_search</code></td>
-<td>Fulltext</td>
+<td>Fulltext (standard-folding)</td>
 <td>Note</td>
 <td><code>content</code></td>
-<td>Note search</td>
+<td><code>/search</code></td>
+</tr>
+<tr>
+<td><code>annotation_search</code></td>
+<td>Fulltext (standard-folding)</td>
+<td>Annotation</td>
+<td><code>highlighted_text</code>, <code>note</code></td>
+<td><code>/search</code></td>
+</tr>
+<tr>
+<td><code>claim_search</code></td>
+<td>Fulltext (standard-folding)</td>
+<td>Claim</td>
+<td><code>text</code></td>
+<td><code>/search</code>, <code>/claims/search</code></td>
+</tr>
+<tr>
+<td><code>entity_name_search</code></td>
+<td>Fulltext (standard-folding)</td>
+<td>Person, Topic, Tag, Project</td>
+<td><code>name</code></td>
+<td><code>/search</code>, <code>/search/suggest</code></td>
+</tr>
+<tr>
+<td><code>paper_text_search</code></td>
+<td>Fulltext (standard-folding, eventually consistent)</td>
+<td>Paper</td>
+<td><code>venue</code>, <code>raw_text</code></td>
+<td><code>/search</code></td>
 </tr>
 <tr>
 <td><code>message_search</code></td>
@@ -2879,13 +2907,6 @@
 <td>Message</td>
 <td><code>content</code></td>
 <td>Conversation search</td>
-</tr>
-<tr>
-<td><code>claim_search</code></td>
-<td>Fulltext</td>
-<td>Claim</td>
-<td><code>text</code></td>
-<td><code>/claims/search</code></td>
 </tr>
 <tr>
 <td><code>paper_embeddings</code></td>

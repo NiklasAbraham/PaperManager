@@ -1317,6 +1317,75 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#2026-10-26-library-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      2026-10-26 — Library search
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-10-26 — Library search">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-ranked-search-over-every-source-scored-in-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      One ranked search over every source, scored in Python
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#every-word-must-match-somewhere-relaxed-only-when-nothing-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      Every word must match somewhere, relaxed only when nothing does
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#standard-folding-analyzer-indexes-rebuilt-at-startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      standard-folding analyzer, indexes rebuilt at startup
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-text-in-lucene-not-contains" class="md-nav__link">
+    <span class="md-ellipsis">
+      Full text in Lucene, not CONTAINS
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hybrid-by-reciprocal-rank-fusion-semantic-weight-scaled-by-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      Hybrid by reciprocal-rank fusion, semantic weight scaled by confidence
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#library-citations-as-a-prior" class="md-nav__link">
+    <span class="md-ellipsis">
+      Library citations as a prior
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1668,6 +1737,75 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#2026-10-26-library-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      2026-10-26 — Library search
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-10-26 — Library search">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-ranked-search-over-every-source-scored-in-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      One ranked search over every source, scored in Python
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#every-word-must-match-somewhere-relaxed-only-when-nothing-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      Every word must match somewhere, relaxed only when nothing does
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#standard-folding-analyzer-indexes-rebuilt-at-startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      standard-folding analyzer, indexes rebuilt at startup
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-text-in-lucene-not-contains" class="md-nav__link">
+    <span class="md-ellipsis">
+      Full text in Lucene, not CONTAINS
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hybrid-by-reciprocal-rank-fusion-semantic-weight-scaled-by-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      Hybrid by reciprocal-rank fusion, semantic weight scaled by confidence
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#library-citations-as-a-prior" class="md-nav__link">
+    <span class="md-ellipsis">
+      Library citations as a prior
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1801,6 +1939,38 @@ so the feature works in the default self-hosted setup.</p>
 <p>24 hand-described areas instead of per-conference clustering: the same area has the same name
 and colour at every venue, so conferences can be compared. Embeddings are centred on the
 conference mean before assignment; without it the most generic area absorbed a fifth of NeurIPS.</p>
+<hr />
+<h2 id="2026-10-26-library-search">2026-10-26 — Library search<a class="headerlink" href="#2026-10-26-library-search" title="Permanent link">&para;</a></h2>
+<h3 id="one-ranked-search-over-every-source-scored-in-python">One ranked search over every source, scored in Python<a class="headerlink" href="#one-ranked-search-over-every-source-scored-in-python" title="Permanent link">&para;</a></h3>
+<p>The old <code>/search</code> passed the raw query to two Lucene indexes (titles/abstracts/summaries and
+notes), crashed on <code>:</code> or <code>-</code>, and could not find a paper by author, DOI, highlight or full
+text. Now each source (paper fields, author/topic/tag names, venue, notes, highlights, claims,
+full text, DOI/arXiv id) gets its own Lucene query, and the per-paper merge, coverage check and
+scoring happen in Python (<code>services/library_search/</code>). Lucene scores are not comparable across
+indexes, so each source is normalised by its best score and weighted; title and author bonuses
+come from the title and names themselves. Pure functions, so the ranking is unit-tested without
+Neo4j, and the MCP <code>library_search</code> tool uses the same engine.</p>
+<h3 id="every-word-must-match-somewhere-relaxed-only-when-nothing-does">Every word must match somewhere, relaxed only when nothing does<a class="headerlink" href="#every-word-must-match-somewhere-relaxed-only-when-nothing-does" title="Permanent link">&para;</a></h3>
+<p>Lucene's default OR returned any paper with any word ("antibody docking" → every antibody
+paper). A hit must now cover every query word across its fields (author + title counts); only
+when no paper does are partial matches shown, flagged <code>relaxed</code>.</p>
+<h3 id="standard-folding-analyzer-indexes-rebuilt-at-startup">standard-folding analyzer, indexes rebuilt at startup<a class="headerlink" href="#standard-folding-analyzer-indexes-rebuilt-at-startup" title="Permanent link">&para;</a></h3>
+<p>Case and accents must not matter (<code>Kynkaanniemi</code> = <code>Kynkäänniemi</code>). The search indexes moved to
+Neo4j's <code>standard-folding</code> analyzer and the query terms are folded the same way in Python (prefix
+and fuzzy terms bypass Lucene's analyzer). <code>db/schema.py</code> drops and rebuilds an index whose
+analyzer differs: seconds on this library, and simpler than versioned index names.</p>
+<h3 id="full-text-in-lucene-not-contains">Full text in Lucene, not <code>CONTAINS</code><a class="headerlink" href="#full-text-in-lucene-not-contains" title="Permanent link">&para;</a></h3>
+<p>The MCP tool scanned <code>toLower(p.raw_text) CONTAINS</code> over every paper: 220–270 ms per query on 36 MB
+of text. A full-text index on <code>raw_text</code> (eventually consistent, so uploads do not wait) costs
+13 MB and answers in single-digit milliseconds.</p>
+<h3 id="hybrid-by-reciprocal-rank-fusion-semantic-weight-scaled-by-confidence">Hybrid by reciprocal-rank fusion, semantic weight scaled by confidence<a class="headerlink" href="#hybrid-by-reciprocal-rank-fusion-semantic-weight-scaled-by-confidence" title="Permanent link">&para;</a></h3>
+<p>Library embeddings reuse the conference explorer's bge-small (no new dependency), stored in a
+file like the conference vectors, synced incrementally by a background thread. Semantic and
+lexical lists are fused by weighted RRF; the semantic weight shrinks when even the best cosine
+is low (jargon the model does not know), the lexical weight when the query is a long question.</p>
+<h3 id="library-citations-as-a-prior">Library citations as a prior<a class="headerlink" href="#library-citations-as-a-prior" title="Permanent link">&para;</a></h3>
+<p>Among many papers matching "flow matching", the one most cited by the library's own papers is
+almost always the one meant. Scores are multiplied by <code>1 + 0.12 ln(1 + citing papers)</code>.</p>
 
 
 

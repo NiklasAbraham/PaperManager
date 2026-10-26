@@ -1322,7 +1322,7 @@
 <p>Runs on startup. Creates:</p>
 <ul>
 <li><strong>Uniqueness constraints</strong> on: <code>Paper.id</code>, <code>Person.id</code>, <code>Topic.id</code>, <code>Topic.name</code>, <code>Tag.id</code>, <code>Tag.name</code>, <code>Note.id</code>, <code>Project.id</code>, <code>Figure.id</code>, <code>Annotation.id</code>, <code>Blog.id</code>, <code>BlogPost.id</code>, <code>User.id</code>, <code>User.name</code>, <code>Claim.id</code>, <code>Table.id</code>, <code>Conversation.id</code>, <code>Message.id</code>, <code>Venue.id</code></li>
-<li><strong>Fulltext indexes</strong>: <code>paper_search</code> (title, abstract, summary), <code>note_search</code> (content), <code>message_search</code> (content), <code>claim_search</code> (text)</li>
+<li><strong>Fulltext indexes</strong>: <code>paper_search</code> (title, abstract, summary), <code>note_search</code> (content), <code>annotation_search</code> (highlighted_text, note), <code>claim_search</code> (text), <code>entity_name_search</code> (Person/Topic/Tag/Project name), <code>paper_text_search</code> (venue, raw_text) with the <code>standard-folding</code> analyzer (rebuilt at startup if their analyzer or fields differ; see <code>.specs/012_search.md</code>), and <code>message_search</code> (content)</li>
 <li><strong>Vector index</strong>: <code>paper_embeddings</code> on <code>Paper.embedding</code> (768-dim cosine, nomic-embed-text)</li>
 </ul>
 <hr />
