@@ -146,6 +146,19 @@ def _anthropic_completion(
     return text
 
 
+def _can_fall_back(provider: str | None, tools: list[dict[str, Any]] | None) -> bool:
+    """A failed LiteLLM call is retried on Anthropic when AI_FALLBACK is on and a key is set.
+
+    Tool calls stay on LiteLLM: the Anthropic path here has no tool support.
+    """
+    return (
+        provider == "litellm"
+        and not tools
+        and settings.ai_fallback
+        and bool(settings.anthropic_api_key.strip())
+    )
+
+
 def chat_completion(
     messages: list[dict[str, Any]],
     model: str | None = None,
@@ -194,7 +207,13 @@ def chat_completion(
     except Exception as exc:
         log.error("LiteLLM ✗ chat_completion FAILED after %.2fs | model=%s | %s: %s",
                   _time.time() - t0, resolved, type(exc).__name__, exc)
-        raise
+        if not _can_fall_back(provider, tools):
+            raise
+        log.warning("LiteLLM ↪ falling back to Anthropic | model=%s", ANTHROPIC_FAST_MODEL)
+        content = _anthropic_completion(
+            messages, ANTHROPIC_FAST_MODEL, json_mode=json_mode, max_tokens=max_tokens,
+            timeout=timeout, max_retries=max_retries,
+        )
     log.info("LiteLLM ✓ chat_completion OK | model=%s | %.2fs | %d chars returned",
              resolved, _time.time() - t0, len(content))
     return content

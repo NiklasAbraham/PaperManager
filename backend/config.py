@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     ai_provider: str = "auto"
     # Model for the fast tasks; empty = the provider's default (Haiku, GPT-5 mini, LITELLM_MODEL).
     fast_model: str = ""
+    # When the LiteLLM proxy fails (down, 502, timeout), retry the fast task on Claude Haiku
+    # if ANTHROPIC_API_KEY is set. Has no effect without that key.
+    ai_fallback: bool = True
 
     # Look: accent colour as a hex value or a preset name (violet, blue, teal, green, amber, rose, slate).
     ui_accent: str = "violet"

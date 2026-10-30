@@ -225,6 +225,9 @@ def suggest_tags(body: SuggestBody):
             kwargs: dict = {
                 "api_key": work_key,
                 "http_client": anthropic.DefaultHttpxClient(verify=_ssl),
+                # The work gateway is often unreachable (VPN-only): fail fast, don't retry.
+                "timeout": anthropic.Timeout(30.0, connect=5.0),
+                "max_retries": 0,
             }
             if work_base:
                 kwargs["base_url"] = work_base

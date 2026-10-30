@@ -38,7 +38,9 @@ Every answer is stored in `.env`, and the app reads it at startup:
 | Accent colour | `UI_ACCENT` | Buttons, links and highlights use your colour (a preset name or any `#RRGGBB`) |
 
 `AI_PROVIDER=auto` uses the first configured provider in this order: your own server, then
-Anthropic, then OpenAI. Set `AI_PROVIDER` or `FAST_MODEL` to override that choice. The model
+Anthropic, then OpenAI. Set `AI_PROVIDER` or `FAST_MODEL` to override that choice. If your own
+server fails and an Anthropic key is set, the fast tasks retry on Claude Haiku
+(`AI_FALLBACK=false` turns that off). The model
 menus in the app show the active model by name, and Claude options appear only for users who
 have a Claude key.
 

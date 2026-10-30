@@ -46,6 +46,36 @@ def test_chat_completion_routes_to_anthropic(env, monkeypatch):
     assert seen["model"] == lc.ANTHROPIC_FAST_MODEL and seen["json_mode"] is True
 
 
+def _litellm_down(monkeypatch):
+    class Down:
+        def __getattr__(self, name):
+            raise RuntimeError("Bad Gateway")
+
+    class Client:
+        chat = Down()
+
+    monkeypatch.setattr(lc, "get_litellm_client", lambda: Client())
+
+
+def test_litellm_failure_falls_back_to_anthropic(env, monkeypatch):
+    env(litellm_endpoint="https://proxy", litellm_api_key="k", anthropic_api_key="sk-ant")
+    _litellm_down(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(lc, "_anthropic_completion", lambda m, model, **kw: seen.setdefault("model", model) and "ok")
+    assert lc.chat_completion([{"role": "user", "content": "hi"}]) == "ok"
+    assert seen["model"] == lc.ANTHROPIC_FAST_MODEL
+
+
+@pytest.mark.parametrize("override", [{"anthropic_api_key": ""}, {"ai_fallback": False}])
+def test_litellm_failure_raises_without_fallback(env, monkeypatch, override):
+    env(litellm_endpoint="https://proxy", litellm_api_key="k", anthropic_api_key="sk-ant", ai_fallback=True)
+    env(**override)
+    _litellm_down(monkeypatch)
+    monkeypatch.setattr(lc, "_anthropic_completion", lambda *a, **kw: pytest.fail("should not fall back"))
+    with pytest.raises(RuntimeError, match="Bad Gateway"):
+        lc.chat_completion([{"role": "user", "content": "hi"}])
+
+
 def test_local_storage_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "storage_backend", "auto")
     monkeypatch.setattr(settings, "google_drive_folder_id", "")
