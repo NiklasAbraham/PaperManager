@@ -104,6 +104,14 @@ class PersonOut(BaseModel):
     skills: str | None = None
     startup_roles: str | None = None
     last_enriched_at: str | None = None
+    openalex_id: str | None = None
+    h_index: int | None = None
+    cv: str | None = None              # JSON-encoded CV, see services/person_cv.py
+    cv_status: str | None = None
+    cv_updated_at: str | None = None
+    photo: str | None = None           # small JPEG data URI
+    photo_source: str | None = None
+    aliases: list[str] | None = None    # names of people merged into this one
 
 
 class PersonEnrichOut(BaseModel):

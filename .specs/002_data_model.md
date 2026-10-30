@@ -56,6 +56,10 @@ Authors, collaborators, colleagues.
 | `s2_author_id` | string | Semantic Scholar author ID |
 | `citation_count` | integer | Total citations from S2 |
 | `last_enriched_at` | datetime | When person data was last enriched |
+| `openalex_id`, `h_index` | string, integer | OpenAlex author ID and h-index (set by the CV builder) |
+| `cv`, `cv_status`, `cv_updated_at` | string, string, datetime | JSON-encoded CV (`services/person_cv.py`); status `ok` / `partial` / `mismatch` / `not-found` / `no-papers` |
+| `photo`, `photo_source` | string | 256 px JPEG data URI and where it came from |
+| `aliases` | list of strings | Names of people merged into this one (`services/person_duplicates.py`) |
 
 ### Topic
 Formal research areas (e.g. `"Protein Structure Prediction"`).

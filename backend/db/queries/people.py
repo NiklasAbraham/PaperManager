@@ -1,3 +1,4 @@
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from neo4j import Driver
@@ -5,6 +6,26 @@ from neo4j import Driver
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def surname_key(name: str | None) -> tuple[str, str]:
+    """Sort key: surname (last word, accents and case folded), then the full name.
+
+    "Christian P. Robert" sorts under R, "Jean-Michel Marin" under M; a surname
+    particle such as "van der" stays with the given names ("Aad van der Vaart" -> V).
+    """
+    folded = unicodedata.normalize("NFKD", name or "")
+    folded = "".join(c for c in folded if not unicodedata.combining(c)).lower().strip()
+    words = folded.replace(",", " ").split()
+    return (words[-1] if words else "", folded)
+
+
+# Heavy fields kept out of list responses; the person detail returns them.
+_LIST_EXCLUDED = ("cv", "photo")
+
+
+def _list_row(node) -> dict:
+    return {k: v for k, v in dict(node).items() if k not in _LIST_EXCLUDED}
 
 
 def create_person(driver: Driver, data: dict) -> dict:
@@ -63,10 +84,10 @@ def list_people(driver: Driver, tag: str | None = None) -> list[dict]:
             )
         rows = []
         for r in result:
-            d = dict(r["p"])
+            d = _list_row(r["p"])
             d["paper_count"] = r["paper_count"]
             rows.append(d)
-        return rows
+        return sorted(rows, key=lambda d: surname_key(d.get("name")))
 
 
 def list_people_without_tag(driver: Driver, tag: str) -> list[dict]:
@@ -84,10 +105,10 @@ def list_people_without_tag(driver: Driver, tag: str) -> list[dict]:
         )
         rows = []
         for r in result:
-            d = dict(r["p"])
+            d = _list_row(r["p"])
             d["paper_count"] = r["paper_count"]
             rows.append(d)
-        return rows
+        return sorted(rows, key=lambda d: surname_key(d.get("name")))
 
 
 def delete_person(driver: Driver, person_id: str) -> bool:
@@ -269,7 +290,7 @@ def list_tracked_people(driver: Driver) -> list[dict]:
     """Return all people with tracked=true."""
     with driver.session() as session:
         result = session.run("MATCH (p:Person {tracked: true}) RETURN p ORDER BY p.name")
-        return [dict(r["p"]) for r in result]
+        return sorted((_list_row(r["p"]) for r in result), key=lambda d: surname_key(d.get("name")))
 
 
 def update_person_props(driver: Driver, person_id: str, props: dict) -> dict | None:

@@ -43,6 +43,60 @@ export interface Person {
   skills?: string;        // JSON-encoded string[]
   startup_roles?: string; // JSON-encoded StartupRole[]
   last_enriched_at?: string;
+  openalex_id?: string;
+  h_index?: number;
+  cv?: string;            // JSON-encoded PersonCv
+  cv_status?: "ok" | "partial" | "mismatch" | "not-found" | "no-papers";
+  cv_updated_at?: string;
+  photo?: string;         // JPEG data URI
+  photo_source?: string;
+}
+
+export interface CvEntry {
+  role?: string | null;
+  department?: string | null;
+  organization?: string | null;
+  place?: string | null;
+  start?: string | null;
+  end?: string | null;
+  source: string;
+}
+
+export interface DuplicatePerson {
+  id: string;
+  name: string;
+  affiliation?: string | null;
+  paper_count: number;
+  degree: number;
+}
+
+/** People that look like one person; the first is the suggested keeper. */
+export interface PersonDuplicateGroup {
+  reasons: string[];
+  people: DuplicatePerson[];
+}
+
+export interface PersonCv {
+  updated_at: string;
+  name: string;
+  current_position?: string | null;
+  positions: CvEntry[];
+  education: CvEntry[];
+  affiliation_history: { institution: string; years: string }[];
+  metrics: { works?: number; citations?: number; h_index?: number; i10_index?: number };
+  topics: string[];
+  top_works: { title: string; year?: number; citations?: number; doi?: string | null }[];
+  bio?: string | null;
+  sources: { openalex?: string | null; orcid?: string | null; homepage?: string | null; wikidata?: string | null };
+  check: {
+    status: NonNullable<Person["cv_status"]>;
+    resolved_by: string;
+    library_papers: number;
+    confirmed: number;
+    unverifiable: number;
+    absent: { id: string; title: string; listed_authors: string[] }[];
+    other_openalex_profiles: string[];
+  };
 }
 
 export interface Topic {

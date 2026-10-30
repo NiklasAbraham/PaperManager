@@ -1,4 +1,4 @@
-import type { T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, PaperTable, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim , IdeogramCaption, IdeogramSessionStatus, IdeogramGenerateBody, IdeogramGenerateResult, Concept, ConceptsBackend, ConceptGeneration, ConfCatalog, ConfStatus, ConfOverview, ConfInstRow, ConfInstitution, ConfTopic, ConfPaperDetail } from "../types";
+import type { PersonCv, PersonDuplicateGroup, T_IngestOut, ParsedMeta, GraphData, Reference, Conversation, KnowledgeMessage, SseEvent, BulkSseEvent, Figure, PaperTable, LiteratureSseEvent, Paper, Chapter, Blog, BlogPost, Note, Annotation, AnnotationColor, VenueOut, Claim , IdeogramCaption, IdeogramSessionStatus, IdeogramGenerateBody, IdeogramGenerateResult, Concept, ConceptsBackend, ConceptGeneration, ConfCatalog, ConfStatus, ConfOverview, ConfInstRow, ConfInstitution, ConfTopic, ConfPaperDetail } from "../types";
 import type { ConfSearch, ConfSearchTopic } from "../types";
 import type { SearchResponse, SearchSuggestions } from "../types";
 
@@ -1373,6 +1373,22 @@ export async function enrichPerson(personId: string): Promise<{
   message?: string;
 }> {
   return apiFetch(`/people/${personId}/enrich`, { method: "POST" });
+}
+
+export async function refreshPersonCv(personId: string): Promise<PersonCv> {
+  return apiFetch(`/people/${personId}/cv`, { method: "POST" });
+}
+
+export async function findPeopleDuplicates(): Promise<{ groups: PersonDuplicateGroup[] }> {
+  return apiFetch("/people/duplicates");
+}
+
+export async function mergePeople(keepId: string, removeIds: string[]): Promise<{ kept_id: string; merged: number; relationships_moved: number }> {
+  return apiFetch("/people/merge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keep_id: keepId, remove_ids: removeIds }),
+  });
 }
 
 export async function enrichAllPeople(): Promise<{ status: string; total_people: number }> {
