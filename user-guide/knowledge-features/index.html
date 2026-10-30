@@ -1741,6 +1741,12 @@ prompt, papers, conversation, question and answer. Click it to see which papers 
 <hr />
 <h2 id="people">People<a class="headerlink" href="#people" title="Permanent link">&para;</a></h2>
 <p>Navigate to <strong>People</strong> in the nav bar.</p>
+<div class="admonition info">
+<p class="admonition-title">Contributed by Antoine Luciano</p>
+<p>Surname order, the CV tab and the duplicate finder come from
+<a href="https://github.com/AntoineLuciano">Antoine Luciano</a>
+(<a href="https://github.com/NiklasAbraham/PaperManager/pull/36">#36</a>).</p>
+</div>
 <p>All people in the system are listed in the sidebar with search, sorted by surname
 ("Christian P. Robert" under R; a particle stays with the given names, so "Aad van der Vaart" is under V).</p>
 <p><strong>Person detail</strong> shows:</p>
@@ -1761,6 +1767,7 @@ prompt, papers, conversation, question and answer. Click it to see which papers 
   profile found).</p>
 </li>
 </ul>
+<p><img alt="CV tab of a researcher, checked against the library papers" src="../../img/screenshots/people-cv.webp" /></p>
 <p>People are auto-created when papers are ingested from the author list.</p>
 <h3 id="duplicate-people">Duplicate people<a class="headerlink" href="#duplicate-people" title="Permanent link">&para;</a></h3>
 <p>The same researcher often arrives under several spellings ("Alán Aspuru-Guzik" and
@@ -1772,6 +1779,7 @@ of the others, fills its empty fields from theirs, and keeps their names as alia
 is joined to a full name only when one full name fits ("C. Robert" stays alone next to both
 "Christian Robert" and "Claire Robert"). <code>backend/scripts/merge_people.py</code> applies the same rules
 from the command line.</p>
+<p><img alt="Duplicate people grouped for merging" src="../../img/screenshots/people-duplicates.webp" /></p>
 <hr />
 <h2 id="projects">Projects<a class="headerlink" href="#projects" title="Permanent link">&para;</a></h2>
 <p>Navigate to <strong>Projects</strong> in the nav bar.</p>
