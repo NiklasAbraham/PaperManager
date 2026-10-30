@@ -28,7 +28,7 @@ REASONS = {
 
 PEOPLE_QUERY = """
 MATCH (p:Person)
-RETURN p.id AS id, p.name AS name, p.affiliation AS affiliation, p.s2_author_id AS s2_author_id,
+RETURN p.id AS id, p.name AS name, p.affiliation AS affiliation, properties(p).s2_author_id AS s2_author_id,
        p.tracked AS tracked, COUNT { (p)--() } AS degree,
        COUNT { (:Paper)-[:AUTHORED_BY|INVOLVES]->(p) } AS paper_count
 """
