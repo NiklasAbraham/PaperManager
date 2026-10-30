@@ -46,6 +46,9 @@ export interface AppSettings {
   claimsModel: string;
   generateEmbeddingsOnUpload: boolean;
 
+  // People — researcher CVs
+  cvModel: string;        // reads homepages: a claude-* id, or "litellm" for the server's fast model
+
   // Inference — compaction
   compactionKeepLastN: number; // how many messages to keep verbatim in sliding-window compact
 
@@ -73,6 +76,7 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   autoExtractClaims: true,
   claimsModel: "litellm",
   generateEmbeddingsOnUpload: true,
+  cvModel: "litellm",
   compactionKeepLastN: 6,
   debugMode: false,
 };

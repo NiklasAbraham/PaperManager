@@ -8,6 +8,7 @@ import {
 } from "../api/client";
 import type { Person, PersonCv, PersonDuplicateGroup, Paper, Tag, Note, StartupRole } from "../types";
 import NoteEditor from "../components/NoteEditor";
+import { useAppSettings } from "../contexts/SettingsContext";
 
 // ── Tag groups for the Q&A-style Tags tab ─────────────────────────────────────
 
@@ -576,6 +577,7 @@ function PersonDetailPanel({ person, onChanged }: {
   const [enrichMsg, setEnrichMsg]     = useState("");
 
   // CV
+  const { settings } = useAppSettings();
   const [cvLoading, setCvLoading] = useState(false);
   const [cvMsg, setCvMsg]         = useState("");
 
@@ -668,7 +670,7 @@ function PersonDetailPanel({ person, onChanged }: {
     setCvLoading(true);
     setCvMsg("");
     try {
-      const cv = await refreshPersonCv(person.id);
+      const cv = await refreshPersonCv(person.id, settings.cvModel);
       setCvMsg(cv.check.status === "mismatch"
         ? "CV found, but it does not match this person's papers — profile fields left unchanged"
         : "CV updated");

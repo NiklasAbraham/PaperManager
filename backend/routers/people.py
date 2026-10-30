@@ -11,7 +11,7 @@ from db.queries.notes import get_person_note, upsert_person_note, set_mentions
 from db.queries.tags import tag_person, untag_person, get_tags_for_person, get_or_create_tag
 from services.note_parser import parse_mentions
 from services.person_enrichment import enrich_person_by_id, enrich_all_people, enrich_person_from_papers_ollama
-from services.person_cv import build_person_cv, build_all_cvs
+from services.person_cv import build_person_cv, build_all_cvs, bulk_cv_running
 from services.person_duplicates import find_duplicate_groups, merge_people
 from services.auth import require_admin
 from models.schemas import (
@@ -219,19 +219,22 @@ def enrich_all(background_tasks: BackgroundTasks):
 
 
 @people_router.post("/{person_id}/cv")
-def refresh_cv(person_id: str):
+def refresh_cv(person_id: str, model: str | None = Query(None, description="LLM that reads the homepage: a claude-* id or the fast model (default)")):
     """Rebuild the person's CV from OpenAlex, ORCID and their homepage, checked against their papers."""
     try:
-        return build_person_cv(get_driver(), person_id)
+        return build_person_cv(get_driver(), person_id, model=model)
     except ValueError:
         raise HTTPException(status_code=404, detail="Person not found")
 
 
 @people_router.post("/cv-all")
 def refresh_all_cvs(background_tasks: BackgroundTasks, only_missing: bool = Query(True),
-                    pause: float = Query(0.0, ge=0, le=60, description="seconds to wait between people")):
+                    pause: float = Query(0.0, ge=0, le=60, description="seconds to wait between people"),
+                    model: str | None = Query(None, description="LLM that reads homepages (see /{person_id}/cv)")):
     """Build CVs in the background for every author (by default only those without one)."""
-    background_tasks.add_task(build_all_cvs, get_driver(), only_missing, pause)
+    if bulk_cv_running():
+        return {"status": "already-running"}
+    background_tasks.add_task(build_all_cvs, get_driver(), only_missing, pause, model)
     return {"status": "started"}
 
 

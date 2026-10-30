@@ -211,6 +211,11 @@ All people in the system are listed in the sidebar with search, sorted by surnam
   the library papers), amber (mostly), red (probably a homonym or a wrong author link), grey (no
   profile found).
 
+  **Settings → People** chooses the model that reads homepages (**CV model**: the server's fast
+  model, e.g. Gemma via LiteLLM, or Claude Haiku / Opus on your Anthropic key) and has
+  **Build missing CVs**, which builds a CV for every author without one, in the background and a
+  few seconds apart. The profile data itself comes from OpenAlex, ORCID and Wikidata and needs no key.
+
 ![CV tab of a researcher, checked against the library papers](../img/screenshots/people-cv.webp)
 
 People are auto-created when papers are ingested from the author list.

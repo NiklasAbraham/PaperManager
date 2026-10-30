@@ -38,3 +38,37 @@ def test_resolve_author_rejects_a_namesake_without_a_shared_paper(monkeypatch):
 
     monkeypatch.setattr(person_cv, "_author_works", lambda aid, limit=600: ({"title": "Bayesian adversarial privacy"},))
     assert _resolve_author({"name": "Jane Doe"}, Counter(), papers) == ("A9", "name+title")
+
+
+def test_cv_model_routing(monkeypatch):
+    """Homepage reading goes to Anthropic for claude-* models, to LiteLLM otherwise."""
+    from services import person_cv
+    import services.litellm_client as lc
+    import services.ai as ai
+
+    calls = []
+    monkeypatch.setattr(lc, "chat_completion", lambda messages, model=None, **kw: calls.append(("litellm", model)) or "{}")
+
+    class _Msg:
+        content = [type("B", (), {"text": "{}"})()]
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(model, **kw):
+                calls.append(("anthropic", model))
+                return _Msg()
+
+    monkeypatch.setattr(ai, "_personal_client", lambda: _Client())
+    person_cv._complete("hi", "claude-haiku-4-5-20251001")
+    person_cv._complete("hi", "google/gemma-4-26b-a4b-it")
+    assert calls[0] == ("anthropic", "claude-haiku-4-5-20251001")
+    assert calls[1] == ("litellm", "google/gemma-4-26b-a4b-it")
+
+
+def test_bulk_cv_runs_once_at_a_time():
+    from services import person_cv
+    with person_cv._bulk_lock:
+        assert person_cv.bulk_cv_running()
+        assert person_cv.build_all_cvs(None) == {"skipped": "already running"}
+    assert not person_cv.bulk_cv_running()

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { fastModelLabel } from "../lib/instance";
 import { useAppSettings, type AppSettings, DEFAULT_SUMMARY_INSTRUCTIONS } from "../contexts/SettingsContext";
-import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, validateSnapshot, clearPapers, seedDefaults, listLitellmModels, getMyAiKeyStatus, updateMyAiKeys, type MyAiKeyStatus, type SnapshotValidation } from "../api/client";
+import { apiFetch, deleteDebugPapers, countDebugPapers, exportRdf, exportCsv, exportSnapshot, importRdf, importSnapshot, validateSnapshot, clearPapers, seedDefaults, listLitellmModels, buildAllPersonCvs, getMyAiKeyStatus, updateMyAiKeys, type MyAiKeyStatus, type SnapshotValidation } from "../api/client";
 
 type BackfillResult = { processed: number; skipped: number; errors: number };
 type BackfillOp = "topics" | "summary" | "figures" | "claims" | "embeddings";
@@ -27,6 +27,7 @@ export default function Settings() {
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{ seeded: number } | null>(null);
   const [litellmModels, setLitellmModels] = useState<string[]>([]);
+  const [cvAllMsg, setCvAllMsg] = useState("");
   const [debugCount, setDebugCount] = useState<number | null>(null);
   const [debugDeleting, setDebugDeleting] = useState(false);
   const [debugDeleteResult, setDebugDeleteResult] = useState<{ deleted: number; figures_deleted: number } | null>(null);
@@ -454,6 +455,50 @@ export default function Settings() {
             onChange={(v) => update({ generateEmbeddingsOnUpload: v })}
           />
         </Row>
+      </Section>
+
+      {/* ── People ── */}
+      <Section title="People" description="Researcher CVs on the People page. The profile data comes from OpenAlex, ORCID and Wikidata (free, no key); the model only reads a researcher's homepage.">
+        <Row label="CV model" description="Model that reads homepages when a CV is built (↻ CV, CV tab). Claude uses your Anthropic key; the other models are the server's fast model (FAST_MODEL in .env).">
+          {(() => {
+            const CLAUDE_OPTIONS = [
+              { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+              { value: "claude-opus-4-6",           label: "Claude Opus 4.6" },
+            ];
+            const allOptions = [
+              { value: "litellm", label: `${fastModelLabel()} (fast model)` },
+              ...CLAUDE_OPTIONS,
+              ...(litellmModels.length > 0
+                ? [{ value: "─────────", label: "─────────" }, ...litellmModels.map((m) => ({ value: m, label: m }))]
+                : []),
+              ...(settings.cvModel !== "litellm" && !CLAUDE_OPTIONS.some((o) => o.value === settings.cvModel) && !litellmModels.includes(settings.cvModel)
+                ? [{ value: settings.cvModel, label: settings.cvModel }]
+                : []),
+            ];
+            return (
+              <Select
+                value={settings.cvModel}
+                options={allOptions}
+                onChange={(v) => { if (v !== "─────────") update({ cvModel: v }); }}
+              />
+            );
+          })()}
+        </Row>
+        <Row label="Build missing CVs" description="Builds a CV for every author who has none yet, in the background and a few seconds apart, authors with the most papers first. Safe to run again: it continues where it stopped.">
+          <button
+            type="button"
+            onClick={() => {
+              setCvAllMsg("");
+              buildAllPersonCvs(settings.cvModel)
+                .then((r) => setCvAllMsg(r.status === "already-running" ? "A CV run is already going." : "Started. CVs appear on the People page as they are built."))
+                .catch(() => setCvAllMsg("Could not start, check the backend logs."));
+            }}
+            className="shrink-0 px-4 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+          >
+            Run
+          </button>
+        </Row>
+        {cvAllMsg && <p className="px-5 pb-4 text-xs text-violet-600">{cvAllMsg}</p>}
       </Section>
 
       {/* ── AI Credentials ── */}

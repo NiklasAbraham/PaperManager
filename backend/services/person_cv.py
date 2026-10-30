@@ -10,6 +10,7 @@ papers that are probably attributed to the wrong person (homonyms, bad merges).
 import json
 import logging
 import re
+import threading
 import time
 import unicodedata
 from collections import Counter
@@ -296,7 +297,22 @@ Page text:
 {text}"""
 
 
-def scrape_homepage_cv(url: str, name: str) -> dict:
+def _complete(prompt: str, model: str | None) -> str:
+    """One JSON completion: Claude models on the personal Anthropic key, anything else
+    (None, "litellm", a LiteLLM model id) on the server's fast model via LiteLLM."""
+    from services.litellm_client import chat_completion, resolve_chat_model
+
+    model = resolve_chat_model(model)
+    if model.startswith("claude-"):
+        from services.ai import _personal_client
+        msg = _personal_client().messages.create(
+            model=model, max_tokens=1500, messages=[{"role": "user", "content": prompt}])
+        return msg.content[0].text
+    return chat_completion(messages=[{"role": "user", "content": prompt}], model=model,
+                           json_mode=True, max_tokens=1500, timeout=90)
+
+
+def scrape_homepage_cv(url: str, name: str, model: str | None = None) -> dict:
     """Read a homepage with the LLM; returns {} if unreachable or not about this person."""
     try:
         r = httpx.get(url, verify=_ssl(), timeout=20, follow_redirects=True,
@@ -308,9 +324,7 @@ def scrape_homepage_cv(url: str, name: str) -> dict:
         text = re.sub(r"\s+", " ", " ".join(parser.parts))[:9000]
         if len(text) < 200:
             return {}
-        from services.litellm_client import chat_completion
-        raw = chat_completion(messages=[{"role": "user", "content": _HOMEPAGE_PROMPT.format(name=name, text=text)}],
-                              json_mode=True, max_tokens=1500, timeout=90)
+        raw = _complete(_HOMEPAGE_PROMPT.format(name=name, text=text), model)
         data = json.loads(re.search(r"\{.*\}", raw, re.S).group())
     except Exception as exc:
         log.debug("Homepage CV scrape failed | %s | %s", url, exc)
@@ -397,7 +411,7 @@ def _years(a: dict) -> str:
     return str(ys[0]) if ys[0] == ys[-1] else f"{ys[0]}–{ys[-1]}"
 
 
-def build_person_cv(driver, person_id: str, scrape_homepage: bool = True) -> dict:
+def build_person_cv(driver, person_id: str, scrape_homepage: bool = True, model: str | None = None) -> dict:
     """Refresh a person's CV, store it on the Person node and return it."""
     from db.queries.people import get_person
 
@@ -430,7 +444,7 @@ def build_person_cv(driver, person_id: str, scrape_homepage: bool = True) -> dic
 
     wiki = fetch_wikidata(author_id if author else None, m.group(1) if (m and orcid) else None)
     homepage = person.get("website_url") or _pick_homepage(orcid.get("urls") or []) or wiki.get("website")
-    page = scrape_homepage_cv(homepage, name) if (homepage and scrape_homepage) else {}
+    page = scrape_homepage_cv(homepage, name, model) if (homepage and scrape_homepage) else {}
 
     checked = [v for v in verdicts if v["verdict"] != "unknown"]
     absent = [v for v in verdicts if v["verdict"] == "absent"]
@@ -518,12 +532,29 @@ def build_person_cv(driver, person_id: str, scrape_homepage: bool = True) -> dic
     return cv
 
 
-def build_all_cvs(driver, only_missing: bool = True, pause: float = 0.0) -> dict:
+_bulk_lock = threading.Lock()
+
+
+def bulk_cv_running() -> bool:
+    return _bulk_lock.locked()
+
+
+def build_all_cvs(driver, only_missing: bool = True, pause: float = 0.0, model: str | None = None) -> dict:
     """Build CVs one person at a time, authors with the most library papers first.
 
     ``pause`` seconds between people keeps the load on OpenAlex, ORCID and the LLM low;
-    with ``only_missing`` an interrupted run picks up where it stopped.
+    with ``only_missing`` an interrupted run picks up where it stopped. Only one run at a
+    time: a second call while one is going returns {"skipped": "already running"}.
     """
+    if not _bulk_lock.acquire(blocking=False):
+        return {"skipped": "already running"}
+    try:
+        return _build_all_cvs(driver, only_missing, pause, model)
+    finally:
+        _bulk_lock.release()
+
+
+def _build_all_cvs(driver, only_missing: bool, pause: float, model: str | None) -> dict:
     with driver.session() as s:
         ids = [r["id"] for r in s.run(
             "MATCH (p:Person) WHERE ()-[:AUTHORED_BY]->(p) "
@@ -533,7 +564,7 @@ def build_all_cvs(driver, only_missing: bool = True, pause: float = 0.0) -> dict
     counts = Counter()
     for n, pid in enumerate(ids, 1):
         try:
-            counts[build_person_cv(driver, pid)["check"]["status"]] += 1
+            counts[build_person_cv(driver, pid, model=model)["check"]["status"]] += 1
         except Exception as exc:
             log.warning("CV build failed | person=%s | %s", pid, exc)
             counts["error"] += 1

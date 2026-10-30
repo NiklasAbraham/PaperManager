@@ -1375,8 +1375,15 @@ export async function enrichPerson(personId: string): Promise<{
   return apiFetch(`/people/${personId}/enrich`, { method: "POST" });
 }
 
-export async function refreshPersonCv(personId: string): Promise<PersonCv> {
-  return apiFetch(`/people/${personId}/cv`, { method: "POST" });
+export async function refreshPersonCv(personId: string, model?: string): Promise<PersonCv> {
+  const q = model ? `?model=${encodeURIComponent(model)}` : "";
+  return apiFetch(`/people/${personId}/cv${q}`, { method: "POST" });
+}
+
+/** Build CVs in the background for every author who has none yet, `pause` seconds apart. */
+export async function buildAllPersonCvs(model?: string, pause = 3): Promise<{ status: string }> {
+  const q = new URLSearchParams({ pause: String(pause), ...(model ? { model } : {}) });
+  return apiFetch(`/people/cv-all?${q}`, { method: "POST" });
 }
 
 export async function findPeopleDuplicates(): Promise<{ groups: PersonDuplicateGroup[] }> {
