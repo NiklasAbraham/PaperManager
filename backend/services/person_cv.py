@@ -518,18 +518,27 @@ def build_person_cv(driver, person_id: str, scrape_homepage: bool = True) -> dic
     return cv
 
 
-def build_all_cvs(driver, only_missing: bool = True) -> dict:
+def build_all_cvs(driver, only_missing: bool = True, pause: float = 0.0) -> dict:
+    """Build CVs one person at a time, authors with the most library papers first.
+
+    ``pause`` seconds between people keeps the load on OpenAlex, ORCID and the LLM low;
+    with ``only_missing`` an interrupted run picks up where it stopped.
+    """
     with driver.session() as s:
         ids = [r["id"] for r in s.run(
             "MATCH (p:Person) WHERE ()-[:AUTHORED_BY]->(p) "
             + ("AND p.cv_updated_at IS NULL " if only_missing else "")
-            + "RETURN p.id AS id"
+            + "RETURN p.id AS id ORDER BY COUNT { (:Paper)-[:AUTHORED_BY]->(p) } DESC"
         )]
     counts = Counter()
-    for pid in ids:
+    for n, pid in enumerate(ids, 1):
         try:
             counts[build_person_cv(driver, pid)["check"]["status"]] += 1
         except Exception as exc:
             log.warning("CV build failed | person=%s | %s", pid, exc)
             counts["error"] += 1
+        if n % 25 == 0 or n == len(ids):
+            log.info("CV build progress | %d/%d | %s", n, len(ids), dict(counts))
+        if pause and n < len(ids):
+            time.sleep(pause)
     return dict(counts)

@@ -228,9 +228,10 @@ def refresh_cv(person_id: str):
 
 
 @people_router.post("/cv-all")
-def refresh_all_cvs(background_tasks: BackgroundTasks, only_missing: bool = Query(True)):
+def refresh_all_cvs(background_tasks: BackgroundTasks, only_missing: bool = Query(True),
+                    pause: float = Query(0.0, ge=0, le=60, description="seconds to wait between people")):
     """Build CVs in the background for every author (by default only those without one)."""
-    background_tasks.add_task(build_all_cvs, get_driver(), only_missing)
+    background_tasks.add_task(build_all_cvs, get_driver(), only_missing, pause)
     return {"status": "started"}
 
 
