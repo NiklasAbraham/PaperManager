@@ -1178,7 +1178,9 @@ written for the agent. It tells the agent to:</p>
 </tbody>
 </table>
 <p><code>AI_PROVIDER=auto</code> uses the first configured provider in this order: your own server, then
-Anthropic, then OpenAI. Set <code>AI_PROVIDER</code> or <code>FAST_MODEL</code> to override that choice. The model
+Anthropic, then OpenAI. Set <code>AI_PROVIDER</code> or <code>FAST_MODEL</code> to override that choice. If your own
+server fails and an Anthropic key is set, the fast tasks retry on Claude Haiku
+(<code>AI_FALLBACK=false</code> turns that off). The model
 menus in the app show the active model by name, and Claude options appear only for users who
 have a Claude key.</p>
 <p>To change something later, edit <code>.env</code> and run
