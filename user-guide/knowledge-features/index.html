@@ -876,6 +876,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="People">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-people" class="md-nav__link">
+    <span class="md-ellipsis">
+      Duplicate people
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1434,6 +1449,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="People">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-people" class="md-nav__link">
+    <span class="md-ellipsis">
+      Duplicate people
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1711,15 +1741,37 @@ prompt, papers, conversation, question and answer. Click it to see which papers 
 <hr />
 <h2 id="people">People<a class="headerlink" href="#people" title="Permanent link">&para;</a></h2>
 <p>Navigate to <strong>People</strong> in the nav bar.</p>
-<p>All people in the system are listed in the sidebar with search.</p>
+<p>All people in the system are listed in the sidebar with search, sorted by surname
+("Christian P. Robert" under R; a particle stays with the given names, so "Aad van der Vaart" is under V).</p>
 <p><strong>Person detail</strong> shows:</p>
 <ul>
 <li>Name and affiliation</li>
 <li>Papers where they are an <strong>author</strong> (<code>AUTHORED_BY</code>)</li>
 <li>Papers where they have an <strong>INVOLVES role</strong> (shared_by, working_on, collaborating, etc.)</li>
-<li><strong>Research specialties</strong> (linked <code>Topic</code> nodes via <code>SPECIALIZES</code>)</li>
+<li>
+<p><strong>Research specialties</strong> (linked <code>Topic</code> nodes via <code>SPECIALIZES</code>)</p>
+</li>
+<li>
+<p><strong>CV</strong> tab: current position, education, past affiliations, h-index, citations, topics and most
+  cited works, built by <strong>↻ CV</strong> from OpenAlex, ORCID, Wikidata (photo, homepage) and the person's
+  homepage. Before trusting a profile it checks the person is really an author of their papers in
+  the library; a profile found by name alone is accepted only if it lists one of those papers,
+  since common names have many homonyms. The status dot says how it went: green (consistent with
+  the library papers), amber (mostly), red (probably a homonym or a wrong author link), grey (no
+  profile found).</p>
+</li>
 </ul>
 <p>People are auto-created when papers are ingested from the author list.</p>
+<h3 id="duplicate-people">Duplicate people<a class="headerlink" href="#duplicate-people" title="Permanent link">&para;</a></h3>
+<p>The same researcher often arrives under several spellings ("Alán Aspuru-Guzik" and
+"Al'an Aspuru-Guzik", "Nele P. Quast" and "Nele Quast", "C. P. Robert" and "Christian P. Robert").
+<strong>⧉ Dups</strong> at the top of the sidebar lists the groups that look like one person, with the rule
+that linked them. Pick which one to keep (the one with a Semantic Scholar id or the most papers
+is preselected) and <strong>Merge</strong>, or <strong>Merge all</strong>. The kept person gets every paper, tag and note
+of the others, fills its empty fields from theirs, and keeps their names as aliases. An initial
+is joined to a full name only when one full name fits ("C. Robert" stays alone next to both
+"Christian Robert" and "Claire Robert"). <code>backend/scripts/merge_people.py</code> applies the same rules
+from the command line.</p>
 <hr />
 <h2 id="projects">Projects<a class="headerlink" href="#projects" title="Permanent link">&para;</a></h2>
 <p>Navigate to <strong>Projects</strong> in the nav bar.</p>
