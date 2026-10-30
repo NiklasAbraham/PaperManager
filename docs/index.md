@@ -8,6 +8,13 @@ hide:
 
 # PaperManager
 
+!!! note "Contributors"
+    PaperManager is open source and grows with other people's pull requests. Thank you to
+    **[Antoine Luciano](https://github.com/AntoineLuciano)** for researcher CVs, the
+    duplicate-people finder and surname order on the People page
+    ([#36](https://github.com/NiklasAbraham/PaperManager/pull/36),
+    [People guide](user-guide/knowledge-features.md#people)).
+
 ## How it works
 
 <div class="pm-steps" markdown>
@@ -65,6 +72,21 @@ at a glance what is still unread.
 <div class="pm-row pm-row--flip" markdown>
 <div markdown>
 
+### A profile for every author
+
+Each researcher gets a CV built from OpenAlex, ORCID, Wikidata and their homepage, checked
+against the papers in your library so a namesake is not mistaken for them. People listed under
+several spellings are found and merged in one click. Contributed by
+[Antoine Luciano](https://github.com/AntoineLuciano).
+
+[People :octicons-arrow-right-24:](user-guide/knowledge-features.md#people)
+</div>
+![Researcher CV checked against the library](img/screenshots/people-cv.webp)
+</div>
+
+<div class="pm-row" markdown>
+<div markdown>
+
 ### Everything about a paper in one view
 
 The left side switches between the PDF, the summary, figures, tables, references and related
@@ -76,7 +98,7 @@ it.
 ![Summary next to the PDF](img/screenshots/summary.webp)
 </div>
 
-<div class="pm-row" markdown>
+<div class="pm-row pm-row--flip" markdown>
 <div markdown>
 
 ### A guided tour through a long paper
@@ -89,7 +111,7 @@ the concepts each one relies on.
 ![Quick tour next to the PDF](img/screenshots/tour.webp)
 </div>
 
-<div class="pm-row pm-row--flip" markdown>
+<div class="pm-row" markdown>
 <div markdown>
 
 ### How a whole project fits together
@@ -102,7 +124,7 @@ by author, year and kind of concept.
 ![Project concept map](img/screenshots/concept-map.webp)
 </div>
 
-<div class="pm-row" markdown>
+<div class="pm-row pm-row--flip" markdown>
 <div markdown>
 
 ### Ask your whole library
@@ -117,7 +139,7 @@ protein structures you can rotate. Narrow a question with `@project:`, `@topic:`
 ![Knowledge chat](img/screenshots/chat.webp)
 </div>
 
-<div class="pm-row pm-row--flip" markdown>
+<div class="pm-row" markdown>
 <div markdown>
 
 ### Who publishes what at NeurIPS, ICML, CVPR, ACL, ...

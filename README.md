@@ -11,6 +11,18 @@ one Neo4j knowledge graph you can search and chat with.
 
 ![Paper view: the PDF of the EDM paper next to an animated visualisation of the probability flow ODE](docs/img/screenshots/concepts.webp)
 
+### Contributors
+
+Thank you to everyone who has added to PaperManager:
+
+- **[Antoine Luciano](https://github.com/AntoineLuciano)**: researcher CVs, the duplicate-people
+  finder and surname order on the People page
+  ([#36](https://github.com/NiklasAbraham/PaperManager/pull/36)).
+
+Pull requests are welcome; merged work is credited here, in the
+[documentation](https://niklasabraham.github.io/PaperManager/) and on the
+[project page](https://niklas-abraham.de/projects/papermanager/#contributions).
+
 ---
 
 ## Features
@@ -25,6 +37,7 @@ one Neo4j knowledge graph you can search and chat with.
 | **Project concept map** | Key concepts and their relations across every paper in a project, as an interactive graph filtered by author, year and kind. |
 | **Knowledge chat** | Ask across the whole library in a desk-style layout: citations open the paper beside the chat, answers get interactive concept cards (formula, plot, animation, short note) and 3D molecules from the PDB or AlphaFold DB ([3Dmol.js](https://3dmol.csb.pitt.edu)). Scope with `@project:`, `@topic:`, `@tag:`, `@paper:`, `@person:`, `@user:`; graph-aware, with optional web search. Claude, Claude Code or any OpenAI-compatible model. |
 | **Conference explorer** | Browse NeurIPS, ICML, ICLR, CVPR, ICCV, ECCV, ACL, EMNLP, AAAI, CoRL and more by institution (rank, research-area mix, collaborators, papers) or by topic (who publishes most on it, closest papers), or search all loaded conferences at once for a paper, an author or where a topic is published. Data from the official conference sites and [Paper Copilot](https://github.com/papercopilot/paperlists), embedded on your own server. |
+| **People** | Every author in the library, sorted by surname. A **CV** tab builds a researcher's profile from OpenAlex, ORCID, Wikidata and their homepage (position, education, h-index, most cited works, photo) and checks it against their papers in your library; **⧉ Dups** finds people listed under several spellings and merges them. Contributed by [Antoine Luciano](https://github.com/AntoineLuciano). |
 | **MCP server** | 41 tools for Claude Desktop and Claude Code: search, batch-check what is already in the library, read, annotate, upload, merge duplicates, query conferences. |
 | **More** | Knowledge graph and Cypher editor, cross-paper synthesis, research-gap finder, author tracking, duplicate merge manager, BibTeX export, multi-user accounts with shared projects. |
 
@@ -40,6 +53,10 @@ one Neo4j knowledge graph you can search and chat with.
   <tr>
     <td width="50%"><img src="docs/img/screenshots/chat-concepts.webp" alt="Knowledge chat answer with a concept card"><br><sub>Concept cards in a chat answer</sub></td>
     <td width="50%"><img src="docs/img/screenshots/chat-structure.webp" alt="3D structure card of the SARS-CoV-2 spike, PDB 6VXX"><br><sub>3D structure card (PDB 6VXX)</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/img/screenshots/people-cv.webp" alt="CV tab of a researcher, checked against the library papers"><br><sub>Researcher CV, checked against the library (by Antoine Luciano)</sub></td>
+    <td width="50%"><img src="docs/img/screenshots/people-duplicates.webp" alt="Duplicate people grouped for merging"><br><sub>Duplicate people finder (by Antoine Luciano)</sub></td>
   </tr>
 </table>
 
@@ -134,4 +151,6 @@ Developer context for working on the code (also used by coding agents) lives in 
 The interactive concepts feature is adapted from [Get It.](https://github.com/beltromatti/get-it)
 (Apache-2.0); see [NOTICE](NOTICE).
 
-Built by [Niklas Abraham](https://niklas-abraham.de). Issues and pull requests are welcome.
+Built by [Niklas Abraham](https://niklas-abraham.de), with contributions from
+[Antoine Luciano](https://github.com/AntoineLuciano) (see [Contributors](#contributors)).
+Issues and pull requests are welcome.

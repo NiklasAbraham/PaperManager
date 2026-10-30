@@ -188,6 +188,11 @@ RETURN p.title, p.year
 
 Navigate to **People** in the nav bar.
 
+!!! info "Contributed by Antoine Luciano"
+    Surname order, the CV tab and the duplicate finder come from
+    [Antoine Luciano](https://github.com/AntoineLuciano)
+    ([#36](https://github.com/NiklasAbraham/PaperManager/pull/36)).
+
 All people in the system are listed in the sidebar with search, sorted by surname
 ("Christian P. Robert" under R; a particle stays with the given names, so "Aad van der Vaart" is under V).
 
@@ -206,6 +211,8 @@ All people in the system are listed in the sidebar with search, sorted by surnam
   the library papers), amber (mostly), red (probably a homonym or a wrong author link), grey (no
   profile found).
 
+![CV tab of a researcher, checked against the library papers](../img/screenshots/people-cv.webp)
+
 People are auto-created when papers are ingested from the author list.
 
 ### Duplicate people
@@ -219,6 +226,8 @@ of the others, fills its empty fields from theirs, and keeps their names as alia
 is joined to a full name only when one full name fits ("C. Robert" stays alone next to both
 "Christian Robert" and "Claire Robert"). `backend/scripts/merge_people.py` applies the same rules
 from the command line.
+
+![Duplicate people grouped for merging](../img/screenshots/people-duplicates.webp)
 
 ---
 
