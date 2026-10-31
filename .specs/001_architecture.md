@@ -79,7 +79,8 @@ This means every capability is available both via HTTP (browser) and via MCP too
 | `metadata_from_url.py` | URL/DOI/arXiv/PubMed/bioRxiv resolver |
 | `figure_extractor.py` | Extract figures from PDF pages; generate captions (Docling/Ollama/Claude) |
 | `note_parser.py` | Regex `@Name` and `#Topic` extraction from Markdown |
-| `references.py` | Three-strategy reference extraction pipeline |
+| `references.py` | Three-strategy reference extraction pipeline, then the identifier check |
+| `citecheck.py` | Resolves DOIs (doi.org), arXiv ids (arXiv API) and URLs in parallel and compares registered titles; stdlib only, shared with the thesis desk |
 | `bulk_resolver.py` | Per-entry resolver for bulk import |
 | `literature_search.py` | Keyword-based search across arXiv / PubMed / bioRxiv |
 | `blog_fetcher.py` | Fetch and parse blog posts from RSS feeds / URLs |

@@ -12,6 +12,9 @@ os.environ.setdefault("TRUSTED_HOSTS", "localhost,127.0.0.1,test,testserver")
 # Most endpoint tests call the API without a session; test_route_guards.py turns the
 # login requirement back on for its own checks.
 os.environ.setdefault("REQUIRE_LOGIN", "false")
+# Extracted references have their DOIs / arXiv ids resolved online (services/citecheck.py);
+# off in tests, test_citecheck.py turns it on with the resolvers patched.
+os.environ.setdefault("REFERENCE_ID_CHECK", "0")
 
 
 # Many tests create and delete real nodes through get_driver(). Run against anything but a

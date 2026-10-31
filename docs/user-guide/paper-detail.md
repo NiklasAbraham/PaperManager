@@ -109,9 +109,11 @@ Papers that this paper cites. Extracted on-demand and shown in a review list bef
 
 **Extraction pipeline** (tries in order):
 
-1. Semantic Scholar `/references` API (requires DOI)
-2. Regex on the `REFERENCES` section of `raw_text`
-3. Claude Haiku on the last 30% of the document (when earlier strategies return < 3 results)
+1. Semantic Scholar `/references` API (requires a DOI or arXiv id), accepted when it is about as complete as the reference list in the text
+2. An LLM over the reference section, in chunks
+3. A deterministic parser over the reference section (also the yardstick for 1 and 2)
+
+**Identifier check.** Every DOI and arXiv id in a list from 2 or 3 is looked up (doi.org, arXiv) before you see it. Ids that do not exist, or that belong to a different paper than the title says, are removed, so a stub is never linked to the wrong paper; where the parser read an author list as the title, the registered title is used instead. This runs without any AI model and takes a second or two per paper.
 
 Each saved reference creates a `Paper` stub node (title + DOI), tagged `from-references`, and linked with a `CITES` relationship. If you later import the full paper by DOI, the stub is enriched rather than duplicated.
 

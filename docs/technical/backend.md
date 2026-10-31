@@ -72,6 +72,7 @@ backend/
 │   ├── figure_extractor.py  # Docling / Ollama / Claude Vision figure extraction
 │   ├── note_parser.py       # Parse @Name and #Topic from markdown text
 │   ├── references.py        # Reference extraction pipeline
+│   ├── citecheck.py         # DOI / arXiv / URL resolver that vets extracted reference ids
 │   ├── bulk_resolver.py     # Per-entry resolver for bulk import
 │   ├── literature_search.py # Keyword-based search across arXiv / PubMed / bioRxiv
 │   ├── blog_fetcher.py      # Fetch and parse blog posts from RSS feeds / URLs

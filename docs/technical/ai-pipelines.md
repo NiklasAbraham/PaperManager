@@ -105,15 +105,20 @@ Triggered via `GET /papers/{id}/extract-references` or `POST /papers/{id}/refere
 
 ```mermaid
 flowchart TD
-    Start["Paper with raw_text"] --> A{DOI available?}
-    A -->|"Yes"| S2["Strategy A:\nSemantic Scholar /references API"]
-    A -->|"No"| B["Strategy B:\nRegex on REFERENCES section"]
-    S2 -->|"< 3 results"| B
-    B -->|"< 3 results"| Claude["Strategy C:\nClaude Haiku on last 30%\nof raw_text"]
-    S2 -->|"≥ 3 results"| Done["Reference list"]
-    B -->|"≥ 3 results"| Done
-    Claude --> Done
+    Start["Paper with raw_text"] --> P["Parser over every reference section\n(count = yardstick)"]
+    P --> A{DOI / arXiv id?}
+    A -->|"Yes"| S2["A: Semantic Scholar /references"]
+    S2 -->|"≥ 80% of parser count"| Done["Reference list"]
+    S2 -->|"short or none"| LLM["B: LLM over the section\n6k-char chunks, LiteLLM then Claude"]
+    A -->|"No"| LLM
+    LLM -->|"≥ 80%"| Vet["Identifier check\n(citecheck: doi.org, arXiv API)"]
+    LLM -->|"short"| Best["C: longest of S2 / LLM / parser"]
+    Best -->|"LLM or parser"| Vet
+    Best -->|"S2"| Done
+    Vet --> Done
 ```
+
+**Identifier check.** Before a list from the LLM or the parser is shown, every DOI and arXiv id in it is resolved (`services/citecheck.py`, no model): doi.org content negotiation returns the registered title, the arXiv API answers 100 ids per request, 16 lookups run in parallel within a 60 s budget. Dead ids are dropped; an id whose registered title does not match the extracted one is dropped too (LLMs invent and misremember ids, the parser can pick up the next entry's id), unless the parser's "title" is an author fragment, in which case the registered title replaces it. Each reference carries `id_check`. `scripts/check_reference_ids.py` runs the same check over existing stubs.
 
 Each reference creates a `Paper` stub node tagged `from-references` and linked via `CITES`. Stubs are enriched when the full paper is later imported.
 

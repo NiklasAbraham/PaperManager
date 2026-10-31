@@ -14,12 +14,20 @@ C. Deterministic parser over the reference section. Handles numbered lists
 The parser also serves as the yardstick: a source whose count falls far below
 what the parser sees in the text is treated as incomplete, and the next source
 is tried.
+
+Identifiers from B and C are then vetted (``vet_reference_ids``, services/citecheck.py):
+every DOI and arXiv id is resolved (doi.org, the arXiv API) and its registered title
+compared with the extracted one. An id that does not exist or names another work (an LLM
+inventing or misremembering it, a DOI cut by a line break) is dropped, so the citation
+stub is matched by title instead of being linked to the wrong paper.
 """
 import re
 import json
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
+
+import os
 
 import httpx
 
@@ -645,7 +653,70 @@ def _extract_references_with_ai(ref_text: str) -> list[dict]:
 def extract_references_ai_full(raw_text: str) -> list[dict]:
     """Forced AI path (on-demand button): chunked LLM extraction, no S2."""
     section = _get_ref_section_text(raw_text) or raw_text
-    return _extract_references_with_ai(section)
+    return vet_reference_ids(_extract_references_with_ai(section))
+
+
+# ── Identifier check ──────────────────────────────────────────────────────────
+
+_VET_BUDGET = 60.0          # seconds for the whole list; ids not checked by then are kept
+
+
+def _junk_title(title: str | None) -> bool:
+    """A parsed title that is an author list or a fragment, not a title."""
+    t = (title or "").strip()
+    return len(re.findall(r"[A-Za-z]{2,}", t)) < 4 or _is_author_segment(t)
+
+
+def vet_reference_ids(refs: list[dict], source: str = "ai", budget: float = _VET_BUDGET) -> list[dict]:
+    """Resolve every DOI / arXiv id and drop the ones that are dead or name another title.
+
+    ``source`` says where the ids came from. ``ai``: the model may have invented the id, so an id
+    whose registered title differs from the extracted one is dropped. ``parser``: the id was copied
+    from the PDF text, but possibly from the neighbouring entry. If the parsed "title" is really an
+    author fragment ("Chen, H. T. Nguyen, ..."), the id is kept and its registered title replaces
+    it; if it reads like a title, the id is the stray one and is dropped. Dead ids (a DOI cut at a
+    line break) are dropped either way.
+
+    Each ref with an identifier gets ``id_check``: ``ok``, ``dropped:<doi|arxiv>:<dead|mismatch>``,
+    ``title_from_<doi|arxiv>`` or ``unchecked`` (network error or out of budget; the id is kept).
+    Mutates and returns refs. Off with REFERENCE_ID_CHECK=0.
+    """
+    if os.environ.get("REFERENCE_ID_CHECK", "1") == "0" or not refs:
+        return refs
+    from services.citecheck import Item, check_items, DEAD, MISMATCH, OK
+
+    items, owners = [], []
+    for i, r in enumerate(refs):
+        title = r.get("title") or ""
+        if r.get("doi"):
+            items.append(Item("doi", str(r["doi"]), title=title))
+            owners.append((i, "doi"))
+        if r.get("arxiv_id"):
+            items.append(Item("arxiv", str(r["arxiv_id"]), title=title))
+            owners.append((i, "arxiv_id"))
+    if not items:
+        return refs
+    t0 = time.time()
+    try:
+        results = check_items(items, workers=16, timeout=10.0, budget=budget)
+    except Exception:
+        log.warning("Reference id check failed; ids kept", exc_info=True)
+        return refs
+    dropped = 0
+    for (i, field), res in zip(owners, results):
+        ref = refs[i]
+        kind = "doi" if field == "doi" else "arxiv"
+        if res.status == MISMATCH and source == "parser" and res.resolved_title and _junk_title(ref.get("title")):
+            ref["title"] = res.resolved_title
+            ref["id_check"] = f"title_from_{kind}"
+        elif res.status in (DEAD, MISMATCH):
+            ref[field] = None
+            dropped += 1
+            ref["id_check"] = f"dropped:{kind}:{res.status}"
+        elif "id_check" not in ref:
+            ref["id_check"] = "ok" if res.status == OK else "unchecked"
+    log.info("Reference ids vetted | ids=%d | dropped=%d | %.1fs", len(items), dropped, time.time() - t0)
+    return refs
 
 
 # ── Combination ───────────────────────────────────────────────────────────────
@@ -679,7 +750,8 @@ def extract_references(raw_text: str, doi: str | None) -> list[dict]:
     Strategy B: LLM over the reference section, chunked.
     Strategy C: Deterministic parser — fallback, and the completeness yardstick.
 
-    Returns list of dicts: {title, authors, year, doi, arxiv_id}
+    B and C go through vet_reference_ids (S2's ids are registry data and are trusted).
+    Returns list of dicts: {title, authors, year, doi, arxiv_id[, id_check]}
     """
     s2_refs = _fetch_s2_references(doi) if doi else None
 
@@ -699,12 +771,14 @@ def extract_references(raw_text: str, doi: str | None) -> list[dict]:
         ai_refs = _extract_references_with_ai(section) or []
         if _complete_enough(ai_refs, expected):
             log.debug("References via AI | count=%d | parser=%d", len(ai_refs), expected)
-            return ai_refs
+            return vet_reference_ids(ai_refs)
 
     # Nothing reached the parser's count: take the most complete source, preferring
     # structured sources on ties.
     candidates = [(s2_refs or [], 2), (ai_refs, 1), (parsed, 0)]
-    best = max(candidates, key=lambda c: (len(c[0]), c[1]))[0]
+    best, rank = max(candidates, key=lambda c: (len(c[0]), c[1]))
     log.debug("References fallback | s2=%d | ai=%d | parser=%d",
               len(s2_refs or []), len(ai_refs), expected)
-    return best
+    if rank == 2:
+        return best
+    return vet_reference_ids(best, source="ai" if rank == 1 else "parser")

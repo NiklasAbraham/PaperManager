@@ -29,7 +29,7 @@ Pull requests are welcome; merged work is credited here, in the
 
 | | |
 |---|---|
-| **Ingestion** | Drop a PDF or paste an arXiv / DOI / PubMed / bioRxiv link. Metadata from Semantic Scholar and CrossRef, duplicate check, then summary, topics, tags, figures, tables and references. Bulk import, literature search and RSS feeds too. |
+| **Ingestion** | Drop a PDF or paste an arXiv / DOI / PubMed / bioRxiv link. Metadata from Semantic Scholar and CrossRef, duplicate check, then summary, topics, tags, figures, tables and references (every extracted DOI and arXiv id resolved against doi.org and arXiv, dead or wrong ones dropped). Bulk import, literature search and RSS feeds too. |
 | **Search** | One box over titles, authors, topics, tags, abstracts, your notes and highlights, claims and full texts, ranked, with the reason for every hit (matched-in chips and marked passages). Type-ahead for papers, authors, topics, tags and projects; typo-tolerant, case- and accent-insensitive; DOIs and arXiv ids; optional meaning-based (embedding) ranking. |
 | **Reading** | One view per paper: PDF with colour-coded highlights, AI summary, figures you can ask about, references, related papers, claims, markdown notes that link `@people` and `#topics`. |
 | **Concepts** | Finds the ideas on each PDF page that a picture explains best and generates an animation, formula breakdown, plot or explanation for each, marked on the page. Adapted from [Get It.](https://github.com/beltromatti/get-it) (Apache-2.0). |
