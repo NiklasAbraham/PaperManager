@@ -1548,14 +1548,18 @@
 <h2 id="reference-extraction-pipeline">Reference Extraction Pipeline<a class="headerlink" href="#reference-extraction-pipeline" title="Permanent link">&para;</a></h2>
 <p>Triggered via <code>GET /papers/{id}/extract-references</code> or <code>POST /papers/{id}/references</code>.</p>
 <pre class="mermaid"><code>flowchart TD
-    Start["Paper with raw_text"] --&gt; A{DOI available?}
-    A --&gt;|"Yes"| S2["Strategy A:\nSemantic Scholar /references API"]
-    A --&gt;|"No"| B["Strategy B:\nRegex on REFERENCES section"]
-    S2 --&gt;|"&lt; 3 results"| B
-    B --&gt;|"&lt; 3 results"| Claude["Strategy C:\nClaude Haiku on last 30%\nof raw_text"]
-    S2 --&gt;|"≥ 3 results"| Done["Reference list"]
-    B --&gt;|"≥ 3 results"| Done
-    Claude --&gt; Done</code></pre>
+    Start["Paper with raw_text"] --&gt; P["Parser over every reference section\n(count = yardstick)"]
+    P --&gt; A{DOI / arXiv id?}
+    A --&gt;|"Yes"| S2["A: Semantic Scholar /references"]
+    S2 --&gt;|"≥ 80% of parser count"| Done["Reference list"]
+    S2 --&gt;|"short or none"| LLM["B: LLM over the section\n6k-char chunks, LiteLLM then Claude"]
+    A --&gt;|"No"| LLM
+    LLM --&gt;|"≥ 80%"| Vet["Identifier check\n(citecheck: doi.org, arXiv API)"]
+    LLM --&gt;|"short"| Best["C: longest of S2 / LLM / parser"]
+    Best --&gt;|"LLM or parser"| Vet
+    Best --&gt;|"S2"| Done
+    Vet --&gt; Done</code></pre>
+<p><strong>Identifier check.</strong> Before a list from the LLM or the parser is shown, every DOI and arXiv id in it is resolved (<code>services/citecheck.py</code>, no model): doi.org content negotiation returns the registered title, the arXiv API answers 100 ids per request, 16 lookups run in parallel within a 60 s budget. Dead ids are dropped; an id whose registered title does not match the extracted one is dropped too (LLMs invent and misremember ids, the parser can pick up the next entry's id), unless the parser's "title" is an author fragment, in which case the registered title replaces it. Each reference carries <code>id_check</code>. <code>scripts/check_reference_ids.py</code> runs the same check over existing stubs.</p>
 <p>Each reference creates a <code>Paper</code> stub node tagged <code>from-references</code> and linked via <code>CITES</code>. Stubs are enriched when the full paper is later imported.</p>
 <hr />
 <h2 id="claim-extraction">Claim Extraction<a class="headerlink" href="#claim-extraction" title="Permanent link">&para;</a></h2>

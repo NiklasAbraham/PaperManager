@@ -1546,10 +1546,11 @@
 <p>Papers that this paper cites. Extracted on-demand and shown in a review list before being saved.</p>
 <p><strong>Extraction pipeline</strong> (tries in order):</p>
 <ol>
-<li>Semantic Scholar <code>/references</code> API (requires DOI)</li>
-<li>Regex on the <code>REFERENCES</code> section of <code>raw_text</code></li>
-<li>Claude Haiku on the last 30% of the document (when earlier strategies return &lt; 3 results)</li>
+<li>Semantic Scholar <code>/references</code> API (requires a DOI or arXiv id), accepted when it is about as complete as the reference list in the text</li>
+<li>An LLM over the reference section, in chunks</li>
+<li>A deterministic parser over the reference section (also the yardstick for 1 and 2)</li>
 </ol>
+<p><strong>Identifier check.</strong> Every DOI and arXiv id in a list from 2 or 3 is looked up (doi.org, arXiv) before you see it. Ids that do not exist, or that belong to a different paper than the title says, are removed, so a stub is never linked to the wrong paper; where the parser read an author list as the title, the registered title is used instead. This runs without any AI model and takes a second or two per paper.</p>
 <p>Each saved reference creates a <code>Paper</code> stub node (title + DOI), tagged <code>from-references</code>, and linked with a <code>CITES</code> relationship. If you later import the full paper by DOI, the stub is enriched rather than duplicated.</p>
 <h3 id="incoming-citations">Incoming Citations<a class="headerlink" href="#incoming-citations" title="Permanent link">&para;</a></h3>
 <p>Papers <strong>in your library</strong> that cite this paper. Maintained automatically as you import papers.</p>
