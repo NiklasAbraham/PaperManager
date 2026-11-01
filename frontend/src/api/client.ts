@@ -175,9 +175,11 @@ export async function uploadPdf(
   preprocessKey?: string,
   analysisKey?: string,
   publishedDate?: string,
+  stubId?: string,
 ): Promise<T_IngestOut> {
   const form = new FormData();
   form.append("file", file);
+  if (stubId) form.append("stub_id", stubId);
   if (titleOverride) form.append("title_override", titleOverride);
   if (projectId) form.append("project_id", projectId);
   if (captionMethod) form.append("caption_method", captionMethod);
@@ -222,12 +224,49 @@ export async function ingestFromUrl(url: string, projectId?: string, debug?: boo
   });
 }
 
-export async function ingestFromUrlFull(url: string, projectId?: string, debug?: boolean, summaryInstructions?: string): Promise<T_IngestOut> {
+export async function ingestFromUrlFull(url: string, projectId?: string, debug?: boolean, summaryInstructions?: string, stubId?: string): Promise<T_IngestOut> {
   return apiFetch<T_IngestOut>("/papers/from-url-full", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, project_id: projectId ?? null, debug: debug ?? false, summary_instructions: summaryInstructions ?? null }),
+    body: JSON.stringify({ url, project_id: projectId ?? null, debug: debug ?? false, summary_instructions: summaryInstructions ?? null, stub_id: stubId ?? null }),
   });
+}
+
+export interface ReferenceImportJob {
+  id: string;
+  status: "queued" | "running" | "done" | "error";
+  step: string;
+  stub_id: string | null;
+  source_paper_id: string | null;
+  doi: string | null;
+  url: string | null;
+  title: string;
+  paper_id: string | null;
+  pdf: boolean | null;
+  tags_applied: string[];
+  merged: boolean;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Pull a reference into the library in the background (normal upload pipeline + auto tags). */
+export async function importReference(sourcePaperId: string, body: {
+  stub_id?: string; doi?: string; url?: string; title?: string;
+  claims_model?: string; skip_embedding?: boolean; save_references?: boolean;
+}): Promise<ReferenceImportJob> {
+  const job = await apiFetch<ReferenceImportJob>(`/papers/${sourcePaperId}/references/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  window.dispatchEvent(new CustomEvent("refimport:started", { detail: job }));
+  return job;
+}
+
+export async function listReferenceImports(sourcePaperId?: string): Promise<ReferenceImportJob[]> {
+  const q = sourcePaperId ? `?source_paper_id=${encodeURIComponent(sourcePaperId)}` : "";
+  return apiFetch<ReferenceImportJob[]>(`/papers/reference-imports${q}`);
 }
 
 export async function deleteDebugPapers(): Promise<{ deleted: number; figures_deleted: number }> {

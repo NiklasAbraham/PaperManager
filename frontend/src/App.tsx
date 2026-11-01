@@ -23,6 +23,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Toaster from "./components/Toaster";
+import ReferenceImportTracker from "./components/ReferenceImportTracker";
 
 // Lazy-load Graph so react-force-graph (WebGL) doesn't run on initial page load
 const Graph         = lazy(() => import("./pages/Graph"));
@@ -102,6 +103,7 @@ function AppLayout() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
+      {!isLogin && <ReferenceImportTracker />}
       {!isLogin && (
         isKnowledge ? (
           /* On /knowledge: navbar is fixed, hidden above viewport, slides down on hover */

@@ -32,9 +32,11 @@ interface Props {
   analysisKey?: string;
   /** Tag suggestions precomputed in the queue — shown instantly in the tags step. */
   precomputedTagSuggestions?: { existing: string[]; new: string[]; all_tags: string[] };
+  /** Existing paper without a PDF (reference stub) that this upload fills in instead of creating a new paper. */
+  stubId?: string;
 }
 
-export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug, queuePosition, queueTotal, skipSummaryStep, preprocessKey, analysisKey, precomputedTagSuggestions }: Props) {
+export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug, queuePosition, queueTotal, skipSummaryStep, preprocessKey, analysisKey, precomputedTagSuggestions, stubId }: Props) {
   const urlMode = !file && !!url;
   const { settings } = useAppSettings();
 
@@ -288,6 +290,10 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
 
   // ── Step 1: upload ─────────────────────────────────────────────────────────
 
+  // A matching paper without a PDF is a reference stub: the upload fills it in
+  // (same node, citations kept) rather than adding a second paper.
+  const targetStubId = stubId ?? (duplicate && !duplicate.drive_file_id ? duplicate.id : undefined);
+
   const confirm = async () => {
     if (!title.trim()) return;
     setSaving(true);
@@ -296,7 +302,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
       let paper: T_IngestOut;
       if (urlMode) {
         const isDefault = summaryInstructions.trim() === settings.defaultSummaryInstructions.trim();
-        paper = await ingestFromUrlFull(url!, undefined, debug, isDefault ? undefined : summaryInstructions);
+        paper = await ingestFromUrlFull(url!, undefined, debug, isDefault ? undefined : summaryInstructions, targetStubId);
         // If user provided a PDF manually before import, attach it now
         if (preImportPdf && paper.pdf_fetched === false) {
           try { await uploadPdfForPaper(paper.id, preImportPdf); } catch { /* non-fatal */ }
@@ -313,6 +319,7 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
           documentType === "paper" ? preprocessKey : undefined,
           documentType === "paper" ? analysisKey : undefined,
           documentType === "news_article" ? (publishedDate || undefined) : undefined,
+          targetStubId,
         );
       }
       await applySource(paper.id);
@@ -1106,7 +1113,18 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             </div>
           )}
 
-          {duplicate && (
+          {duplicate && !duplicate.drive_file_id && (
+            <div className="flex items-start gap-2 rounded-lg bg-violet-50 border border-violet-200 px-3 py-2.5 text-xs">
+              <span className="text-violet-600 mt-0.5 shrink-0">↻</span>
+              <div className="flex-1 min-w-0 text-violet-800">
+                "{duplicate.title}" is already in your library as a reference without a PDF. This upload adds the PDF to it.
+              </div>
+              <a href={`/paper/${duplicate.id}`} target="_blank" rel="noreferrer" className="shrink-0 text-violet-700 underline font-medium">
+                View →
+              </a>
+            </div>
+          )}
+          {duplicate && duplicate.drive_file_id && (
             <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs">
               <span className="text-amber mt-0.5 shrink-0">⚠</span>
               <div className="flex-1 min-w-0">

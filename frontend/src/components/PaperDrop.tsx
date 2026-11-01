@@ -628,6 +628,7 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
             preprocessKey={queue[activeIdx].preprocessKey}
             analysisKey={queue[activeIdx].analysisKey}
             precomputedTagSuggestions={queue[activeIdx].tagSuggestions}
+            stubId={queue[activeIdx].duplicateHasPdf === false ? queue[activeIdx].duplicateId : undefined}
             skipSummaryStep={true}
             queuePosition={reviewable.length > 1 ? pos : undefined}
             queueTotal={reviewable.length > 1 ? reviewable.length : undefined}
@@ -723,13 +724,13 @@ function QueueRow({
     const stub = item.duplicateId && item.duplicateHasPdf === false;
     if (fullyReady) {
       return stub
-        ? "Reference exists without PDF — click to attach PDF"
+        ? "Ready — adds the PDF to the existing reference"
         : "Ready — click to review";
     }
     if (preparing) return `Preparing…${prepHint}`;
     // prepFailed — clickable, but background precompute didn't fully complete.
     return stub
-      ? `Reference exists without PDF — click to attach PDF${prepHint}`
+      ? `Ready — adds the PDF to the existing reference${prepHint}`
       : `Ready — click to review (background prep incomplete)${prepHint}`;
   })();
 

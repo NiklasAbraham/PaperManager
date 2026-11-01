@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { mdPlugins, inlineMd } from "../lib/markdown";
-import { apiFetch, extractReferences, aiExtractReferences, saveReferences, listReferences, ingestFromUrl, previewUrl, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, fetchTables, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, addAuthorByName, aiExtractAuthors, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, aiExtractMetadata, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd, listAnnotations, exportPaperMarkdown, getOrCreatePerson, linkPersonInvolves, listConcepts } from "../api/client";
+import { apiFetch, extractReferences, aiExtractReferences, saveReferences, listReferences, importReference, listReferenceImports, suggestTags, applyTags, createStandaloneTag, suggestTopics, fetchFigures, fetchTables, extractFiguresForPaper, chatWithFigure, deletePaper, removeAuthor, addAuthorByName, aiExtractAuthors, fetchGraph, fetchPaperInvolves, regenerateSummary, updatePaper, refetchPdf, reextractAbstract, aiExtractMetadata, parsePdf, fetchPaperProjects, listProjects, addPaperToProject, removePaperFromProject, getPaperClaims, extractPaperClaims, getRelatedPapers, discoverAdd, listAnnotations, exportPaperMarkdown, getOrCreatePerson, linkPersonInvolves, listConcepts } from "../api/client";
 import NoteEditor from "../components/NoteEditor";
 import ChatPanel from "../components/ChatPanel";
 import EditPaperModal from "../components/EditPaperModal";
@@ -17,6 +17,7 @@ import OnboardingModal from "../components/OnboardingModal";
 import { useAppSettings } from "../contexts/SettingsContext";
 import { notify } from "../lib/notify";
 import { fastModelLabel, instanceInfo } from "../lib/instance";
+import type { ReferenceImportJob } from "../api/client";
 import type { Paper, Person, Topic, Tag, Reference, Figure, PaperTable, GraphData, ParsedMeta, T_IngestOut, Claim, RelatedPaper, Annotation, AnnotationColor, Concept, ConceptsBackend, ConceptGeneration } from "../types";
 
 const PAPER_GRAPH_NODE_COLORS: Record<string, string> = {
@@ -154,21 +155,20 @@ export default function PaperDetail() {
   const [aiExtractingRefs, setAiExtractingRefs] = useState(false);
   const [pendingRefs, setPendingRefs]   = useState<Reference[] | null>(null);
   const [checkedRefs, setCheckedRefs]   = useState<boolean[]>([]);
-  const [pullingDoi, setPullingDoi]     = useState<string | null>(null);
+  // Background reference imports started from this paper (see ReferenceImportTracker)
+  const [refJobs, setRefJobs]           = useState<ReferenceImportJob[]>([]);
+  const [startingRef, setStartingRef]   = useState<string | null>(null);
   const [pullingAll, setPullingAll]     = useState(false);
-  const [pullAllProgress, setPullAllProgress] = useState<{done: number; total: number} | null>(null);
   // Inline URL import for refs without DOI
   const [refUrlInput, setRefUrlInput]       = useState<Record<number, string>>({});
   const [refUrlPulling, setRefUrlPulling]   = useState<number | null>(null);
   const [refUrlOpen, setRefUrlOpen]         = useState<number | null>(null);
   const [onboardingPaper, setOnboardingPaper] = useState<T_IngestOut | null>(null);
-  // Ref confirm modal (Pull ↓ and Import ↓ go through UploadConfirmModal)
-  const [refConfirmUrl, setRefConfirmUrl] = useState<string | null>(null);
-  const [refConfirmMeta, setRefConfirmMeta] = useState<ParsedMeta | null>(null);
   // Upload PDF for a reference
   const [refUploadFile, setRefUploadFile]   = useState<File | null>(null);
   const [refUploadMeta, setRefUploadMeta]   = useState<ParsedMeta | null>(null);
   const [refUploadParsing, setRefUploadParsing] = useState(false);
+  const [refUploadStubId, setRefUploadStubId] = useState<string | undefined>(undefined);
   const refUploadInputRef = useRef<HTMLInputElement>(null);
   const pendingRefForUpload = useRef<Reference | null>(null);
   const [suggestingTags, setSuggestingTags] = useState(false);
@@ -210,11 +210,34 @@ export default function PaperDetail() {
     apiFetch<Person[]>(`/papers/${id}/authors`).then(setAuthors).catch(() => {});
     apiFetch<Topic[]>(`/papers/${id}/topics`).then(setTopics).catch(() => {});
     apiFetch<Tag[]>(`/papers/${id}/tags`).then(setTags).catch(() => {});
+    listReferenceImports(id).then(setRefJobs).catch(() => {});
     listReferences(id)
       .then(({ references, cited_by }) => { setReferences(references); setCitedBy(cited_by); })
       .catch(() => {});
     apiFetch<{id: string; name: string; affiliation?: string}[]>("/people").then(setAllPeople).catch(() => {});
     listAnnotations(id).then(setAnnotations).catch(() => {});
+  }, [id]);
+
+  // Background reference imports: live status + refresh the list when one lands
+  useEffect(() => {
+    if (!id) return;
+    const onUpdate = (e: Event) => {
+      const jobs = (e as CustomEvent<ReferenceImportJob[]>).detail ?? [];
+      setRefJobs(jobs.filter((j) => j.source_paper_id === id));
+    };
+    const onFinished = (e: Event) => {
+      const job = (e as CustomEvent<ReferenceImportJob>).detail;
+      if (job?.source_paper_id !== id) return;
+      listReferences(id)
+        .then(({ references, cited_by }) => { setReferences(references); setCitedBy(cited_by); })
+        .catch(() => {});
+    };
+    window.addEventListener("refimport:update", onUpdate);
+    window.addEventListener("refimport:finished", onFinished);
+    return () => {
+      window.removeEventListener("refimport:update", onUpdate);
+      window.removeEventListener("refimport:finished", onFinished);
+    };
   }, [id]);
 
   // Load figures lazily when left tab is first opened
@@ -514,50 +537,66 @@ export default function PaperDetail() {
     setSelectedSugTopics(new Set());
   };
 
-  const handlePullReference = async (doi: string, refTitle?: string, refYear?: number | null) => {
-    setPullingDoi(doi);
+  const refKey = (ref: Reference) => ref.id ?? ref.doi ?? ref.title;
+
+  /** Active (queued/running) background import for this reference, if any. */
+  const activeJobFor = (ref: Reference) => refJobs.find((j) =>
+    (j.status === "queued" || j.status === "running") &&
+    ((ref.id && j.stub_id === ref.id) || (!ref.id && ref.doi && j.doi === ref.doi)));
+
+  const startRefImport = async (ref: Reference, url?: string) => {
+    if (!id) return null;
+    const job = await importReference(id, {
+      stub_id: ref.id,
+      doi: url ? undefined : ref.doi,
+      url,
+      title: ref.title,
+      claims_model: settings.autoExtractClaims ? settings.claimsModel : "",
+      skip_embedding: !settings.generateEmbeddingsOnUpload,
+      save_references: true,
+    });
+    setRefJobs((prev) => [...prev.filter((j) => j.id !== job.id), job]);
+    return job;
+  };
+
+  const handlePullReference = async (ref: Reference) => {
+    setStartingRef(refKey(ref));
     try {
-      let meta: ParsedMeta;
-      try {
-        meta = await previewUrl(doi);
-      } catch {
-        meta = { title: refTitle ?? "", doi, year: refYear ?? undefined, authors: [], metadata_source: "doi" };
-      }
-      setRefConfirmUrl(doi);
-      setRefConfirmMeta(meta);
-    } catch { /* ignore */ }
-    finally { setPullingDoi(null); }
+      await startRefImport(ref);
+      notify(`Importing "${ref.title}" in the background — keep reading.`, "info");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Could not start the import");
+    } finally {
+      setStartingRef(null);
+    }
   };
 
   const handlePullAllRefs = async () => {
     if (!id || pullingAll) return;
-    const stubs = references.filter((ref) => !(ref as any).summary && !!ref.doi);
+    const stubs = references.filter((ref) => !(ref as any).summary && !!ref.doi && !activeJobFor(ref));
     if (stubs.length === 0) return;
     setPullingAll(true);
-    setPullAllProgress({ done: 0, total: stubs.length });
-    for (let i = 0; i < stubs.length; i++) {
-      try { await ingestFromUrl(stubs[i].doi!); } catch { /* skip failed */ }
-      setPullAllProgress({ done: i + 1, total: stubs.length });
+    let started = 0;
+    for (const ref of stubs) {
+      try { await startRefImport(ref); started++; } catch { /* skip */ }
     }
-    const { references: refs, cited_by } = await listReferences(id);
-    setReferences(refs);
-    setCitedBy(cited_by);
     setPullingAll(false);
-    setPullAllProgress(null);
+    notify(`Importing ${started} reference${started === 1 ? "" : "s"} in the background, one after another.`, "info");
   };
 
   const handlePullRefByUrl = async (idx: number) => {
     const url = refUrlInput[idx]?.trim();
-    if (!url || !id) return;
+    const ref = references[idx];
+    if (!url || !id || !ref) return;
     setRefUrlPulling(idx);
     try {
-      const meta = await previewUrl(url);
+      await startRefImport(ref, url);
       setRefUrlOpen(null);
       setRefUrlInput((prev) => { const n = { ...prev }; delete n[idx]; return n; });
-      setRefConfirmUrl(url);
-      setRefConfirmMeta(meta);
-    } catch { /* leave input open so user can correct */ }
-    finally { setRefUrlPulling(null); }
+      notify(`Importing "${ref.title}" in the background — keep reading.`, "info");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Could not start the import");
+    } finally { setRefUrlPulling(null); }
   };
 
   const handleRefFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -565,6 +604,7 @@ export default function PaperDetail() {
     e.target.value = "";
     if (!f || !pendingRefForUpload.current) return;
     const ref = pendingRefForUpload.current;
+    setRefUploadStubId(ref.id);
     setRefUploadParsing(true);
     try {
       const parsed = await parsePdf(f);
@@ -1258,7 +1298,7 @@ export default function PaperDetail() {
                     )}
                     {aiExtractingRefs ? "Extracting…" : "✦ Extract with AI"}
                   </button>
-                  {references.some((ref) => !(ref as any).summary && ref.doi) && (
+                  {references.some((ref) => !(ref as any).summary && ref.doi && !activeJobFor(ref)) && (
                     <button
                       onClick={handlePullAllRefs}
                       disabled={pullingAll || extracting}
@@ -1271,8 +1311,8 @@ export default function PaperDetail() {
                         </svg>
                       )}
                       {pullingAll
-                        ? `Pulling ${pullAllProgress?.done}/${pullAllProgress?.total}…`
-                        : `Pull all into library (${references.filter((r) => !(r as any).summary && r.doi).length})`}
+                        ? "Queueing…"
+                        : `Pull all into library (${references.filter((r) => !(r as any).summary && r.doi && !activeJobFor(r)).length})`}
                     </button>
                   )}
                 </div>
@@ -1330,7 +1370,8 @@ export default function PaperDetail() {
                         const doi = ref.doi;
                         const isStub = !isPulled && !!doi;
                         const isNoDoi = !isPulled && !doi;
-                        const isPulling = pullingDoi === doi;
+                        const job = activeJobFor(ref);
+                        const isPulling = startingRef === refKey(ref);
                         return (
                           <div
                             key={i}
@@ -1340,10 +1381,19 @@ export default function PaperDetail() {
                             <div className="flex items-start justify-between gap-2">
                               <p className="text-xs font-medium text-gray-800 leading-snug">{ref.title}</p>
                               {isPulled && <span className="shrink-0 text-[10px] text-green-600 font-semibold mt-0.5">✓ In library</span>}
-                              {isStub && (
+                              {!isPulled && job && (
+                                <span className="shrink-0 flex items-center gap-1 text-[10px] text-violet-600 font-medium mt-0.5" title={job.step}>
+                                  <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                  </svg>
+                                  {job.status === "queued" ? "Queued" : "Importing…"}
+                                </span>
+                              )}
+                              {isStub && !job && (
                                 <div className="flex items-center gap-1 shrink-0">
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); handlePullReference(doi!, ref.title, ref.year); }}
+                                    onClick={(e) => { e.stopPropagation(); handlePullReference(ref); }}
                                     disabled={isPulling || refUploadParsing}
                                     className="text-[10px] font-medium bg-white border border-violet-200 text-violet-600 px-2 py-0.5 rounded-full hover:bg-violet-50 disabled:opacity-50"
                                   >
@@ -1359,7 +1409,7 @@ export default function PaperDetail() {
                                   </button>
                                 </div>
                               )}
-                              {isNoDoi && (
+                              {isNoDoi && !job && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setRefUrlOpen(refUrlOpen === i ? null : i); }}
                                   className="shrink-0 text-[10px] font-medium bg-white border border-gray-200 text-gray-500 px-2 py-0.5 rounded-full hover:border-violet-300 hover:text-violet-600"
@@ -1368,7 +1418,7 @@ export default function PaperDetail() {
                                 </button>
                               )}
                             </div>
-                            {isNoDoi && refUrlOpen === i && (
+                            {isNoDoi && !job && refUrlOpen === i && (
                               <div className="mt-2 flex gap-1.5" onClick={(e) => e.stopPropagation()}>
                                 <input
                                   autoFocus
@@ -2653,6 +2703,7 @@ export default function PaperDetail() {
         <UploadConfirmModal
           file={refUploadFile}
           meta={refUploadMeta}
+          stubId={refUploadStubId}
           onConfirmed={async (paper: T_IngestOut) => {
             setRefUploadFile(null);
             setRefUploadMeta(null);
@@ -2663,23 +2714,6 @@ export default function PaperDetail() {
             setOnboardingPaper(paper);
           }}
           onCancel={() => { setRefUploadFile(null); setRefUploadMeta(null); pendingRefForUpload.current = null; }}
-        />
-      )}
-
-      {refConfirmUrl && refConfirmMeta && (
-        <UploadConfirmModal
-          file={null}
-          url={refConfirmUrl}
-          meta={refConfirmMeta}
-          onConfirmed={async (paper) => {
-            setRefConfirmUrl(null);
-            setRefConfirmMeta(null);
-            const { references: refs, cited_by } = await listReferences(id!);
-            setReferences(refs);
-            setCitedBy(cited_by);
-            setOnboardingPaper(paper);
-          }}
-          onCancel={() => { setRefConfirmUrl(null); setRefConfirmMeta(null); }}
         />
       )}
 

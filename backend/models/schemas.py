@@ -220,6 +220,8 @@ class IngestFromUrlBody(BaseModel):
     project_id: str | None = None
     debug: bool = False
     summary_instructions: str | None = None
+    # Paper without a PDF (reference stub) that this import must enrich.
+    stub_id: str | None = None
 
 
 # ── References ─────────────────────────────────────────────────────────────────

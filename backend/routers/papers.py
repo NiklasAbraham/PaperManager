@@ -48,6 +48,13 @@ from models.schemas import PaperCreate, PaperUpdate, PaperOut, NoteBody, NoteOut
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 
+@router.get("/reference-imports")
+def reference_imports(source_paper_id: Optional[str] = None):
+    """Background reference imports of the last hours (queued/running/done/error)."""
+    from services.reference_import import list_jobs
+    return list_jobs(source_paper_id)
+
+
 @router.get("/check-duplicate")
 def check_duplicate(doi: Optional[str] = None, title: Optional[str] = None):
     """Return {duplicate: paper | null} — used by the frontend before confirming upload."""
@@ -161,6 +168,16 @@ def create(body: PaperCreate):
     return create_paper(get_driver(), body.model_dump())
 
 
+def _stub_target(driver, stub_id: Optional[str]) -> Optional[dict]:
+    """The paper named by `stub_id` if it exists and has no PDF yet, else None."""
+    if not stub_id:
+        return None
+    stub = get_paper(driver, stub_id)
+    if stub and not stub.get("drive_file_id"):
+        return stub
+    return None
+
+
 @router.post("/upload", response_model=IngestOut, status_code=status.HTTP_201_CREATED)
 def upload(
     file: UploadFile = File(...),
@@ -175,9 +192,14 @@ def upload(
     preprocess_key: Optional[str] = Form(None),
     analysis_key: Optional[str] = Form(None),
     debug: bool = Form(False),
+    stub_id: Optional[str] = Form(None),
     x_user_name: Optional[str] = Header(None),
 ):
     """Full ingestion pipeline: PDF → metadata → Drive → summary → Neo4j.
+
+    `stub_id` names a paper that exists without a PDF (a reference stub): the
+    upload then always enriches that node, even when the PDF's DOI or title
+    don't match it exactly, so pulling a reference never leaves a duplicate.
 
     Defined as a SYNC endpoint on purpose: the pipeline is entirely blocking
     (LLM calls, Drive upload, Neo4j writes). As a sync def, FastAPI runs it in
@@ -266,7 +288,7 @@ def upload(
     driver = get_driver()
     import json as _json
 
-    existing = find_duplicate(driver, doi=meta.get("doi"), title=meta.get("title", ""))
+    existing = _stub_target(driver, stub_id) or find_duplicate(driver, doi=meta.get("doi"), title=meta.get("title", ""))
     if existing:
         if existing.get("drive_file_id"):
             # Full paper already in library — block duplicate
@@ -697,7 +719,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
         except Exception as exc:
             log.warning("Summary failed (non-fatal) | %s", exc)
 
-        existing = find_duplicate(driver, doi=merged.get("doi"), title=merged.get("title", ""))
+        existing = _stub_target(driver, body.stub_id) or find_duplicate(driver, doi=merged.get("doi"), title=merged.get("title", ""))
         if existing and existing.get("drive_file_id"):
             import json as _json
             raise HTTPException(status_code=409, detail=_json.dumps({
@@ -718,7 +740,21 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
             "raw_text": raw_text,
             "venue": merged.get("venue"),
         }
-        paper = merge_paper_by_doi(driver, save_data) if merged.get("doi") else create_paper(driver, save_data)
+        if existing:
+            # Reference stub without a PDF: enrich it in place (keeps its CITES links).
+            log.info("Enriching stub paper %s with PDF from URL", existing["id"])
+            paper = update_paper(driver, existing["id"], {
+                **save_data,
+                "title": save_data["title"] or existing.get("title") or "",
+                "doi": save_data["doi"] or existing.get("doi"),
+                "year": save_data["year"] if save_data["year"] is not None else existing.get("year"),
+                "abstract": save_data["abstract"] or existing.get("abstract"),
+                "venue": save_data["venue"] or existing.get("venue"),
+            })
+        elif merged.get("doi"):
+            paper = merge_paper_by_doi(driver, save_data)
+        else:
+            paper = create_paper(driver, save_data)
         if x_user_name:
             try:
                 link_paper_added_by(driver, paper["id"], x_user_name)
@@ -813,7 +849,7 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
             except Exception as exc:
                 log.warning("Summary failed (non-fatal) | %s", exc)
 
-        paper = merge_paper_by_doi(driver, {
+        meta_data = {
             "title": meta.get("title", ""),
             "year": meta.get("year"),
             "doi": meta.get("doi"),
@@ -824,7 +860,19 @@ async def ingest_from_url_full(body: IngestFromUrlBody, x_user_name: Optional[st
             "metadata_source": meta.get("metadata_source", "url"),
             "raw_text": "",
             "venue": meta.get("venue"),
-        })
+        }
+        stub = _stub_target(driver, body.stub_id)
+        if stub:
+            paper = update_paper(driver, stub["id"], {
+                **meta_data,
+                "title": meta_data["title"] or stub.get("title") or "",
+                "doi": meta_data["doi"] or stub.get("doi"),
+                "year": meta_data["year"] if meta_data["year"] is not None else stub.get("year"),
+                "abstract": meta_data["abstract"] or stub.get("abstract"),
+                "venue": meta_data["venue"] or stub.get("venue"),
+            })
+        else:
+            paper = merge_paper_by_doi(driver, meta_data)
         if x_user_name:
             try:
                 link_paper_added_by(driver, paper["id"], x_user_name)
@@ -1542,6 +1590,34 @@ def ai_extract_refs(paper_id: str):
         raise HTTPException(status_code=422, detail="No extracted text stored for this paper — upload the PDF first")
     refs = extract_references_ai_full(raw_text)
     return {"references": refs}
+
+
+class ReferenceImportBody(BaseModel):
+    stub_id: Optional[str] = None       # the reference node (no PDF) to fill
+    doi: Optional[str] = None
+    url: Optional[str] = None
+    title: Optional[str] = None
+    claims_model: str = "litellm"
+    skip_embedding: bool = False
+    save_references: bool = True
+
+
+@router.post("/{paper_id}/references/import", status_code=status.HTTP_202_ACCEPTED)
+def import_reference(paper_id: str, body: ReferenceImportBody, x_user_name: Optional[str] = Header(None)):
+    """Pull one reference of `paper_id` into the library in the background.
+
+    Same pipeline as a PDF upload (open-access PDF → /papers/upload, metadata
+    only when none exists), enriching/merging the existing reference stub,
+    then auto-tagging. Returns the job; poll GET /papers/reference-imports.
+    """
+    from services.reference_import import start_job
+    if not (body.stub_id or body.doi or body.url):
+        raise HTTPException(status_code=422, detail="stub_id, doi or url required")
+    return start_job(
+        stub_id=body.stub_id, source_paper_id=paper_id, doi=body.doi, url=body.url,
+        title=body.title, user_name=x_user_name, claims_model=body.claims_model,
+        skip_embedding=body.skip_embedding, save_references=body.save_references,
+    )
 
 
 @router.post("/{paper_id}/references", status_code=status.HTTP_201_CREATED)
