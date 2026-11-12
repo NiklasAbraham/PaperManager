@@ -1,7 +1,17 @@
 /* eslint-disable react-hooks/immutability -- an imperative canvas engine: `eng` is a plain mutable drawing cache (positions, layers), deliberately outside React state */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TopicMapData } from "./api";
-import { NEUTRAL, SpatialGrid, placeLabels, rgba, type LabelBox } from "./helpers";
+import { SpatialGrid, placeLabels, rgba, type LabelBox } from "./helpers";
+import { pointColors, type ColorMode, type YearRange } from "./mapSettings";
+
+/** Imperative handle for the full page: zoom buttons and the PNG export painter. */
+export interface TopicMapApi {
+  zoomBy: (factor: number) => void;
+  resetZoom: () => void;
+  /** Paints the current view (zoom, dots, highlights, labels; no hover) at its on-screen size onto `g`. */
+  paintView: (g: CanvasRenderingContext2D) => void;
+  size: () => { w: number; h: number };
+}
 
 interface Props {
   data: TopicMapData;
@@ -18,18 +28,35 @@ interface Props {
   pad?: number;
   /** Fit the dots (their bounding box) into the card, centred, stretch capped at 2:1; default stretches the unit square. */
   fit?: boolean;
+  /** Colour rule of the dots (default: cluster). */
+  colorMode?: ColorMode;
+  /** Several projects at once, each with its own soft bubble (map project ids); overrides `activeProjectId`. */
+  checkedProjects?: string[];
+  /** Multipliers on the dot radius and alpha. */
+  dotSize?: number;
+  dotOpacity?: number;
+  showLabels?: boolean;
+  /** Cluster label font size (px). */
+  labelSize?: number;
+  /** Controlled reference visibility (hides the built-in "references" chip). */
+  refsVisible?: boolean;
+  /** Title search: ids that match; every other dot is dimmed. null = no search. */
+  highlightIds?: Set<string> | null;
+  /** Year extent the year colour scale spans. */
+  yearRange?: YearRange | null;
+  /** Show +/- zoom buttons next to "Reset zoom". */
+  zoomButtons?: boolean;
+  apiRef?: { current: TopicMapApi | null };
 }
 
 const PAD_X = 20, PAD_Y = 18, MUTED_INK = "#9ca3af", MAX_ZOOM = 8, CELL = 16, HIT_RADIUS = 8;
-const FONT = "600 11px system-ui, 'Segoe UI', Roboto, sans-serif";
-const FONT_MUTED = "400 11px system-ui, 'Segoe UI', Roboto, sans-serif";
 
 /** Mutable drawing state (screen positions, caches); lives outside React state so mousemove costs nothing. */
 interface Engine {
   w: number; h: number; dpr: number; k: number; tx: number; ty: number;
   sx: Float32Array; sy: Float32Array;
   base: HTMLCanvasElement | null; baseDirty: boolean;
-  blob: { key: string; canvas: HTMLCanvasElement } | null;
+  blob: { key: string; canvases: HTMLCanvasElement[] } | null;
   sprites: Map<string, HTMLCanvasElement>;
   grid: SpatialGrid | null; gridIds: number[];
   hover: number; raf: number;
@@ -77,7 +104,13 @@ function tint(g: CanvasRenderingContext2D, w: number, h: number, color: string) 
   g.putImageData(img, 0, 0);
 }
 
-export default function TopicMap({ data, activeProjectId = null, interactive = true, onOpenPaper, className = "", insetTop, insetBottom, pad, fit = false }: Props) {
+const NO_PROJECTS: string[] = [];
+
+export default function TopicMap({
+  data, activeProjectId = null, interactive = true, onOpenPaper, className = "", insetTop, insetBottom, pad, fit = false,
+  colorMode = "cluster", checkedProjects, dotSize = 1, dotOpacity = 1, showLabels = true, labelSize = 11,
+  refsVisible, highlightIds = null, yearRange = null, zoomButtons = false, apiRef,
+}: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [eng] = useState(newEngine);
@@ -89,14 +122,14 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
   // Library papers last so they sit on top of the faint references.
   const model = useMemo(() => {
     const pts = [...data.points.filter((p) => p.r), ...data.points.filter((p) => !p.r)];
-    const colorOf = new Map(data.clusters.map((c) => [c.id, c.color]));
-    const mutedIds = new Set(data.clusters.filter((c) => c.muted).map((c) => c.id));
-    const colors = pts.map((p) => colorOf.get(p.c) ?? NEUTRAL);
-    const groups = new Map<string, { color: string; muted: boolean; ref: number[]; lib: number[] }>();
+    const mutedIds = new Set(colorMode === "cluster" ? data.clusters.filter((c) => c.muted).map((c) => c.id) : []);
+    const colors = pointColors(pts, colorMode, data.clusters, data.projects, checkedProjects ?? NO_PROJECTS, yearRange);
+    const groups = new Map<string, { color: string; muted: boolean; dim: boolean; ref: number[]; lib: number[] }>();
     pts.forEach((p, i) => {
       const muted = mutedIds.has(p.c);
-      const key = `${colors[i]}|${muted ? 1 : 0}`;
-      const g = groups.get(key) ?? { color: colors[i], muted, ref: [], lib: [] };
+      const dim = !!highlightIds && !highlightIds.has(p.id);
+      const key = `${colors[i]}|${muted ? 1 : 0}|${dim ? 1 : 0}`;
+      const g = groups.get(key) ?? { color: colors[i], muted, dim, ref: [], lib: [] };
       (p.r ? g.ref : g.lib).push(i);
       groups.set(key, g);
     });
@@ -105,16 +138,21 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
     for (const p of pts) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
     const box = x1 > x0 && y1 > y0 ? { x0, y0, bw: x1 - x0, bh: y1 - y0 } : { x0: 0, y0: 0, bw: 1, bh: 1 };
     return { pts, colors, groups: [...groups.values()], hasRefs, box };
-  }, [data]);
+  }, [data, colorMode, checkedProjects, highlightIds, yearRange]);
 
-  const projIndex = useMemo(() => data.projects.findIndex((p) => p.id === activeProjectId), [data.projects, activeProjectId]);
-  const refsOn = showRefs && model.hasRefs;
+  const activeKey = (checkedProjects ?? (activeProjectId ? [activeProjectId] : NO_PROJECTS)).join(",");
+  const activeIdx = useMemo(
+    () => activeKey.split(",").filter(Boolean).map((id) => data.projects.findIndex((p) => p.id === id)).filter((i) => i >= 0),
+    [data.projects, activeKey]);
+  const refsOn = (refsVisible ?? showRefs) && model.hasRefs;
 
   // Everything drawn is derived from `eng` + the props below; `draw` is the only writer of the canvas.
   const padX = pad ?? PAD_X, padY = pad ?? PAD_Y;
   const top = insetTop ?? padY, bottom = insetBottom ?? padY;
-  const latest = useRef({ model, projIndex, refsOn, data, insetTop: top, insetBottom: bottom, padX, fit });
-  useEffect(() => { latest.current = { model, projIndex, refsOn, data, insetTop: top, insetBottom: bottom, padX, fit }; });
+  const latest = useRef({ model, activeIdx, refsOn, data, insetTop: top, insetBottom: bottom, padX, fit, dotSize, dotOpacity, showLabels, labelSize });
+  useEffect(() => {
+    latest.current = { model, activeIdx, refsOn, data, insetTop: top, insetBottom: bottom, padX, fit, dotSize, dotOpacity, showLabels, labelSize };
+  });
 
   /** Unit-square coordinates -> unzoomed card pixels (stretched, or aspect-preserving fit of the bounding box, centred). */
   const place = useCallback((x: number, y: number) => {
@@ -139,26 +177,21 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
   }, [eng, place]);
 
   const dotR = useCallback(() => {
-    const s = Math.min(2.2, Math.sqrt(eng.k));
+    const s = Math.min(2.2, Math.sqrt(eng.k)) * latest.current.dotSize;
     return { lib: 2.7 * s, ref: 1.15 * s };
   }, [eng]);
 
-  const drawBase = useCallback(() => {
-    const { model: m, refsOn: refs } = latest.current;
-    if (!eng.base) eng.base = document.createElement("canvas");
-    const c = eng.base;
-    c.width = Math.max(1, Math.round(eng.w * eng.dpr)); c.height = Math.max(1, Math.round(eng.h * eng.dpr));
-    const g = c.getContext("2d");
-    if (!g) return;
-    g.setTransform(eng.dpr, 0, 0, eng.dpr, 0, 0);
+  /** The dots of every group onto `g` (logical px). `inView` limits work on the cached screen layer. */
+  const paintDots = useCallback((g: CanvasRenderingContext2D, inView: (i: number) => boolean) => {
+    const { model: m, refsOn: refs, dotOpacity: op } = latest.current;
     const r = dotR();
-    const inView = (i: number) => eng.sx[i] > -4 && eng.sx[i] < eng.w + 4 && eng.sy[i] > -4 && eng.sy[i] < eng.h + 4;
+    const dimK = (grp: { dim: boolean }) => (grp.dim ? 0.12 : 1);
     if (refs) {
       for (const grp of m.groups) {
         const rr = grp.muted ? r.ref * 0.8 : r.ref;
         g.beginPath();
         for (const i of grp.ref) if (inView(i)) { g.moveTo(eng.sx[i] + rr, eng.sy[i]); g.arc(eng.sx[i], eng.sy[i], rr, 0, 6.2832); }
-        g.fillStyle = rgba(grp.color, grp.muted ? 0.18 : 0.3);
+        g.fillStyle = rgba(grp.color, (grp.muted ? 0.18 : 0.3) * op * dimK(grp));
         g.fill();
       }
     }
@@ -166,65 +199,85 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
       const rl = grp.muted ? r.lib * 0.7 : r.lib;
       g.beginPath();
       for (const i of grp.lib) if (inView(i)) { g.moveTo(eng.sx[i] + rl, eng.sy[i]); g.arc(eng.sx[i], eng.sy[i], rl, 0, 6.2832); }
-      g.fillStyle = rgba(grp.color, grp.muted ? 0.5 : 0.92);
+      g.fillStyle = rgba(grp.color, (grp.muted ? 0.5 : 0.92) * op * dimK(grp));
       g.fill();
       g.lineWidth = 0.8;
-      g.strokeStyle = grp.muted ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.85)";
+      g.strokeStyle = `rgba(255,255,255,${(grp.muted ? 0.5 : 0.85) * dimK(grp)})`;
       g.stroke();
     }
-    eng.baseDirty = false;
   }, [eng, dotR]);
 
-  const blobFor = useCallback((): HTMLCanvasElement | null => {
-    const { model: m, projIndex: pi, data: d } = latest.current;
-    if (pi < 0) return null;
-    const key = `${pi}|${eng.k}|${eng.tx}|${eng.ty}|${eng.w}|${eng.h}|${m.pts.length}`;
-    if (eng.blob?.key === key) return eng.blob.canvas;
-    const c = document.createElement("canvas");
-    c.width = Math.max(1, Math.round(eng.w / 2)); c.height = Math.max(1, Math.round(eng.h / 2));
+  const drawBase = useCallback(() => {
+    if (!eng.base) eng.base = document.createElement("canvas");
+    const c = eng.base;
+    c.width = Math.max(1, Math.round(eng.w * eng.dpr)); c.height = Math.max(1, Math.round(eng.h * eng.dpr));
     const g = c.getContext("2d");
-    if (g) {
-      // Kernel ~3 % of the shorter canvas side (more for sparse projects), in half-resolution pixels.
-      const members = d.projects[pi].count || 0;
-      const sparse = members < 25 ? 1.7 : members < 80 ? 1.35 : 1;
-      const radius = Math.max(5, Math.round(0.03 * Math.min(eng.w, eng.h) * sparse * Math.min(2.5, Math.sqrt(eng.k)) / 2));
-      const sp = brush(eng, radius);
-      m.pts.forEach((p, i) => {
-        if (!p.r && p.p.includes(pi)) g.drawImage(sp, eng.sx[i] / 2 - radius, eng.sy[i] / 2 - radius);
-      });
-      tint(g, c.width, c.height, d.projects[pi].color);
-    }
-    eng.blob = { key, canvas: c };
-    return c;
+    if (!g) return;
+    g.setTransform(eng.dpr, 0, 0, eng.dpr, 0, 0);
+    paintDots(g, (i) => eng.sx[i] > -4 && eng.sx[i] < eng.w + 4 && eng.sy[i] > -4 && eng.sy[i] < eng.h + 4);
+    eng.baseDirty = false;
+  }, [eng, paintDots]);
+
+  /** One soft bubble layer per checked project (cached until the view or the selection changes). */
+  const blobsFor = useCallback((): HTMLCanvasElement[] => {
+    const { model: m, activeIdx: act, data: d } = latest.current;
+    if (!act.length) return [];
+    const key = `${act.join(",")}|${eng.k}|${eng.tx}|${eng.ty}|${eng.w}|${eng.h}|${m.pts.length}`;
+    if (eng.blob?.key === key) return eng.blob.canvases;
+    const canvases = act.map((pi) => {
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(eng.w / 2)); c.height = Math.max(1, Math.round(eng.h / 2));
+      const g = c.getContext("2d");
+      if (g) {
+        // Kernel ~3 % of the shorter canvas side (more for sparse projects), in half-resolution pixels.
+        const members = d.projects[pi].count || 0;
+        const sparse = members < 25 ? 1.7 : members < 80 ? 1.35 : 1;
+        const radius = Math.max(5, Math.round(0.03 * Math.min(eng.w, eng.h) * sparse * Math.min(2.5, Math.sqrt(eng.k)) / 2));
+        const sp = brush(eng, radius);
+        m.pts.forEach((p, i) => {
+          if (!p.r && p.p.includes(pi)) g.drawImage(sp, eng.sx[i] / 2 - radius, eng.sy[i] / 2 - radius);
+        });
+        tint(g, c.width, c.height, d.projects[pi].color);
+      }
+      return c;
+    });
+    eng.blob = { key, canvases };
+    return canvases;
   }, [eng]);
 
-  const compose = useCallback(() => {
-    const cv = canvasRef.current;
-    const g = cv?.getContext("2d");
-    if (!cv || !g || eng.w < 2) return;
-    const { model: m, projIndex: pi, data: d } = latest.current;
-        if (eng.baseDirty) { project(); drawBase(); }
-    g.setTransform(eng.dpr, 0, 0, eng.dpr, 0, 0);
-    g.clearRect(0, 0, eng.w, eng.h);
-    const blob = blobFor();
-    if (blob) {
+  /** The whole scene in logical px. `live` = the on-screen canvas (cached dot layer, hover ring); not live = export. */
+  const paint = useCallback((g: CanvasRenderingContext2D, live: boolean) => {
+    const { model: m, activeIdx: act, data: d, dotOpacity: op, showLabels: labelsOn, labelSize: ls } = latest.current;
+    if (eng.baseDirty) { project(); if (live) drawBase(); }
+    if (!live) project();
+    for (const canvas of blobsFor()) {
       g.save();
       g.filter = "blur(3px)";
-      g.drawImage(blob, 0, 0, eng.w, eng.h);
+      g.drawImage(canvas, 0, 0, eng.w, eng.h);
       g.restore();
     }
-    if (eng.base) { g.globalAlpha = pi >= 0 ? 0.15 : 1; g.drawImage(eng.base, 0, 0, eng.w, eng.h); g.globalAlpha = 1; }
+    const fade = act.length ? 0.15 : 1;
+    if (live) {
+      if (eng.base) { g.globalAlpha = fade; g.drawImage(eng.base, 0, 0, eng.w, eng.h); g.globalAlpha = 1; }
+    } else {
+      g.globalAlpha = fade;
+      paintDots(g, (i) => eng.sx[i] > -4 && eng.sx[i] < eng.w + 4 && eng.sy[i] > -4 && eng.sy[i] < eng.h + 4);
+      g.globalAlpha = 1;
+    }
     const r = dotR();
-    if (pi >= 0) {
+    if (act.length) {
       for (let i = 0; i < m.pts.length; i++) {
         const p = m.pts[i];
-        if (p.r || !p.p.includes(pi)) continue;
+        if (p.r || !act.some((pi) => p.p.includes(pi))) continue;
+        if (highlightIds && !highlightIds.has(p.id)) continue;
         g.beginPath(); g.arc(eng.sx[i], eng.sy[i], r.lib + 0.8, 0, 6.2832);
+        g.globalAlpha = op;
         g.fillStyle = m.colors[i]; g.fill();
+        g.globalAlpha = 1;
         g.lineWidth = 1; g.strokeStyle = "#fff"; g.stroke();
       }
     }
-    if (eng.hover >= 0) {
+    if (live && eng.hover >= 0) {
       const i = eng.hover;
       g.beginPath(); g.arc(eng.sx[i], eng.sy[i], (m.pts[i].r ? r.ref : r.lib) + 3.2, 0, 6.2832);
       g.fillStyle = "rgba(255,255,255,0.95)"; g.fill();
@@ -232,14 +285,15 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
       g.beginPath(); g.arc(eng.sx[i], eng.sy[i], (m.pts[i].r ? r.ref : r.lib) + 0.6, 0, 6.2832);
       g.fillStyle = m.colors[i]; g.fill();
     }
+    if (!labelsOn) return;
     // Cluster labels: text with a white halo, biggest first, an overlapping one is skipped.
-    const small = eng.w < 380;
-    const fontFor = (muted: boolean) => (muted ? FONT_MUTED : FONT).replace("11px", small ? "10px" : "11px");
+    const px = eng.w < 380 ? Math.max(8, ls - 1) : ls;
+    const fontFor = (muted: boolean) => `${muted ? 400 : 600} ${px}px system-ui, 'Segoe UI', Roboto, sans-serif`;
     g.textAlign = "center"; g.textBaseline = "middle";
     const boxes: (LabelBox & { muted: boolean })[] = d.clusters.map((c) => {
       const text = c.label;
       g.font = fontFor(!!c.muted);
-      const w = g.measureText(text).width + 8, h = 15;
+      const w = g.measureText(text).width + 8, h = px + 4;
       const q = place(c.x, c.y);
       const x = Math.min(eng.w - w / 2 - 2, Math.max(w / 2 + 2, q.x * eng.k + eng.tx));
       const y = Math.min(eng.h - h / 2 - 2, Math.max(h / 2 + 2, q.y * eng.k + eng.ty));
@@ -251,7 +305,16 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
       g.strokeStyle = "rgba(255,255,255,0.92)"; g.strokeText(l.text, l.x, l.y);
       g.fillStyle = l.muted ? MUTED_INK : "#1f2937"; g.fillText(l.text, l.x, l.y);
     }
-  }, [eng, project, drawBase, blobFor, dotR, place]);
+  }, [eng, project, drawBase, paintDots, blobsFor, dotR, place, highlightIds]);
+
+  const compose = useCallback(() => {
+    const cv = canvasRef.current;
+    const g = cv?.getContext("2d");
+    if (!cv || !g || eng.w < 2) return;
+    g.setTransform(eng.dpr, 0, 0, eng.dpr, 0, 0);
+    g.clearRect(0, 0, eng.w, eng.h);
+    paint(g, true);
+  }, [eng, paint]);
 
   const schedule = useCallback(() => {
     if (eng.raf) return;
@@ -281,8 +344,8 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
   }, [eng, invalidateBase]);
 
   // Data, references toggle or highlighted project changed.
-  useEffect(() => { invalidateBase(); }, [model, refsOn, top, bottom, padX, fit, invalidateBase]);
-  useEffect(() => { schedule(); }, [projIndex, schedule]);
+  useEffect(() => { invalidateBase(); }, [model, refsOn, top, bottom, padX, fit, dotSize, dotOpacity, invalidateBase]);
+  useEffect(() => { schedule(); }, [activeIdx, showLabels, labelSize, schedule]);
 
   const gridFor = () => {
     if (eng.grid) return eng.grid;
@@ -375,6 +438,23 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
 
   const reset = () => { setView(1, 0, 0); };
 
+  /** Zoom about the centre of the card (the +/- buttons). */
+  const zoomBy = (f: number) => {
+    const k2 = Math.min(MAX_ZOOM, Math.max(1, eng.k * f));
+    const bx = (eng.w / 2 - eng.tx) / eng.k, by = (eng.h / 2 - eng.ty) / eng.k;
+    eng.hover = -1;
+    setView(k2, eng.w / 2 - bx * k2, eng.h / 2 - by * k2);
+  };
+
+  useEffect(() => {
+    if (!apiRef) return;
+    apiRef.current = {
+      zoomBy, resetZoom: reset, size: () => ({ w: eng.w, h: eng.h }),
+      paintView: (g) => paint(g, false),
+    };
+    return () => { apiRef.current = null; };
+  });
+
   const pt = hover ? model.pts[hover.i] : null;
   const cluster = pt ? data.clusters.find((c) => c.id === pt.c) : null;
   const projNames = pt ? pt.p.map((i) => data.projects[i]?.name).filter(Boolean) : [];
@@ -392,15 +472,23 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
         onPointerMove={onPointerMove} onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
         onClick={onClick}
       />
-      {interactive && (model.hasRefs || zoomed) && (
+      {interactive && (model.hasRefs || zoomed || zoomButtons) && (
         <div className="absolute right-2 top-2 flex items-center gap-1.5">
+          {zoomButtons && (
+            <div className="flex items-center rounded-full bg-raised/90 border border-line overflow-hidden">
+              <button type="button" onClick={() => zoomBy(1.5)} aria-label="Zoom in" title="Zoom in"
+                className="h-6 w-7 text-sm leading-none text-ink-2 hover:bg-accent-lo hover:text-accent">+</button>
+              <button type="button" onClick={() => zoomBy(1 / 1.5)} aria-label="Zoom out" title="Zoom out"
+                className="h-6 w-7 border-l border-line text-sm leading-none text-ink-2 hover:bg-accent-lo hover:text-accent">&minus;</button>
+            </div>
+          )}
           {zoomed && (
             <button type="button" onClick={reset}
               className="h-6 px-2 rounded-full bg-raised/90 border border-line text-[11px] text-ink-2 hover:border-accent-border hover:text-accent">
               Reset zoom
             </button>
           )}
-          {model.hasRefs && (
+          {model.hasRefs && refsVisible === undefined && (
             <button type="button" aria-pressed={refsOn} onClick={() => setShowRefs((v) => !v)}
               title="Cited papers without a PDF in your library (faint dots)"
               className={`h-6 px-2 rounded-full border text-[11px] ${refsOn ? "bg-accent-lo border-accent-border text-accent" : "bg-raised/90 border-line text-ink-3 hover:text-ink-2"}`}>
@@ -418,7 +506,7 @@ export default function TopicMap({ data, activeProjectId = null, interactive = t
           <p className="text-xs font-medium text-ink line-clamp-3">{pt.t}</p>
           <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-ink-2">
             <span className="inline-block w-2 h-2 rounded-full shrink-0 mt-px" style={{ background: model.colors[hover.i] }} />
-            <span>{pt.topic ?? cluster?.label ?? "No topic"}{pt.r ? " · reference" : ""}</span>
+            <span>{pt.topic ?? cluster?.label ?? "No topic"}{pt.r ? " · reference" : ""}{pt.yr ? ` · ${pt.yr}` : ""}</span>
           </p>
           {projNames.length > 0 && <p className="text-[11px] text-ink-3">in {projNames.join(", ")}</p>}
         </div>

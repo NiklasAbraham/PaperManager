@@ -146,5 +146,7 @@ def get_dashboard(driver: Driver = Depends(get_driver)):
 
 
 @router.get("/topic-map")
-def get_topic_map(refs: int = Query(1), driver: Driver = Depends(get_driver)):
-    return topic_map.get_topic_map(driver, refs=bool(refs))
+def get_topic_map(refs: int = Query(1), clusters: int | None = Query(None, ge=1, le=64),
+                  driver: Driver = Depends(get_driver)):
+    """`clusters=N` (clamped to 2..16) re-clusters the cached layout; first request per N returns `building`."""
+    return topic_map.get_topic_map(driver, refs=bool(refs), clusters=clusters)

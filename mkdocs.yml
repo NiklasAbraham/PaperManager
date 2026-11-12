@@ -97,6 +97,7 @@ nav:
     - Concepts, tour and concept map: user-guide/reading-tools.md
     - Knowledge chat: user-guide/chat.md
     - Graph and Cypher panel: user-guide/graph.md
+    - Topic map: user-guide/topic-map.md
     - Reports: user-guide/reports.md
     - People, projects and export: user-guide/knowledge-features.md
     - Conference explorer: user-guide/conferences.md

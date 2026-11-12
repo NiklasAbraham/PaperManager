@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { DashVariant } from "./helpers";
 import { fmt } from "./helpers";
 import TopicMap from "./TopicMap";
@@ -15,6 +15,13 @@ interface Props {
 
 const STRIP = "flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-px-4 sm:scroll-px-6 lg:scroll-px-0 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:overflow-visible lg:grid lg:grid-cols-4 pb-1 lg:pb-0 [scrollbar-width:none]";
 const COLLAPSED_KEY = "pm_dash_map_collapsed";
+/** Link to the full-page map; carries the project the pointer is on, if any. */
+function FullMapLink({ projectId, className = "" }: { projectId?: string | null; className?: string }) {
+  return (
+    <Link to={projectId ? `/topic-map?proj=${encodeURIComponent(projectId)}` : "/topic-map"}
+      className={`text-[11px] text-ink-3 hover:text-accent whitespace-nowrap ${className}`}>Open full map ↗</Link>
+  );
+}
 const heading = (t: React.ReactNode) => <h1 className="text-sm font-semibold text-ink">{t}</h1>;
 
 export default function Dashboard({ variant, title, onFilter }: Props) {
@@ -75,8 +82,9 @@ export default function Dashboard({ variant, title, onFilter }: Props) {
           {showMap && (
             <div className={`flex flex-col h-[260px] lg:h-[400px] min-w-0 ${showStats || dashLoading ? "" : "lg:col-span-2"}`}>
               <div className="relative flex-1 min-h-0">{mapEl(true, "absolute inset-0", undefined, 16, true)}</div>
-              <p className="hidden sm:block shrink-0 px-4 pb-2 text-center text-[11px] text-ink-3">
-                Hover a dot for the title · click to open · hover a project to see where it lives
+              <p className="shrink-0 px-4 pb-2 flex items-center justify-center gap-3 text-center text-[11px] text-ink-3">
+                <span className="hidden sm:inline">Hover a dot for the title · click to open · hover a project to see where it lives</span>
+                <FullMapLink projectId={hoverProject} />
               </p>
             </div>
           )}
@@ -102,14 +110,17 @@ export default function Dashboard({ variant, title, onFilter }: Props) {
         )}
         {showMap && (
           <section aria-label="Topic map" className="bg-raised border border-line rounded-xl overflow-hidden">
+            <div className="flex items-center hover:bg-gray-50">
             <button type="button" onClick={toggle} aria-expanded={!collapsed}
-              className="w-full flex items-center gap-2 px-3.5 h-9 text-left hover:bg-gray-50">
+              className="flex-1 min-w-0 flex items-center gap-2 pl-3.5 pr-2 h-9 text-left">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-3">Topic map</span>
               <span className="text-xs text-ink-3 truncate">
                 {dash ? `${fmt(dash.total)} papers${dash.references ? ` · ${fmt(dash.references)} references` : ""}` : ""}
               </span>
               <svg className={`ml-auto w-3.5 h-3.5 text-ink-3 transition-transform ${collapsed ? "" : "rotate-180"}`} viewBox="0 0 20 20" fill="currentColor"><path d="M5.5 7.5 10 12l4.5-4.5-1-1L10 10 6.5 6.5z" /></svg>
             </button>
+            <FullMapLink projectId={hoverProject} className="px-3.5" />
+            </div>
             {!collapsed && <div className="relative h-[240px] sm:h-[280px] border-t border-line-s">{mapEl()}</div>}
           </section>
         )}

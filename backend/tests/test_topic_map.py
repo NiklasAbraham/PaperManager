@@ -414,3 +414,65 @@ def test_pool_failure_falls_back_to_thread(monkeypatch):
     monkeypatch.setattr(tm, "_use_pool", True)
     fut = tm._submit(lambda a: a + 1, 1)
     assert fut.result(timeout=5) == 2 and tm._use_pool is False
+
+
+# ---- clusters=N parameter
+
+def test_derive_respects_k_and_clamps():
+    layout, attrs = _fake()
+    assert tm.derive(layout, attrs, 5)["k"] == 5
+    assert tm.derive(layout, attrs, 99)["k"] <= tm.MAX_CLUSTERS
+    assert tm.clamp_clusters(0) == tm.MIN_CLUSTERS and tm.clamp_clusters(40) == tm.MAX_CLUSTERS
+
+
+def test_payload_colours_beyond_eight_clusters_are_distinct():
+    layout, attrs = _fake()
+    d = tm.derive(layout, attrs, 12)
+    out = tm.build_payload(layout, attrs, d, set(), True)
+    cols = [c["color"] for c in out["clusters"] if not c["muted"]]
+    assert len(set(cols)) == len(cols)
+
+
+def test_clusters_param_runs_in_background_and_caches(world, monkeypatch):
+    (world.mdir / "layout.json").write_text(_json.dumps(world.layout))
+    tm.get_topic_map(world.driver); world.finish()
+    default = tm.get_topic_map(world.driver)
+    k = default["clusters"].__len__() + 2
+    calls = []
+    real = tm.derive
+    monkeypatch.setattr(tm, "derive", lambda *a: calls.append(a) or real(*a))
+    first = tm.get_topic_map(world.driver, clusters=k)
+    assert first["state"] == "building" and not calls and len(world.jobs) == 1
+    assert tm.get_topic_map(world.driver, clusters=k)["state"] == "building" and len(world.jobs) == 1  # one job per N
+    world.finish()
+    out = tm.get_topic_map(world.driver, clusters=k)
+    assert out["state"] == "ready" and len(out["clusters"]) == k and not out["stale"]
+    assert not world.jobs and len(calls) == 1
+    tm.get_topic_map(world.driver, clusters=k)
+    assert not world.jobs and len(calls) == 1                     # cached per N
+    # the default view is untouched, and asking for the default k does not start a job
+    assert len(tm.get_topic_map(world.driver)["clusters"]) == len(default["clusters"])
+    assert tm.get_topic_map(world.driver, clusters=len(default["clusters"]))["state"] == "ready" and not world.jobs
+
+
+def test_clusters_param_keeps_label_privacy(world, monkeypatch):
+    (world.mdir / "layout.json").write_text(_json.dumps(world.layout))
+    tm.get_topic_map(world.driver); world.finish()
+    monkeypatch.setattr(tm, "hidden_paper_ids", lambda d: (set(), set()))     # non-admin: sees no projects
+    tm.get_topic_map(world.driver, clusters=6); world.finish()
+    out = tm.get_topic_map(world.driver, clusters=6)
+    assert out["state"] == "ready" and out["projects"] == []
+    derived = tm._cache["variants"][6]["derived"]
+    assert out["clusters"][0]["label"] == derived["labels_public"][0]
+
+
+def test_points_carry_year_and_reading_status():
+    layout, attrs = _fake()
+    attrs["papers"][0].update(year=2019, status="read")
+    attrs["papers"][1].update(year=None, created="2024-05-01T10:00:00+00:00", status=None)
+    d = tm.derive(layout, attrs)
+    out = tm.build_payload(layout, attrs, d, set(), True)
+    by = {p["id"]: p for p in out["points"]}
+    a, b = attrs["papers"][0]["id"], attrs["papers"][1]["id"]
+    assert by[a]["yr"] == 2019 and by[a]["s"] == "read"
+    assert by[b]["yr"] == 2024 and by[b]["s"] == "unread"

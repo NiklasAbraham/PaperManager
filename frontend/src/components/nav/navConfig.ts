@@ -37,6 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Explore menu
   { group: "explore", label: "Graph", to: "/graph", description: "Papers, people and topics as a network; Cypher queries" },
+  { group: "explore", label: "Topic map", to: "/topic-map", description: "Your library as a map of topics; projects as bubbles" },
   { group: "explore", label: "Find papers", to: "/literature", description: "Search arXiv, Semantic Scholar, PubMed, bioRxiv; keyword feed" },
   { group: "explore", label: "Conferences", to: "/conferences", description: "Browse conference proceedings" },
   { group: "explore", label: "Blogs", to: "/blogs", description: "Followed blogs and their posts" },

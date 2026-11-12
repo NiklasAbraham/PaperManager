@@ -39,6 +39,7 @@ const Reports       = lazy(() => import("./pages/Reports"));
 const ReportView    = lazy(() => import("./pages/ReportView"));
 const Suggestions   = lazy(() => import("./pages/Suggestions"));
 const Health        = lazy(() => import("./pages/Health"));
+const TopicMapPage  = lazy(() => import("./pages/TopicMapPage"));
 
 function AppLayout() {
   const { pathname } = useLocation();
@@ -84,6 +85,7 @@ function AppLayout() {
                 <Route path="/conferences" element={<Conferences />} />
                 <Route path="/conferences/:key" element={<Conferences />} />
                 <Route path="/graph"   element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading graph…</div>}><Graph /></Suspense>} />
+                <Route path="/topic-map" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading map…</div>}><TopicMapPage /></Suspense>} />
                 <Route path="/cypher" element={<Cypher />} />
                 <Route path="/knowledge" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><KnowledgeChat /></Suspense>} />
                 <Route path="/chat" element={<ChatRedirect />} />

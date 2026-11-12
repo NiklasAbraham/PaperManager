@@ -19,6 +19,10 @@ export interface DashboardData {
 
 export interface MapPoint {
   id: string; x: number; y: number; c: number; t: string; r: number; p: number[]; topic: string | null;
+  /** Publication year (else the year it was added); missing from older backends. */
+  yr?: number | null;
+  /** Reading status; missing from older backends (= unread). */
+  s?: "unread" | "reading" | "read";
 }
 export interface MapCluster {
   id: number; label: string; color: string; x: number; y: number; size: number; library: number;
@@ -43,9 +47,11 @@ export async function fetchDashboard(): Promise<DashboardData | null> {
   }
 }
 
-export async function fetchTopicMap(refs: boolean): Promise<TopicMapData | null> {
+/** `clusters`: ask for N clusters (the backend re-clusters in the background and answers `building` first). */
+export async function fetchTopicMap(refs: boolean, clusters?: number | null): Promise<TopicMapData | null> {
   try {
-    const d = await apiFetch<Partial<TopicMapData>>(`/stats/topic-map?refs=${refs ? 1 : 0}`);
+    const q = `refs=${refs ? 1 : 0}${clusters ? `&clusters=${clusters}` : ""}`;
+    const d = await apiFetch<Partial<TopicMapData>>(`/stats/topic-map?${q}`);
     if (!d || (d.state !== "ready" && d.state !== "building" && d.state !== "empty")) return null;
     return { state: d.state, computed_at: d.computed_at, seconds: d.seconds, n: d.n, stale: d.stale,
       points: d.points ?? [], clusters: d.clusters ?? [], projects: d.projects ?? [] };

@@ -33,6 +33,9 @@ log = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- constants
 
 CLUSTER_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+# slots beyond the first 8 (only used when a user asks for more than 8 clusters)
+CLUSTER_COLORS_EXTRA = ["#7a5230", "#14a3b8", "#a64ca6", "#7d8c1f", "#c2185b", "#3f51b5", "#8d6e63", "#455a64"]
+MIN_CLUSTERS, MAX_CLUSTERS = 2, 16
 PROJECT_OFFSET = 3
 SYSTEM_TAG = "from-references"
 ATTR_TTL = 120.0
@@ -540,7 +543,11 @@ def _jitter(pid: str, scale: float = 0.01) -> tuple[float, float]:
     return ((h[0] / 255 - 0.5) * 2 * scale, (h[1] / 255 - 0.5) * 2 * scale)
 
 
-def derive(layout: dict, attrs: dict) -> dict:
+def clamp_clusters(k: int) -> int:
+    return max(MIN_CLUSTERS, min(MAX_CLUSTERS, int(k)))
+
+
+def derive(layout: dict, attrs: dict, k: int | None = None) -> dict:
     """Join layout and attributes: places papers missing from the embedding file, clusters, labels.
 
     Returns arrays aligned by point: ids, xy (n,2), assign, plus clusters and project meta.
@@ -575,7 +582,7 @@ def derive(layout: dict, attrs: dict) -> dict:
     all_ids = ids + miss_ids
     all_xy = np.vstack([xy, np.array(miss_xy, dtype=np.float64).reshape(-1, 2)]) if miss_ids else xy
     by_id = {**placed, **{p["id"]: p for p in missing}}
-    k = cluster_count(n_emb)
+    k = cluster_count(n_emb) if k is None else clamp_clusters(k)
     assign = cluster(xy, k) if n_emb else np.zeros(0, dtype=np.int32)
     kk = int(assign.max()) + 1 if n_emb else 0
     if miss_ids:
@@ -593,6 +600,23 @@ def derive(layout: dict, attrs: dict) -> dict:
             "candidates": admin["candidates"], "k": kk, "rec": rec}
 
 
+def _year_of(rec: dict) -> int | None:
+    """Publication year, else the year the paper was added; None when neither is known."""
+    try:
+        y = int(rec.get("year"))
+        if 1500 < y < 2200:
+            return y
+    except (TypeError, ValueError):
+        pass
+    d = parse_ts(rec.get("created"))
+    return d.year if d else None
+
+
+def _status_of(rec: dict) -> str:
+    st = rec.get("status")
+    return st if st in ("reading", "read") else "unread"
+
+
 def build_payload(layout: dict, attrs: dict, derived: dict, hidden: set[str], refs: bool,
                   stale: bool = False) -> dict:
     """The /stats/topic-map payload, filtered to what the user may see."""
@@ -605,6 +629,7 @@ def build_payload(layout: dict, attrs: dict, derived: dict, hidden: set[str], re
     public_view = vis_set is not None
     labels = derived.get("labels_public", derived["labels"]) if public_view else derived["labels"]
     muted = derived.get("muted_public", derived["muted"]) if public_view else derived["muted"]
+    live = {p["id"]: p for p in attrs["papers"]}          # year / reading status are read live, not from the derived snapshot
     shown = []
     for pid, (x, y), c, r in zip(derived["ids"], derived["xy"], derived["assign"], derived["rec"]):
         if pid in hidden:
@@ -627,7 +652,8 @@ def build_payload(layout: dict, attrs: dict, derived: dict, hidden: set[str], re
         topics = r.get("topics") or []
         points.append({"id": pid, "x": round(float(x), 4), "y": round(float(y), 4), "c": c,
                        "t": (r.get("title") or "")[:140], "r": is_ref, "p": ps,
-                       "topic": topics[0] if topics else None})
+                       "topic": topics[0] if topics else None,
+                       "yr": _year_of(live.get(pid) or r), "s": _status_of(live.get(pid) or r)})
         per_cluster[c] += 1
         per_lib[c] += 0 if is_ref else 1
         members.setdefault(c, []).append((float(x), float(y)))
@@ -639,7 +665,7 @@ def build_payload(layout: dict, attrs: dict, derived: dict, hidden: set[str], re
         if is_muted:
             color = MUTED_COLOR
         else:
-            color = CLUSTER_COLORS[slot % len(CLUSTER_COLORS)]
+            color = (CLUSTER_COLORS + CLUSTER_COLORS_EXTRA)[slot % (len(CLUSTER_COLORS) + len(CLUSTER_COLORS_EXTRA))]
             slot += 1
         clusters.append({"id": j, "label": labels[j], "color": color, "muted": is_muted,
                          "x": round(float(np.median(mem[:, 0])), 4), "y": round(float(np.median(mem[:, 1])), 4),
@@ -662,13 +688,13 @@ _lock = threading.RLock()         # guards the cache dict below
 _attr_lock = threading.Lock()     # one attribute refresh at a time
 _cache: dict = {"layout": None, "attrs": None, "attrs_ts": 0.0, "attrs_hash": None,
                 "derived": None, "derived_key": None, "derived_loaded": False,
-                "job": None, "job_fail_ts": 0.0, "error": None, "meta_mtime": None, "meta": None}
+                "variants": {}, "kjobs": {}, "job": None, "job_fail_ts": 0.0, "error": None, "meta_mtime": None, "meta": None}
 _executor: ProcessPoolExecutor | None = None
 _use_pool = True
 
 ATTR_QUERY = """
 MATCH (p:Paper)
-RETURN p.id AS id, p.title AS title,
+RETURN p.id AS id, p.title AS title, p.year AS year, p.reading_status AS status, p.created_at AS created,
        [(p)-[:TAGGED]->(g:Tag) | g.name] AS tags,
        [(p)-[:ABOUT]->(t:Topic) | t.name] AS topics,
        [(p)-[:IN_PROJECT]->(x:Project) | x.id] AS projects
@@ -890,6 +916,18 @@ def _job(mdir: str, edir: str, layout: dict | None, build: bool, attrs: dict, at
             "layout_key": layout["computed_at"], "built": build, "seconds": round(time.perf_counter() - t0, 1)}
 
 
+def _job_k(layout: dict, attrs: dict, k: int, attrs_h: str) -> dict:
+    """Child-process job: re-run k-means on the cached layout with `k` clusters and re-derive labels."""
+    try:
+        os.nice(10)
+    except (OSError, AttributeError):
+        pass
+    t0 = time.perf_counter()
+    derived = derive(layout, attrs, k)
+    return {"k": k, "derived": derived, "attrs_hash": attrs_h, "layout_key": layout["computed_at"],
+            "seconds": round(time.perf_counter() - t0, 1)}
+
+
 def _submit(fn, *args) -> Future:
     """One-worker spawn process pool, created lazily; an in-process thread when no pool can start."""
     global _executor, _use_pool
@@ -929,6 +967,43 @@ def _on_job_done(fut: Future) -> None:
         _cache["derived"] = res["derived"]
         _cache["derived_key"] = (res["layout_key"], res["attrs_hash"])
         _cache["error"], _cache["job"] = None, None
+
+
+def _on_kjob_done(k: int, fut: Future) -> None:
+    global _executor
+    try:
+        res = fut.result()
+    except BaseException as e:  # noqa: BLE001
+        log.error("topic map clusters=%s job failed: %r", k, e)
+        if e.__class__.__name__ == "BrokenProcessPool":
+            _executor = None
+        with _lock:
+            _cache["kjobs"].pop(k, None)
+            _cache.setdefault("kfail", {})[k] = time.time()
+        return
+    with _lock:
+        _cache.setdefault("variants", {})[k] = {"key": (res["layout_key"], res["attrs_hash"]), "derived": res["derived"]}
+        _cache["kjobs"].pop(k, None)
+
+
+def _variant(layout: dict | None, attrs: dict, k: int) -> tuple[dict | None, bool]:
+    """Cached derive for k clusters: (derived or None, current). Starts the background job when out of date; never blocks."""
+    with _lock:
+        v = _cache.setdefault("variants", {}).get(k)
+        key = (layout and layout.get("computed_at"), _cache["attrs_hash"])
+        if v is not None and v["key"] == key:
+            return v["derived"], True
+        if layout is not None and k not in _cache.setdefault("kjobs", {}) \
+                and time.time() - _cache.get("kfail", {}).get(k, 0.0) >= FAIL_BACKOFF:
+            try:
+                fut = _submit(_job_k, layout, attrs, k, _cache["attrs_hash"])
+            except Exception:  # noqa: BLE001
+                log.exception("topic map: could not start clusters job")
+                _cache.setdefault("kfail", {})[k] = time.time()
+            else:
+                _cache.setdefault("kjobs", {})[k] = fut
+                fut.add_done_callback(lambda f, k=k: _on_kjob_done(k, f))
+        return (v["derived"] if v else None), False
 
 
 def _needs_layout(layout: dict | None, meta: dict | None) -> bool:
@@ -983,7 +1058,7 @@ def _schedule(layout: dict | None, attrs: dict, need_layout: bool, edir: Path) -
     return current
 
 
-def get_topic_map(driver, refs: bool = True) -> dict:
+def get_topic_map(driver, refs: bool = True, clusters: int | None = None) -> dict:
     """Cached, visibility-filtered topic map. The request path does no layout or labelling work:
     those run in a background job and the last derived result is served meanwhile."""
     edir = emb_dir()
@@ -1006,6 +1081,13 @@ def get_topic_map(driver, refs: bool = True) -> dict:
         job = _cache["job"]
     if derived is None:
         return empty_payload("building")
+    if clusters is not None and clamp_clusters(clusters) != derived["k"]:
+        k = clamp_clusters(clusters)
+        vd, v_current = _variant(layout, attrs, k)
+        if vd is None:
+            return empty_payload("building")
+        derived, current = vd, current and v_current
+        job = job or (None if v_current else True)
     hidden, vis = hidden_paper_ids(driver)
     view = attrs if vis is None else {**attrs, "visible_project_ids": vis}
     stale = (not current) or _is_stale(layout, meta) or job is not None

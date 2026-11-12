@@ -88,6 +88,24 @@ its papers on the map. `TopicMap` is a canvas: library papers big, references sm
 and labels (collision-avoiding), hover = title, click = open paper, Ctrl/Cmd+wheel or pinch zoom (max 8x), drag pan,
 "Reset zoom".
 
+## Full page `/topic-map` (Explore → Topic map)
+
+`frontend/src/pages/TopicMapPage.tsx` reuses `TopicMap.tsx` (extra props: `colorMode`, `checkedProjects`, `dotSize`, `dotOpacity`,
+`showLabels`, `labelSize`, `refsVisible`, `highlightIds`, `yearRange`, `zoomButtons`, `apiRef`). Settings live in the URL
+(`mapSettings.ts`: `color refs size op labels ls k proj y0 y1 q`, only non-defaults written; parse clamps garbage).
+Colour modes: cluster, project, year (sequential), reading status, none. Points carry `yr` (publication year, else year added)
+and `s` (reading status), read live from the attrs in `build_payload`, not from the derived snapshot.
+`useTopicMapData(clusters)` fetches refs=0 then refs=1 and polls while `building`.
+
+`GET /stats/topic-map?clusters=N` (clamped 2..16; UI offers 4..16): when N differs from the default k, `_variant` serves the
+cached `derive(layout, attrs, N)` for the current (layout, attrs) key, else starts `_job_k` in the same child process pool and
+returns `state: "building"` (or the previous variant, `stale`). One cache entry per N; label privacy is the same
+(`labels_public` for non-admins). Beyond 8 clusters colours continue with `CLUSTER_COLORS_EXTRA`.
+
+PNG export (`mapExport.ts`): `TopicMap`'s `apiRef.paintView` paints the view (no hover) into an offscreen canvas at 2x/4x on
+white with title "PaperManager · Topic map · date" and the legend; `topic-map-YYYY-MM-DD.png`; "Copy image" uses ClipboardItem.
+The Library card links to `/topic-map` (with `?proj=` when a project is hovered).
+
 ## Tests
 
 `backend/tests/test_topic_map.py` (layout, clustering, labels, junk, seeding, payload visibility; pure, no DB),
