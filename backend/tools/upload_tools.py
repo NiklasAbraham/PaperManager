@@ -32,22 +32,16 @@ def entry_for(source: str) -> dict:
 def register(mcp: FastMCP):
     @mcp.tool()
     def upload_pdf(source: str, project: str = "") -> dict:
-        """Add a paper WITH its PDF through the full upload pipeline (same as a
-        drag-and-drop upload: full text, Drive, AI summary, topics, claims,
-        references, figures). Takes a few minutes per paper.
+        """Add a paper WITH its PDF through the full upload pipeline (as a drag-and-drop
+        upload: full text, Drive, AI summary, topics, claims, references, figures). Takes a
+        few minutes per paper.
 
-        source is one of:
-          - an absolute local PDF path under the host import root
-            (HOST_IMPORT_ROOT, e.g. /srv/papers/...),
-          - a direct PDF URL,
-          - an arXiv id ("2210.02747" or "arXiv:2210.02747"),
-          - a DOI ("10.1038/..." or a doi.org URL); bioRxiv DOIs are fetched from
-            bioRxiv, others via Unpaywall, falling back to metadata-only.
-        project is an optional project name or id to link the paper to.
-
-        If the paper is already in the library with full text it is only linked.
-        Returns status (uploaded | already-in-library | already-complete |
-        metadata-only | no-pdf | error), the paper id and title."""
+        `source`: an absolute PDF path under the host import root (HOST_IMPORT_ROOT), a direct
+        PDF URL, an arXiv id ("2210.02747", "arXiv:2210.02747") or a DOI ("10.1038/...", a
+        doi.org URL; bioRxiv DOIs fetched from bioRxiv, others via Unpaywall, falling back to
+        metadata-only). `project`: optional name or id to link the paper to. A paper already
+        in the library with full text is only linked. Returns status (uploaded |
+        already-in-library | already-complete | metadata-only | no-pdf | error), paper id, title."""
         entry = entry_for(source)
         path = entry.get("pdf_path")
         if path and not os.path.isfile(path):

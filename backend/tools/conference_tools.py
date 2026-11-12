@@ -90,16 +90,14 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def conference_topic(conference: str, query: str, k: int = 100, papers: int = 15) -> dict:
-        """Who publishes on a topic at one conference, or at all of them. `conference` is a
-        key or name ("neurips2026", "ICML 2025", "iclr" = latest) or "all". `query` is a
-        topic or a pasted abstract. One conference: the k papers closest to the query
-        (bge-small embeddings of title + abstract), counted per institution: top
-        universities and companies, research-area mix, closest papers. "all": the k
-        closest papers pooled over every loaded conference (title-only embeddings, so
-        conferences with and without abstracts compare fairly; k defaults to 300 there),
-        with how many fall in each conference per 1,000 of its papers, the per-year trend
-        of series loaded for several years, and institutions pooled over all of them.
-        Papers already in the library carry library_paper_id."""
+        """Who publishes on a topic at one conference, or at all of them. `conference`: a
+        key or name ("neurips2026", "ICML 2025", "iclr" = latest) or "all"; `query`: a topic
+        or a pasted abstract. One conference: the k papers closest to the query (title +
+        abstract embeddings) counted per institution (universities, companies), research-area
+        mix, closest papers. "all": the k (default 300) closest pooled over every loaded
+        conference (title-only embeddings), per conference per 1,000 of its papers, the
+        per-year trend of series loaded for several years, institutions pooled. Papers
+        already in the library carry library_paper_id."""
         if conference.strip().lower() in ("all", "*", "any", "every"):
             return _topic_all(query, k, papers)
         ds, err = _ready(conference)
@@ -150,12 +148,11 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool()
     def conference_search_papers(query: str, limit: int = 20, series: str = "", year_min: int = 0,
                                  year_max: int = 0) -> dict:
-        """Find papers across every loaded conference by title or meaning. `query` is a
-        title, part of one or a few words (typos tolerated). Returns title matches first
-        (match kind: exact, prefix, phrase, words, most words), then the papers closest in
-        meaning that did not match by words; each with conference, decision, area,
-        institutions, url, match (cosine to the query) and library_paper_id. `series`
-        restricts to a comma list ("neurips,icml"), year_min / year_max to years."""
+        """Find papers across every loaded conference by title or meaning (`query`: a
+        title, part of one or a few words; typos tolerated). Title matches first (exact,
+        prefix, phrase, words, most words), then the closest in meaning; each with
+        conference, decision, area, institutions, url, match (cosine) and library_paper_id.
+        `series`: comma list ("neurips,icml"); year_min / year_max."""
         from services.conferences import search
 
         res = search.search_papers(query, limit=max(1, min(int(limit), 50)), series=series,
@@ -175,12 +172,12 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def conference_search_author(name: str, limit: int = 10, papers: int = 30) -> dict:
-        """Find an author across every loaded conference by name: full name, surname,
-        "Surname, First", initials ("c deane") or a prefix; one typo is tolerated. Names
-        are grouped by spelling (accents and case folded), so one name can be two people:
-        each author lists the institutions given on their papers and, when the papers fall
-        into groups sharing no institution and no co-author, `possible_identities`. Papers
-        come per conference with the author's institutions on that paper."""
+        """Find an author across every loaded conference: full name, surname, "Surname,
+        First", initials ("c deane") or a prefix; one typo tolerated. Names are grouped by
+        spelling (accents, case folded), so one name can be two people: each author lists
+        the institutions on their papers and, when the papers split into groups sharing no
+        institution and no co-author, `possible_identities`. Papers per conference, with the
+        author's institutions on each."""
         from services.conferences import search
 
         res = search.search_authors(name, limit=max(1, min(int(limit), 30)), library=_library())

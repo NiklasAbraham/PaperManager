@@ -21,11 +21,13 @@ from db.connection import get_driver
 from db.queries.visibility import paper_visibility_clause
 from services.library_lookup import lookup as _lookup
 from services.library_search.engine import Filters, search as _search
+from tools._compact import json_tool
 
 # Claude Code moves MCP results above ~50 KB out of context into a file, which the
 # model then has to open with another tool; every result here stays well below that.
 _READ_MAX = 30000
 _NOTE_MAX = 6000
+_HIGHLIGHT_MAX = 800  # list_highlights only; get_paper_context returns them whole
 _SAVED_ANSWER = re.compile(r"\n-{3,}\n\*\*Claude \(([^)]*)\):\*\*")
 
 
@@ -84,66 +86,57 @@ def library_lookup(dois: list[str] | None = None, titles: list[str] | None = Non
 def register(mcp: FastMCP):
     @mcp.tool(name="library_lookup", structured_output=False)
     def _library_lookup(dois: list[str] = [], titles: list[str] = [], project: str = "") -> str:  # noqa: B006
-        """Cheap batch check of which papers are ALREADY in the library. Call it before
-        add_paper_metadata / upload_pdf for a list of cited papers, so nothing is added twice;
-        far cheaper than search_papers or library_search (no summaries, abstracts or snippets).
+        """Batch check which papers are ALREADY in the library: call it before
+        add_paper_metadata / upload_pdf for a list of cited papers; far cheaper than
+        search_papers or library_search.
 
-        Up to 200 items per call. Pass `dois`, `titles`, or both paired by index (item i is
-        dois[i] with titles[i]; use "" for a missing one): the DOI is tried first, then the
-        title. DOIs are normalised (case, https://doi.org/, doi: prefixes, trailing dot) and
-        arXiv forms are one id (10.48550/arXiv.2210.02747 = arXiv:2210.02747 = 2210.02747v2).
-        Titles are compared lowercased with markup and everything but a-z0-9 removed: exact
-        first, else the first 45 such characters. A paper stored under its bioRxiv DOI is
-        missed by the journal DOI, so give titles too when you have them.
+        Up to 200 items: `dois`, `titles`, or both paired by index (dois[i] with titles[i],
+        "" for a missing one). The DOI is tried first (normalised; arXiv forms are one id:
+        10.48550/arXiv.2210.02747 = arXiv:2210.02747 = 2210.02747v2), then the title
+        (lowercased, a-z0-9 only: exact, else the first 45 characters). A paper stored under
+        its bioRxiv DOI is missed by the journal DOI, so give titles too.
 
-        Returns compact JSON: `found`, `missing`, and per item `{query, kind, match}` where
-        kind is doi | title_exact | title_prefix | null and match is null or
-        `{id, title, doi, year, projects, reference_stub, has_text, url}` (a list plus
-        `duplicates: n` when several papers match). `reference_stub` = citation stub from a
-        reference list (no PDF or notes); it counts as present but may deserve upload_pdf.
-        `project` (name or id) adds `in_project` per match; add_to_project links a found
-        paper that is not in it yet."""
+        Returns compact JSON: `found`, `missing`, per item {query, kind
+        (doi|title_exact|title_prefix|null), match: null or {id, title, doi, year, projects,
+        reference_stub, has_text, url}} (a list plus `duplicates: n` when several match).
+        reference_stub = citation stub without PDF or notes: present, may deserve upload_pdf.
+        `project` (name or id) adds `in_project`; add_to_project links a paper not yet in it."""
         return json.dumps(library_lookup(dois, titles, project), ensure_ascii=False, separators=(",", ":"))
 
     @mcp.tool(name="library_add", structured_output=False)
     def _library_add(papers: list[dict] = [], path: str = "", project: str = "",  # noqa: B006
                      dry_run: bool = False) -> str:
-        """Add a whole reference list to the library and to one project in ONE call, instead
+        """Add a whole reference list to the library and one project in ONE call, instead
         of library_lookup + add_paper_metadata + add_to_project per paper.
 
-        Give `path`, the absolute path of a report's papers.json (a list of entries, or
-        {"papers": [...]}), or `papers`, the entries inline (up to 200). An entry needs
-        `title`; it may carry `doi`, `arxiv` (an id; becomes DOI 10.48550/arXiv.<id>),
-        `paperId`, `year`, `venue`, `abstract`, `document_type`, `published_date`, and
-        `authors` as a list of full names (a plain string is ignored).
+        `path`: absolute path of a report's papers.json (a list, or {"papers": [...]}), or
+        `papers` inline (up to 200). An entry needs `title`; optional `doi`, `arxiv` (an id;
+        becomes DOI 10.48550/arXiv.<id>), `paperId`, `year`, `venue`, `abstract`,
+        `document_type`, `published_date`, `authors` (list of full names; a string is ignored).
 
-        Per entry: a `paperId` that exists counts as present; otherwise the DOI, then the
-        title, is looked up as in library_lookup; a paper still missing is created as
-        metadata only (no PDF; upload_pdf adds one later). Entries naming the same paper
-        twice are created once (`same_as`). With `project` (name or id; it must exist,
-        create_project first) every paper is linked to it; existing links are kept.
+        A `paperId` that exists counts as present; otherwise the DOI, then the title, as in
+        library_lookup; a paper still missing is created metadata-only (upload_pdf adds a PDF
+        later). The same paper twice in the batch is created once (`same_as`). `project` (name
+        or id) must exist (create_project first); every paper is linked, existing links kept.
         With `path` the file is rewritten with each entry's paperId, url and status
-        ("present" or "added"). `dry_run` reports the same counts and writes nothing.
+        (present|added). `dry_run` reports the same counts and writes nothing.
 
         Returns compact JSON: counts (present, added, same_in_batch, linked) and per entry
-        {i, title, status, id, kind, url}; kind is how a present paper was found (id, doi,
-        title_exact, title_prefix), `duplicates` lists ids when several library papers match."""
+        {i, title, status, id, kind (id|doi|title_exact|title_prefix), url}; `duplicates`
+        lists ids when several library papers match."""
         from services.library_add import add as _add
         res = _add(get_driver(), papers, project, path, dry_run, url_base=settings.frontend_url)
         return json.dumps(res, ensure_ascii=False, separators=(",", ":"))
 
-    @mcp.tool()
+    @json_tool(mcp)
     def library_search(query: str, project: str = "", limit: int = 12) -> dict:
-        """Search the whole library for a topic and report WHERE each paper matched.
-
-        Looks in titles, authors, topics, tags, venue, abstracts/summaries, the user's own
-        notes, the user's PDF highlights and their comments, extracted claims and the
-        extracted full text (the same ranked search as the app's library page), blended
-        with embedding similarity of title + abstract. Quote a phrase to require it.
-        `project` restricts to one project (name, e.g. "MasterThesis", or id).
-        Each hit lists `matched_in` and short `evidence` snippets (matched words in
-        «»), plus whether the paper has full text (`text_chars`), a note, and how many
-        highlights — use get_paper_context and read_paper_text / find_in_paper to go deeper."""
+        """Search the whole library for a topic and report WHERE each paper matched:
+        title, authors, topics, tags, venue, abstract/summary, the user's notes, PDF
+        highlights and their comments, extracted claims, full text (the app's ranked search,
+        blended with title+abstract embeddings). Quote a phrase to require it. `project`:
+        name (e.g. "MasterThesis") or id. Each hit has `matched_in`, `evidence` snippets
+        (matched words in «»), `text_chars`, `has_note`, `highlights`; go deeper with
+        get_paper_context and find_in_paper / read_paper_text."""
         q = query.strip()
         if not q:
             return {"query": query, "hits": [], "error": "empty query"}
@@ -171,7 +164,7 @@ def register(mcp: FastMCP):
         return {"query": query, "project": project or None, "total": res["total"],
                 "mode": res["mode"], "hits": hits}
 
-    @mcp.tool()
+    @json_tool(mcp)
     def get_paper_context(paper_id: str) -> dict:
         """Everything the library holds about one paper except its full text:
         metadata, authors, tags, topics, projects, the user's markdown note, every PDF
@@ -216,7 +209,7 @@ def register(mcp: FastMCP):
             "url": _url(paper_id),
         }
 
-    @mcp.tool()
+    @json_tool(mcp)
     def read_paper_text(paper_id: str, offset: int = 0, length: int = 15000) -> dict:
         """Read the paper's extracted full text, `length` characters from `offset`
         (max 30000 per call). Page through with `next_offset` until it is null.
@@ -237,7 +230,7 @@ def register(mcp: FastMCP):
             **({"note": "No extracted text for this paper."} if not total else {}),
         }
 
-    @mcp.tool()
+    @json_tool(mcp)
     def find_in_paper(paper_id: str, query: str, context: int = 500, max_hits: int = 8) -> dict:
         """Find passages in one paper's full text. Tries the exact phrase first, then
         each word of 4+ letters. Returns snippets with character offsets that can be
@@ -274,11 +267,12 @@ def register(mcp: FastMCP):
         return {"paper_id": paper_id, "title": r["title"], "url": _url(paper_id), "query": query,
                 "mode": mode, "total_chars": len(text), "hits": hits}
 
-    @mcp.tool()
-    def list_highlights(project: str = "", paper_id: str = "", query: str = "", limit: int = 100) -> dict:
+    @json_tool(mcp)
+    def list_highlights(project: str = "", paper_id: str = "", query: str = "", limit: int = 40) -> dict:
         """The user's PDF highlights (quoted text, page, colour, their comment), newest
         first, optionally restricted to a project (name or id), one paper, or those whose
-        text or comment contains `query`."""
+        text or comment contains `query`. Texts over 800 characters are cut (`truncated`);
+        get_paper_context has them in full."""
         vis, vis_params = paper_visibility_clause("p")
         with get_driver().session() as s:
             rows = s.run(
@@ -292,9 +286,12 @@ def register(mcp: FastMCP):
                 project=project.strip(), pid=paper_id.strip(), raw=query.strip().lower(),
                 k=max(1, min(int(limit), 500)), **vis_params)
             out = [{"paper_id": r["id"], "title": r["title"], "url": _url(r["id"]), **_highlight(dict(r["a"]))} for r in rows]
+        for h in out:
+            if len(h["text"]) > _HIGHLIGHT_MAX:
+                h["text"], h["truncated"] = h["text"][:_HIGHLIGHT_MAX] + "…", True
         return {"count": len(out), "highlights": out}
 
-    @mcp.tool()
+    @json_tool(mcp)
     def list_notes(project: str = "", query: str = "", limit: int = 50) -> dict:
         """The user's notes on papers, most recently edited first, optionally restricted
         to a project (name or id) or to notes containing `query`. Each note gives the

@@ -19,6 +19,13 @@ Configure in Claude Code by adding to ~/.claude/settings.json:
 
 Or use the project-level .mcp.json at the repo root.
 """
+import os
+
+# Query vectors for semantic search come from the backend, which has the model loaded,
+# instead of torch + the model in every MCP process (services/conferences/embedder.py;
+# falls back to a local load if the backend cannot answer).
+os.environ.setdefault("PM_EMBED_URL", f"http://127.0.0.1:{os.environ.get('BACKEND_PORT', '8000')}/conferences/embed")
+
 from mcp.server.fastmcp import FastMCP
 from config import settings
 from services.auth import set_request_user
@@ -38,6 +45,10 @@ library_tools.register(mcp)
 upload_tools.register(mcp)
 maintenance_tools.register(mcp)
 conference_tools.register(mcp)
+
+# Compact descriptions and schemas (every chat loads them), PAPERMANAGER_MCP_EXCLUDE.
+from tools._compact import tidy  # noqa: E402
+tidy(mcp)
 
 if __name__ == "__main__":
     mcp.run()

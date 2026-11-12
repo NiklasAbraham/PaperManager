@@ -33,7 +33,7 @@ The MCP server runs as a separate process from the FastAPI backend and communica
 
 | Tool | Description |
 |---|---|
-| `search_papers` | Search by keyword, tag, topic, project, person, year range, reading_status, or bookmark |
+| `search_papers` | Search by keyword, tag, topic, project, person, year range, reading_status, or bookmark; short rows, `limit` |
 | `get_paper_detail` | Full paper metadata including reading_status, rating, bookmarked, venue |
 | `get_paper_concepts` | Concepts detected on the paper's PDF pages, with any generated visualisation spec |
 | `get_random_paper` | Random paper (optionally filtered by reading_status) |
@@ -50,11 +50,11 @@ conversation. Results stay under ~31 KB: Claude Code moves larger MCP results in
 |---|---|
 | `library_lookup` | Batch existence check before adding cited papers: up to 200 `dois` and/or `titles` (paired by index) in two Cypher queries. Match by normalised DOI (arXiv forms one id, bioRxiv versions dropped), else normalised title (`[a-z0-9]` only, markup stripped) exactly, else on its first 45 characters; `kind` says which. Per item only id, title, DOI, year, projects, `reference_stub`, `has_text`, `url` (a list with `duplicates` when several papers match); `project` adds `in_project`. Compact JSON, about 350 bytes per found item. Logic in `services/library_lookup.py` |
 | `library_add` | Batch add of a reference list in one call: `path` (absolute path of a report's `papers.json`, a list or `{"papers": [...]}`) or `papers` inline, up to 200 entries with `title` and optionally `doi`, `arxiv`, `paperId`, `year`, `venue`, `abstract`, `document_type`, `published_date`, `authors` (list of full names). Confirms given `paperId`s, runs `library_lookup` on the rest, creates the missing papers (metadata only), dedupes within the batch (`same_as`), MERGEs every paper into `project` (must exist), and rewrites the file with `paperId`, `url`, `status` (`present` / `added`). `dry_run` writes nothing. Logic in `services/library_add.py` |
-| `library_search` | One query across metadata, notes, highlights and their comments, claims and extracted full text; each hit says where it matched, with snippets. `project` filters by project name or id |
+| `library_search` | One query across metadata, notes, highlights and their comments, claims and extracted full text; each hit says where it matched, with snippets. `project` filters by project name or id. Hybrid: query vector from the backend's `POST /conferences/embed` |
 | `get_paper_context` | Metadata, authors, tags, topics, projects, the note (own text split from saved chat answers), every highlight with page, colour and comment, claims, `text_chars` |
 | `read_paper_text` | Extracted full text, 30 000 characters per call from `offset`; page with `next_offset` |
 | `find_in_paper` | Passages in one paper's text for a phrase, else ranked by how many query words co-occur; returns offsets for `read_paper_text` |
-| `list_highlights` | Highlights, filterable by project, paper or text |
+| `list_highlights` | Highlights, filterable by project, paper or text; 40 by default, texts cut at 800 characters (`truncated`) |
 | `list_notes` | Notes, filterable by project or text; own text in full, saved answers only counted |
 
 A paper note is the user's own text followed by chat answers the frontend saved below it
@@ -120,10 +120,52 @@ conference not loaded returns an error naming its state rather than starting a d
 | `add_person` | Create a person node |
 | `list_projects` | List all projects |
 | `list_project_papers` | Papers in a project |
-| `add_to_project` | Add a paper to a project |
+| `add_to_project` | Add a paper to a project (id or name); says `linked` / `already`, errors when either is missing |
 | `create_project` | Create a new project |
 
 ---
+
+## What every chat pays (`tools/_compact.py`)
+
+Every Claude Code session starts its own `python mcp_server.py` (the desk: `docker exec -i
+papermanager-backend-1 python mcp_server.py`, `ENABLE_TOOL_SEARCH=false`), so startup time and the
+tool definitions are paid per session, and results are read on every turn.
+
+- **Startup.** `services.ai` (anthropic + openai SDKs, ~2 s), `pypdf`, torch and transformers are
+  imported inside the tools that need them; `import mcp_server` takes ~2 s instead of 3.9 s.
+  `tests/test_mcp_lean.py` fails if one of them is imported at startup again.
+- **Definitions.** `tidy(mcp)` runs after registration: `inspect.cleandoc` on every description
+  (Python 3.11 keeps docstring indentation) and pydantic's `title` dropped from every parameter
+  schema (arguments are validated by the pydantic model, not by the advertised schema; `anyOf`
+  with `null` is kept). The long docstrings are written tersely. 42 tools: 8,723 → 7,295 tokens
+  (22,980 → 17,890 characters); the test keeps them under 18,500 characters and checks that the
+  usage guidance (bioRxiv note, `dry_run`, `create_project`, `confirm`, ...) is still there.
+- **`PAPERMANAGER_MCP_EXCLUDE`** (comma list, opt-in, default empty) removes tools from the
+  listing for a client that never calls them.
+- **Results.** The read tools (`library_search`, `get_paper_context`, `read_paper_text`,
+  `find_in_paper`, `list_highlights`, `list_notes`, `search_papers`, `get_paper_detail`,
+  `list_projects`, `list_project_papers`) are registered with `json_tool`: one compact JSON text
+  block (FastMCP would send `indent=2` plus a structured copy). Same keys; `library_search`
+  ~24 % fewer tokens.
+- **`search_papers`** returns short rows (`id`, `title`, `year`, `venue`, `doi`, `document_type`,
+  `reading_status`, `authors[:5]`, `matched_in`, `reference_stub`, `url`; no summary or abstract)
+  and takes `limit` (default 20, max 100): a query result went from 131 KB / 37k tokens to 8 KB.
+- **`list_highlights`** defaults to 40 highlights and cuts texts over 800 characters
+  (`truncated: true`); `get_paper_context` keeps them whole.
+- **`add_to_project`** takes a project id or exact name (case-insensitive), MERGEs, and returns
+  `linked: "linked" | "already"`, or `status: "error"` when the paper or the project is not found
+  (or not visible to the user); before, a wrong id returned `status: "ok"` and linked nothing.
+- **Semantic search** (`library_search` hybrid mode, the conference tools) gets its query vectors
+  from the backend, which has bge-small loaded: `mcp_server.py` sets `PM_EMBED_URL`
+  (`http://127.0.0.1:8000/conferences/embed`), `semantic.ensure_loaded()` then only reads
+  `emb.npy`, and `embedder.embed_query` posts the query text (instruction prefix added by
+  `query_text()`) with a token for the default user. A 404 (backend not restarted since),
+  503 (model still loading), timeout (2 s) or a vector for another model makes it load the model
+  locally as before; that process then stays local. Measured on the production library: first
+  search of a session 8.0 s → 0.7 s, the MCP process stays at ~210 MB instead of +300 MB for
+  torch and the model. The model loads from the local cache first (`local_files_only`), online
+  only for the first download. (`.specs/012_search.md` still says the MCP loads the model; it
+  was being edited by another session when this landed.)
 
 ## Architecture Note
 

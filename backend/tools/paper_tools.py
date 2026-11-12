@@ -1,4 +1,5 @@
 from mcp.server.fastmcp import FastMCP
+from tools._compact import json_tool
 from db.connection import get_driver
 from db.queries.papers import create_paper, get_paper, update_paper, random_paper
 from db.queries.concepts import list_concepts
@@ -6,10 +7,25 @@ from db.queries.search import search_papers as _search
 from db.queries.people import list_people as _list_people
 from db.queries.tags import list_tags as _list_tags
 from db.queries.topics import list_topics as _list_topics
+from config import settings
+
+
+def _row(p: dict) -> dict:
+    """A search_papers hit without the long fields (summary, abstract, snippets' marks)."""
+    row = {k: p[k] for k in ("id", "title", "year", "venue", "doi", "document_type", "reading_status")
+           if p.get(k) not in (None, "")}
+    if p.get("authors"):
+        row["authors"] = p["authors"][:5] + (["…"] if len(p["authors"]) > 5 else [])
+    if p.get("matched_fields"):
+        row["matched_in"] = p["matched_fields"]
+    if p.get("is_reference"):
+        row["reference_stub"] = True
+    row["url"] = f"{settings.frontend_url.rstrip('/')}/paper/{p['id']}"
+    return row
 
 
 def register(mcp: FastMCP):
-    @mcp.tool()
+    @json_tool(mcp)
     def search_papers(
         query: str = "",
         tag: str = "",
@@ -20,10 +36,13 @@ def register(mcp: FastMCP):
         year_max: int | None = None,
         reading_status: str = "",
         bookmarked: bool | None = None,
+        limit: int = 20,
     ) -> list[dict]:
-        """Search papers by keyword, tag, topic, project, or person. All params optional.
-        reading_status can be 'unread', 'reading', or 'read'.
-        Returns a list of matching paper objects with id, title, year, summary, and metadata_source."""
+        """List papers by keyword and/or filters (tag, topic, project id, person id, years,
+        reading_status 'unread'|'reading'|'read', bookmarked); all optional, newest first
+        without a query. One short row per paper: id, title, year, venue, doi, authors, url
+        and, with a query, where it matched. For a topic search prefer library_search; for
+        abstract and summary call get_paper_detail."""
         result = _search(
             get_driver(),
             q=query or None,
@@ -35,10 +54,11 @@ def register(mcp: FastMCP):
             year_max=year_max,
             reading_status=reading_status or None,
             bookmarked=bookmarked,
+            limit=max(1, min(int(limit), 100)),
         )
-        return result["results"]
+        return [_row(p) for p in result["results"]]
 
-    @mcp.tool()
+    @json_tool(mcp)
     def get_paper_detail(paper_id: str) -> dict:
         """Get full details of a paper by its ID, including title, abstract, summary, doi, year, venue,
         reading_status, rating, bookmarked, color, and metadata_source."""

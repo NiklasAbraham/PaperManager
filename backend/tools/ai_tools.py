@@ -1,7 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 from db.connection import get_driver
 from db.queries.papers import get_paper
-from services.ai import chat_with_paper as _chat
 
 
 def register(mcp: FastMCP):
@@ -10,6 +9,10 @@ def register(mcp: FastMCP):
         """Ask Claude a question about a specific paper using its full extracted text as context.
         Returns Claude's answer as markdown text.
         The question can be anything about the paper's content, methods, contributions, or relevance."""
+        # Imported here: services.ai pulls in the anthropic and openai SDKs (~2 s), which
+        # every MCP process would otherwise pay at startup for a tool that is rarely called.
+        from services.ai import chat_with_paper as _chat
+
         paper = get_paper(get_driver(), paper_id)
         if not paper:
             return f"Error: Paper {paper_id} not found."

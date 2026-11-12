@@ -9,7 +9,6 @@ from db.queries.people import get_authors_for_paper, get_or_create_person, link_
 from services.duplicate_scan import CLASSES, SCAN_QUERY, scan, wrong_doi_suspects
 from services.paper_delete import deletion_preview, delete_paper_completely
 from services.paper_merge import merge_papers as _merge
-from services.pdf_parser import clean_authors
 
 _METADATA_FIELDS = ("title", "year", "venue", "doi", "abstract", "published_date", "document_type")
 
@@ -71,6 +70,7 @@ def update_paper_metadata(
 
     removed: list[str] = []
     if authors is not None:
+        from services.pdf_parser import clean_authors  # pypdf, only needed here
         names = clean_authors(authors)
         for person in get_authors_for_paper(driver, paper_id):
             if person["name"] not in names:
