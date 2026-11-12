@@ -204,4 +204,4 @@ database and loads the demo library.
 - [Ingest your first paper](ingestion.md) — drag a PDF or paste a URL
 - [Browse the library](library.md) — search, filter, sort your papers
 - [Chat with a paper](paper-detail.md#chat-with-paper) — ask Claude questions about any paper
-- [Explore the knowledge graph](knowledge-features.md#knowledge-graph) — visualise connections
+- [Explore the knowledge graph](graph.md) — visualise connections

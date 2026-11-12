@@ -20,7 +20,8 @@ frontend/
     ├── index.css
     │
     ├── api/
-    │   └── client.ts        # All fetch calls to the backend (typed)
+    │   ├── client.ts        # All fetch calls to the backend (typed)
+    │   └── insights.ts      # Tokens, Reports, Suggestions and Health calls
     │
     ├── types/
     │   └── index.ts         # TypeScript types matching backend Pydantic schemas
@@ -41,6 +42,12 @@ frontend/
     │   ├── PdfAnnotator.tsx     # In-browser PDF highlight + annotation UI
     │   ├── BookChapters.tsx     # Chapter list + chapter chat panel
     │   ├── ResearchGapPanel.tsx # Research gap analysis results panel
+    │   ├── nav/             # NavBar, NavMenu, MobileDrawer; navConfig.ts is the single source of the navigation
+    │   ├── search/          # SearchBox, FilterMenu (popover / bottom sheet), filterState (URL <-> filters), LibraryMenu
+    │   ├── graph/           # Cypher query panel, result table, examples, saved queries
+    │   ├── kchat/           # Knowledge chat: ToolCall rows, TurnSources, FigureStrip, structure cards, copyTex, composer
+    │   ├── insights/        # Shared pieces of Tokens / Reports / Suggestions / Health (BarChart, DataTable, StatRow, SuggestionChip)
+    │   ├── literature/      # ExternalSearch and KeywordFeed (the two tabs of Find papers)
     │   └── UserPicker.tsx       # Active user selector (navbar)
     │
     └── pages/
@@ -51,10 +58,15 @@ frontend/
         ├── Graph.tsx            # Knowledge graph (WebGL force-graph) + Cypher query panel (components/graph/)
         ├── KnowledgeChat.tsx    # Multi-paper AI chat
         ├── Cypher.tsx           # Redirects to /graph?view=query
+        ├── Tokens.tsx           # Usage ledger: totals, charts, breakdowns, calls
+        ├── Reports.tsx          # Report list + new report form
+        ├── ReportView.tsx       # One report: progress, text, cited papers, export
+        ├── Suggestions.tsx      # Improvement ideas, votes, status
+        ├── Health.tsx           # Admin system health
         ├── Settings.tsx         # App settings
         ├── BulkImport.tsx       # Bulk paper import
         ├── LiteratureSearch.tsx # Stream recent papers from arXiv / PubMed / bioRxiv
-        ├── Discover.tsx         # Search external sources + add to library
+        ├── Discover.tsx         # Legacy; /discover redirects to /literature?tab=search
         ├── Blogs.tsx            # Blog list + blog post reader
         ├── BlogPostDetail.tsx   # Single blog post view
         ├── Venues.tsx           # Venue browser
@@ -81,8 +93,14 @@ React Router v7 defines the page routes in `App.tsx`:
 | `/knowledge` | `KnowledgeChat` | Multi-paper AI chat |
 | `/cypher` | `Cypher` | Redirect to `/graph?view=query` (keeps `?q=`) |
 | `/bulk-import` | `BulkImport` | Bulk paper import |
-| `/literature` | `LiteratureSearch` | Recent paper stream from external sources |
-| `/discover` | `Discover` | Search external sources + add to library |
+| `/literature` | `LiteratureSearch` | Find papers: tab Search (arXiv, Semantic Scholar, PubMed, bioRxiv) and tab Feed (keyword stream) |
+| `/discover` | redirect | Goes to `/literature?tab=search` (Discover is part of Find papers) |
+| `/chat` | redirect | Goes to `/knowledge` |
+| `/reports`, `/reports/:id` | `Reports`, `ReportView` | Report list and one report |
+| `/tokens` | `Tokens` | Usage ledger |
+| `/suggestions` | `Suggestions` | Improvement ideas |
+| `/health` | `Health` | System health (admin) |
+| `/tools`, `/tools/ideogram`, `/admin` | `Tools`, `IdeogramChat`, `AdminConsole` | Tools hub, image generation, admin console |
 | `/blogs` | `Blogs` | Blog list |
 | `/blogs/posts/:postId` | `BlogPostDetail` | Single blog post |
 | `/teammates` | `Teammates` | Collaborator view (no navbar link) |
@@ -95,7 +113,7 @@ React Router v7 defines the page routes in `App.tsx`:
 
 ### Library (`Library.tsx`)
 
-Main landing page. Shows a paper grid with search, filters (tag, topic, project, person), view mode toggle, and a drag-and-drop upload zone. Includes a stats dashboard.
+Main landing page. One sticky bar holds the search box, the **Filters** popover (`components/search/FilterMenu.tsx`; a bottom sheet on phones), the add button and the **⋯** menu. All query and filter state lives in the URL (`filterState.ts`, pure and unit-tested). Without a query it shows *Continue reading* and *Recently added*, loaded one page at a time; with a query, ranked rows with matched-in chips.
 
 ### PaperDetail (`PaperDetail.tsx`)
 
@@ -107,19 +125,27 @@ Single paper view with:
 
 ### Graph (`Graph.tsx`)
 
-Uses **force-graph** (WebGL) to render the knowledge graph. Fetches from `GET /graph?mode=...`. Clicking a node opens `EntityPanel` for details.
+Uses **force-graph** (WebGL) to render the knowledge graph. Fetches from `GET /graph?mode=...`. Clicking a node opens `EntityPanel` for details. For admins, **Query** opens `components/graph/CypherPanel.tsx`: one `POST /graph/query` run feeds a Graph tab (drawn in the main canvas) and a Table tab (`ResultTable`); examples, saved queries (localStorage), schema and AI assist live there too.
 
 ### KnowledgeChat (`KnowledgeChat.tsx`)
 
-Multi-paper AI chat. Sends messages to `POST /knowledge-chat/stream` (SSE). Supports `@tag:`, `@topic:`, `@project:`, `@paper:` mention syntax to scope context.
+Multi-paper AI chat, laid out like the desk chat. Sends messages to `POST /knowledge-chat/stream` (SSE) and renders each event as it arrives: `step` events become `ToolCall` rows, `interim` text the model's notes between them, `token` the answer, `suggestion` a `SuggestionChip`. Under an answer: `TurnSources` (papers it cited, read or searched), `FigureStrip` with a lightbox, concept cards, structure cards (`kchat/structure/`, 3Dmol.js; PDB, AlphaFold DB, ligands by CCD or PubChem) and KaTeX maths with copy-as-TeX (`copyTex.ts`). **Stop** calls `POST /knowledge-chat/stop`; retry re-asks. Supports `@tag:`, `@topic:`, `@project:`, `@paper:`, `@person:`, `@user:` mentions to scope context.
 
 ### LiteratureSearch (`LiteratureSearch.tsx`)
 
 Streams recent papers from arXiv, PubMed, and bioRxiv using keyword lists. Papers can be added to the library in one click.
 
-### Discover (`Discover.tsx`)
+### Find papers (Discover folded in)
 
-Unified external search across arXiv, Semantic Scholar, and PubMed. Shows which results are already in the library; adds missing ones via URL ingest.
+`LiteratureSearch.tsx` has two tabs: **Search** (`components/literature/ExternalSearch.tsx`: arXiv, Semantic Scholar, PubMed and bioRxiv, showing which results are already in the library) and **Feed** (`KeywordFeed.tsx`). The old Discover page is gone.
+
+### Tokens, Reports, Suggestions, Health
+
+Four pages over the same small kit (`components/insights/`, API in `api/insights.ts`). `Tokens.tsx` reads `/tokens/summary`, `/tokens/calls` and `/tokens/prices`; `Reports.tsx` and `ReportView.tsx` poll `/reports` while a report runs and offer Markdown and HTML export; `Suggestions.tsx` lists, votes and (admins) sets status; `Health.tsx` reads `/system/health` (admin only, refresh button). They are lazy-loaded.
+
+### Navigation (`components/nav/`)
+
+`navConfig.ts` is the single source for the desktop bar, the dropdowns and the mobile drawer: four primary entries (Library, Projects, People, Chat) and the Explore, Tools and Account menus; entries can be admin-only. `redirects.tsx` keeps old routes (`/cypher`, `/chat`) working.
 
 ### Conferences (`Conferences.tsx`)
 

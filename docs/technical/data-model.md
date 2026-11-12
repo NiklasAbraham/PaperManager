@@ -212,6 +212,44 @@ A single message in a Conversation.
 | `tokens_used` | integer | Token count for this message |
 | `created_at` | datetime | When sent |
 
+### Report
+
+A long read written from the library (see [AI pipelines](ai-pipelines.md#reports)). Private to its `owner`.
+
+| Property | Type | Description |
+| -------- | ---- | ----------- |
+| `id` | string (UUID) | Internal identifier |
+| `owner` | string | User who started it |
+| `title`, `question` | string | Title (from the plan) and the question asked |
+| `project_id`, `project_name` | string | Optional project scope |
+| `length`, `model` | string | `short` / `standard` / `long`; the model used |
+| `status` | string | `queued`, `running`, `done`, `failed` or `cancelled` |
+| `stage`, `progress` | string, number | Current stage and 0–100 |
+| `steps_json` | string | Last 50 progress lines |
+| `markdown` | string | The finished text, with `[[n]](/paper/<id>)` citations and a reference list |
+| `paper_count`, `word_count` | integer | Size |
+| `error` | string | Failure reason |
+| `created_at`, `updated_at`, `finished_at` | datetime | Timestamps |
+
+### Suggestion
+
+An idea to improve PaperManager, shared by all users of the instance.
+
+| Property | Type | Description |
+| -------- | ---- | ----------- |
+| `id` | string (UUID) | Internal identifier |
+| `text`, `detail` | string | Short title (3–280 characters) and optional detail |
+| `source` | string | `chat`, `user` or `report` |
+| `status` | string | `open`, `planned`, `done` or `dismissed` |
+| `created_by` | string | User name |
+| `voters` | list of string | Users who voted (votes = its length) |
+| `seen` | integer | How often the chat proposed the same idea |
+| `context`, `conversation_id` | string | The question that led to it (≤ 300 characters) and its conversation |
+| `created_at`, `updated_at` | datetime | Timestamps |
+
+!!! note "Not in the graph: the usage ledger"
+    LLM usage (the Tokens page) is stored in SQLite, not in Neo4j. See [Architecture](architecture.md#usage-ledger).
+
 ### User
 
 A named user for identity and conversation attribution.
@@ -316,6 +354,7 @@ A table extracted from a paper PDF.
 | ------------ | --------- | ----------- |
 | `HAS_MESSAGE` | Conversation → Message | Message in conversation |
 | `BELONGS_TO` | Conversation → User | Conversation owned by user |
+| `CITES_PAPER` | Report → Paper | Paper cited by a report; property `n` is its number in the reference list. Deleting a paper removes the edge, not the report |
 
 ---
 
@@ -342,6 +381,8 @@ A table extracted from a paper PDF.
 | Claim | id | UNIQUE |
 | Table | id | UNIQUE |
 | Venue | id | UNIQUE |
+| Report | id | UNIQUE |
+| Suggestion | id | UNIQUE |
 
 ---
 
@@ -356,6 +397,9 @@ A table extracted from a paper PDF.
 | `entity_name_search` | Fulltext (standard-folding) | Person, Topic, Tag, Project | `name` | `/search`, `/search/suggest` |
 | `paper_text_search` | Fulltext (standard-folding, eventually consistent) | Paper | `venue`, `raw_text` | `/search` |
 | `message_search` | Fulltext | Message | `content` | Conversation search |
+| `paper_created_at` | Range | Paper | `created_at` | Library date-added filter, newest/oldest sort |
+| `paper_year` | Range | Paper | `year` | Year filter and sort |
+| `paper_updated_at` | Range | Paper | `updated_at` | Recently updated sort |
 | `paper_embeddings` | Vector (cosine) | Paper | `embedding` | Semantic similarity (768-dim, nomic-embed-text) |
 
 ---

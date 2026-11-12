@@ -61,12 +61,14 @@ concept map in about ten minutes.
 ### One library for every paper
 
 Search titles, authors, your notes and highlights and the full text in one box, ranked, with
-every hit showing why it matched; filter by project, topic, tag, author or reading status, and see
-at a glance what is still unread.
+every hit showing why it matched. Narrow it by date added, year, reading status, rating, document
+type, project, tag, topic or venue, or by whether a paper has a PDF, a note or highlights; the whole
+view is in the URL. Continue reading and Recently added sit on the landing page.
 
-[Library :octicons-arrow-right-24:](user-guide/library.md)
+[Library :octicons-arrow-right-24:](user-guide/library.md) ·
+[Search and filters :octicons-arrow-right-24:](user-guide/search-filters.md)
 </div>
-![Library dashboard](img/screenshots/library.webp)
+![Library landing page](img/screenshots/library.webp)
 </div>
 
 <div class="pm-row pm-row--flip" markdown>
@@ -130,13 +132,32 @@ by author, year and kind of concept.
 ### Ask your whole library
 
 The knowledge chat answers from your papers and cites them; a citation opens the paper
-beside the chat. Answers can carry concept cards (formulas, plots, animations) and 3D
-protein structures you can rotate. Narrow a question with `@project:`, `@topic:` or
-`@paper:`, branch off from any question, or let it search the web too.
+beside the chat. You see every lookup the model makes and a sources row under each answer.
+Answers can carry figure strips, concept cards (formulas, plots, animations) and 3D
+structures (PDB entries, ligands, alignments) you can rotate. Narrow a question with
+`@project:`, `@topic:` or `@paper:`, branch off from any question, stop or retry an answer,
+or let it search the web too.
 
-[Knowledge chat :octicons-arrow-right-24:](user-guide/knowledge-features.md#knowledge-chat)
+[Knowledge chat :octicons-arrow-right-24:](user-guide/chat.md)
 </div>
-![Knowledge chat](img/screenshots/chat.webp)
+![Knowledge chat with tool-call rows and sources](img/screenshots/chat-tools.webp)
+</div>
+
+<div class="pm-row" markdown>
+<div markdown>
+
+### A long read from your own papers
+
+Ask a question or pick a project and a report is written in the background: sections, citations
+that link to your papers, a reference list, export as HTML or Markdown. Every model call it
+makes shows up on the Tokens page with its cost; the chat can also propose improvements to the
+app, which everyone can vote on.
+
+[Reports :octicons-arrow-right-24:](user-guide/reports.md) ·
+[Tokens :octicons-arrow-right-24:](user-guide/tokens.md) ·
+[Suggestions :octicons-arrow-right-24:](user-guide/suggestions.md)
+</div>
+![A finished report](img/screenshots/report-view.webp)
 </div>
 
 <div class="pm-row" markdown>
@@ -154,6 +175,18 @@ topic is published, per conference and over the years.
 </div>
 ![Conference explorer](img/screenshots/conferences.webp)
 </div>
+
+---
+
+## See it in action
+
+Three short films, each recorded from a real library:
+
+- [**Ask the library**](https://niklas-abraham.de/assets/papermanager/reel-chat.mp4) (41 s): the chat queries the graph, pulls in 16 figures, spins a 3D structure and links every source.
+- [**The five you need**](https://niklas-abraham.de/assets/papermanager/reel-search.mp4) (40 s): one query and four filters take 1,173 papers down to five.
+- [**One paper, taken apart**](https://niklas-abraham.de/assets/papermanager/teardown-af3.mp4) (36 s): the AlphaFold 3 paper is split into pages, figures, claims and authors, then tied to the papers that cite it.
+
+More on the [project page](https://niklas-abraham.de/projects/papermanager/#teardown). Music in the first two: Kevin MacLeod (incompetech.com), CC BY 4.0.
 
 ---
 
@@ -182,7 +215,7 @@ topic is published, per conference and over the years.
 
     ---
 
-    The MCP server gives Claude Desktop and Claude Code 41 tools to search, read and edit
+    The MCP server gives Claude Desktop and Claude Code 42 tools to search, read and edit
     your library.
 
     [:octicons-arrow-right-24: MCP server](user-guide/mcp-server.md)
@@ -212,7 +245,7 @@ graph LR
 ```
 
 Every paper, author, topic, project, note and concept is a node in one Neo4j graph, so the
-same data powers the library, the chat, the concept map and the Graph page's Cypher query panel. PDFs stay in
+same data powers the library, the chat, the reports, the concept map and the Graph page's Cypher query panel. PDFs stay in
 your own Google Drive. More in [Architecture](technical/architecture.md).
 
 PaperManager is open source. The project page at

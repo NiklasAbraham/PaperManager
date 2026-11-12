@@ -4,22 +4,52 @@ The Library is the main page of PaperManager (`/`). It shows all papers in your 
 
 ---
 
-## Dashboard
+## Landing page
 
-With no query and no filters the page is deliberately quiet:
+With no query and no filters the page shows, top to bottom:
 
 - A header line, **Library · 1,163 papers**.
-- **Continue reading**: up to six papers whose reading status is *Reading*, most recently
-  touched first (three on a phone). The block is hidden when you are not reading anything.
+- A small **dashboard** with the **topic map** (see the next section).
+- **Continue reading**: one slim row of up to three papers whose reading status is *Reading*,
+  most recently touched first (two on a phone). It is hidden when you are not reading anything.
 - **Recently added**: your papers as cards, newest first, a page at a time (20, 50, 100 or
   200 per page, see Settings). The sort menu on the right of the heading changes the order.
 
 The papers are loaded one page at a time from the server, so the page opens quickly however
-large the library is. Statistics (counts, papers by year, venues) are no longer on this page.
+large the library is.
 
 The bar at the top stays in view while you scroll: the search box, a **Filters** button with a
 badge showing how many filters are active, the **+** button to add papers and a **⋯** menu with
 *Surprise me*, *Find research gaps* and *Manage tags / topics / authors / projects*.
+
+---
+
+## Dashboard and topic map
+
+Above the paper list, the unfiltered Library page shows four small tiles and, below them, a map of your library. The map
+card can be folded away; the page remembers that.
+
+**The strip**
+
+- **Added**: papers added this week and this month, with a small bar chart of the last twelve weeks.
+- **Reading**: how many papers are unread, being read and read. Click a bar to filter the list by that status.
+- **Topics**: your biggest topics. Click a chip to filter by that topic.
+- **Projects**: your projects with their paper counts. Click one to filter by it. Hover a project to see where its papers sit on the map.
+
+**The map**
+
+- Each dot is a paper, placed by meaning: papers about similar things sit close together.
+- Big dots are your library. Small, faint dots are cited references; use the **references** toggle to show or hide them.
+- Colours are clusters of related papers, each with a label. A grey "Unparsed references" cluster collects reference entries that could not be read properly.
+- Hover a dot to see the title, click it to open the paper.
+- Zoom with **Ctrl** (or **⌘**) and the mouse wheel, or pinch on a trackpad. Drag with the mouse to pan. **Reset zoom** brings the whole map back.
+
+The dashboard only appears on the plain Library page; as soon as you search or set a filter, it gives way to the results.
+After an update the first build of the map takes up to a minute or two ("Laying out your library..."); later updates keep
+the dots where they were.
+
+Prefer a different layout? Add `?dash=a` (stats column beside a larger map) or `?dash=c` (cards floating over the map) to the
+address, or `?dash=off` to hide the dashboard and keep only the heading.
 
 ---
 
@@ -97,6 +127,8 @@ The **✦** button next to the box still turns a plain-language request into fil
 AI model.
 
 ## Filters {#filters}
+
+A shorter walk-through with the speed notes is on [Search and filters](search-filters.md).
 
 Click **Filters** next to the search box. A panel opens (a sheet from the bottom on a phone)
 and every change applies at once, so the list updates behind it while you click. Filters work

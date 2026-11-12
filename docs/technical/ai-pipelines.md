@@ -251,6 +251,58 @@ flowchart TD
     Claude --> Browser["Token-by-token response"]
 ```
 
+The model also has library tools (graph queries, semantic search, a paper's full text, its figures, web search). Each
+tool call is streamed to the browser as a `step` event and saved with the answer, so the chat shows what was looked
+up; the papers a call touched feed the Sources row. The system prompt ends with an instruction that lets the model
+append one `<suggestion>...</suggestion>` line when the session shows a gap in PaperManager itself.
+`services/suggestions.py` strips that tag from the token stream (whatever the token boundaries), so neither the
+browser nor the saved message contains it, then records the suggestion (merging it into an open or planned one with
+the same normalised text or a word-set overlap of 0.75) and emits a `suggestion` event. `SUGGESTIONS_FROM_CHAT=false`
+keeps stripping but records nothing.
+
+---
+
+## Reports
+
+`POST /reports` creates a `Report` node (status `queued`) and hands it to a background thread pool
+(`REPORTS_MAX_PARALLEL`, default 2). `services/reports/pipeline.py` then runs, checking a cancel flag between steps:
+
+```mermaid
+flowchart LR
+    S["Scope<br/>10 %"] --> P["Plan<br/>20 %"] --> E["Evidence<br/>55 %"] --> Sec["Sections<br/>90 %"] --> F["Frame<br/>97 %"] --> V["Save<br/>100 %"]
+```
+
+1. **Scope.** Candidates are the papers given, the project's papers, and the top hits of the library search for the
+   question (hybrid mode, visibility-filtered as the requesting user). A project with no question asks for an
+   overview of the project's literature.
+2. **Plan.** One JSON call (`prompts/report_plan.txt`): title, lede and 3, 5 or 7 sections (short, standard, long),
+   each with a focus, one to three search queries and the candidate papers it should draw on.
+3. **Evidence.** Per section, extra retrieval with its queries, then an evidence pack per paper (up to 8 per section):
+   title, year, authors, venue, summary, abstract, up to 8 claims, your note, up to 6 highlights with comments and up
+   to 2 full-text passages around the query terms. Packs are capped by a character budget
+   (`REPORTS_EVIDENCE_CHARS`; by default 20,000 on the LiteLLM model, 60,000 on Anthropic or OpenAI). Each paper
+   gets a source number S1...Sn.
+4. **Sections.** One call per section (`prompts/report_section.txt`) in Markdown; every claim is followed by an `[S3]`
+   marker and only the section's own sources may be cited.
+5. **Frame.** One call (`prompts/report_frame.txt`): the introduction and a closing section (what the library shows,
+   what it does not, open questions).
+6. **Save.** Markers become `[[3]](/paper/<id>)` links, unknown markers are dropped, a reference list is appended in
+   order of first citation and a `CITES_PAPER` edge is written per cited paper.
+
+Models: `fast` (default; the server's fast provider: LiteLLM, Claude Haiku or OpenAI), `claude` (your personal key,
+`REPORTS_CLAUDE_MODEL`, default `claude-sonnet-4-6`) and `claude-work` (the work gateway). A restart marks queued and
+running reports failed. All calls run inside `usage_context(feature="reports", user=owner)`, so the
+[usage ledger](architecture.md#usage-ledger) attributes the cost. The HTML export (`render.py`) is one self-contained page;
+Markdown is the stored text.
+
+---
+
+## Usage Ledger
+
+Every call in every pipeline above is recorded without the pipeline knowing: the SDK methods are wrapped once and the
+feature name is derived from the calling code (summary, topics, claims, knowledge-chat, concepts, tour, reports, ...).
+See [Architecture](architecture.md#usage-ledger).
+
 ---
 
 ## Affiliation Extraction
@@ -308,3 +360,6 @@ All prompts live in `prompts/` and are loaded fresh on each call:
 | `chapter_chat_system.txt` | `ai.py` | Chapter Q&A system prompt |
 | `literature_search_keywords.txt` | `literature_search.py` | Default literature search keywords |
 | `merge_scan.txt` | `merge.py` | Duplicate detection |
+| `report_plan.txt` | `services/reports/pipeline.py` | Report plan: title, lede, sections, queries |
+| `report_section.txt` | `services/reports/pipeline.py` | One report section with `[S#]` citations |
+| `report_frame.txt` | `services/reports/pipeline.py` | Report introduction and closing section |

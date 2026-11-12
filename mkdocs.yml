@@ -92,11 +92,19 @@ nav:
   - Using PaperManager:
     - Adding papers: user-guide/ingestion.md
     - Library: user-guide/library.md
+    - Search and filters: user-guide/search-filters.md
     - Reading a paper: user-guide/paper-detail.md
     - Concepts, tour and concept map: user-guide/reading-tools.md
-    - Knowledge chat and graph: user-guide/knowledge-features.md
+    - Knowledge chat: user-guide/chat.md
+    - Graph and Cypher panel: user-guide/graph.md
+    - Reports: user-guide/reports.md
+    - People, projects and export: user-guide/knowledge-features.md
     - Conference explorer: user-guide/conferences.md
     - MCP server (Claude): user-guide/mcp-server.md
+  - Account and admin:
+    - Tokens: user-guide/tokens.md
+    - Suggestions: user-guide/suggestions.md
+    - Health: user-guide/health.md
   - Technical reference:
     - Architecture: technical/architecture.md
     - Backend: technical/backend.md

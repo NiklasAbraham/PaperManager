@@ -7,7 +7,7 @@ Plan about ten minutes, most of it waiting for the AI steps to finish in the bac
 
 ## 1. Add a paper
 
-1. Open **Library** (the first item in the top menu).
+1. Open **Library** (the first item in the top menu; see [The navigation](#the-navigation) below).
 2. Click **+** (*Add paper*). Drag a PDF into the drop zone, or paste a link such as
    `https://arxiv.org/abs/2206.00364`.
 3. PaperManager looks up title, authors, year and DOI on Semantic Scholar and CrossRef. A badge
@@ -66,10 +66,27 @@ Open **Chat** in the top bar and ask a question, for example:
 
 The answer cites the papers it used. Leave out the `@project:` part to search the whole
 library, or turn on web search for questions your papers do not cover. More in
-[Knowledge features](knowledge-features.md).
+[Knowledge chat](chat.md).
+
+## The navigation
+
+The top bar has four entries and three menus:
+
+| Where | What is there |
+|---|---|
+| **Library**, **Projects**, **People**, **Chat** | the four places you use every day |
+| **Explore** | [Graph](graph.md) (with the Cypher query panel for admins), Find papers (search arXiv, Semantic Scholar, PubMed and bioRxiv, or browse the keyword feed), Conferences, Blogs, Venues, [Reports](reports.md), [Suggestions](suggestions.md) |
+| **Tools** | Bulk import, Merge duplicates, Image generation, and an overview of all tools |
+| **Account** (your name) | Settings, [Tokens](tokens.md), Teammates; for admins also Admin and [Health](health.md) |
+
+![The Explore menu](../img/screenshots/nav-explore.webp){ .pm-shot }
+
+The old Cypher and Discover pages are gone: Cypher is the **Query** panel of the Graph page, and Discover
+is part of Find papers. Old links to them redirect.
 
 ## Where next
 
-- [Library](library.md): search, filters and views
+- [Library](library.md) and [Search and filters](search-filters.md): search, filters and views
+- [Reports](reports.md): a long read written from your library
 - [Reading a paper](paper-detail.md): every tab of the paper view
 - [MCP server](mcp-server.md): use your library from Claude Desktop or Claude Code

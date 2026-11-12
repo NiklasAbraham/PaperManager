@@ -61,7 +61,11 @@ backend/
 │   ├── author_tracker.py    # Author tracking + auto-import
 │   ├── merge.py             # Duplicate detection + merge
 │   ├── users.py             # User identity + per-user conversations
-│   └── admin.py             # Admin / maintenance endpoints
+│   ├── admin.py             # Admin / maintenance endpoints
+│   ├── tokens.py            # /tokens: usage ledger summary, calls, prices
+│   ├── reports.py           # /reports: long-read reports
+│   ├── suggestions.py       # /suggestions: improvement ideas, votes, status
+│   └── system_health.py     # GET /system/health (admin only)
 │
 ├── services/
 │   ├── ai.py                # Claude: summarise, chat, topics, figures, claims, synthesis
@@ -79,7 +83,14 @@ backend/
 │   ├── book_chapter_parser.py # Detect chapter boundaries in PDFs (Docling + AI)
 │   ├── embeddings.py        # Ollama embeddings for semantic similarity
 │   ├── person_enrichment.py # Enrich Person nodes with affiliation / S2 data
-│   └── web_search.py        # Web search for research gaps and synthesis
+│   ├── web_search.py        # Web search for research gaps and synthesis
+│   ├── usage/               # Token ledger: SDK hooks, SQLite store, price table
+│   ├── reports/             # Report pipeline, retrieval, rendering, job runner
+│   ├── library_search/      # Ranked search engine, query parser, ranking, result cache
+│   ├── cypher_result.py     # Cypher result -> table rows + graph nodes/links
+│   ├── suggestions.py       # Chat suggestion filter and recording
+│   ├── system_health.py     # Health checks (cached per check)
+│   └── heartbeat.py         # Heartbeats of background threads
 │
 ├── models/
 │   └── schemas.py           # Pydantic request/response models
@@ -126,6 +137,7 @@ async def lifespan(app: FastAPI):
     run_schema_setup(get_driver())       # create indexes + constraints
     seed_default_tags(get_driver())      # seed default tags
     seed_people_tags(get_driver())       # seed people-related tags
+    recover_interrupted(get_driver())    # mark reports left running by a restart as failed
     yield
 ```
 
@@ -137,8 +149,9 @@ The app is started by `start.sh` via `uvicorn backend.main:app`.
 
 Runs on startup. Creates:
 
-- **Uniqueness constraints** on: `Paper.id`, `Person.id`, `Topic.id`, `Topic.name`, `Tag.id`, `Tag.name`, `Note.id`, `Project.id`, `Figure.id`, `Annotation.id`, `Blog.id`, `BlogPost.id`, `User.id`, `User.name`, `Claim.id`, `Table.id`, `Conversation.id`, `Message.id`, `Venue.id`
+- **Uniqueness constraints** on: `Paper.id`, `Person.id`, `Topic.id`, `Topic.name`, `Tag.id`, `Tag.name`, `Note.id`, `Project.id`, `Figure.id`, `Annotation.id`, `Blog.id`, `BlogPost.id`, `User.id`, `User.name`, `Claim.id`, `Table.id`, `Conversation.id`, `Message.id`, `Venue.id`, `Report.id`, `Suggestion.id`
 - **Fulltext indexes**: `paper_search` (title, abstract, summary), `note_search` (content), `annotation_search` (highlighted_text, note), `claim_search` (text), `entity_name_search` (Person/Topic/Tag/Project name), `paper_text_search` (venue, raw_text) with the `standard-folding` analyzer (rebuilt at startup if their analyzer or fields differ; see `.specs/012_search.md`), and `message_search` (content)
+- **Range indexes** on `Paper.created_at`, `Paper.year` and `Paper.updated_at` (`paper_created_at`, `paper_year`, `paper_updated_at`), for the date, year and sort filters of the Library
 - **Vector index**: `paper_embeddings` on `Paper.embedding` (768-dim cosine, nomic-embed-text)
 
 ---
@@ -162,6 +175,11 @@ Runs on startup. Creates:
 | `embeddings.py` | Generate Ollama (nomic-embed-text) embeddings stored on Paper nodes |
 | `person_enrichment.py` | Enrich Person nodes with affiliations and Semantic Scholar author data |
 | `web_search.py` | Web search helper used by research gaps and synthesis endpoints |
+| `usage/` | Token ledger: wraps the Anthropic and OpenAI SDK methods, attributes feature / user / paper, prices calls, stores them in SQLite (`usage.sqlite`) |
+| `reports/` | `pipeline.py` scope, plan, evidence, sections, frame, save; `retrieval.py` candidates and evidence packs; `llm.py`; `render.py` citations, Markdown to HTML; `jobs.py` background runner (`REPORTS_MAX_PARALLEL`) |
+| `suggestions.py` | `SuggestionFilter` strips `<suggestion>` from the chat stream and records it, merging duplicates |
+| `system_health.py` | Parallel health checks with per-check cache TTLs; `heartbeat.py` records sweeper beats |
+| `library_search/cache.py` | 60 s in-process cache of ranked results per user, cleared by any non-GET request |
 | `conferences/` | Conference explorer (see `.specs/011_conferences.md`): `catalog.py` conference-years and sources, `sources.py` miniconf + Paper Copilot fetchers, `institutions.py` name normalisation and academia / industry, `areas.py` the 24-area taxonomy and zero-shot assignment, `embedder.py` bge-small-en-v1.5 on CPU, `store.py` build worker, on-disk datasets under `/data/conferences`, queries |
 
 ---
