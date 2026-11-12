@@ -35,6 +35,54 @@ def _url(paper_id: str) -> str:
     return f"{settings.frontend_url.rstrip('/')}/paper/{paper_id}"
 
 
+# Extracted PDF text breaks lines inside a phrase ("score\nmatching") and hyphenates words
+# at a line end ("diffu-\nsion"). The phrase step of find_in_paper matches across both:
+# a space in the query matches any run of whitespace, and between two characters of a word
+# the text may hold a line-end hyphen (or soft hyphen) or a bare line break. The regex runs
+# on the original text, so every offset points into what read_paper_text returns.
+_WORD_BREAK = r"(?:[-\u00ad\u2010]?[ \t]*\r?\n\s*|\u00ad)?"
+
+
+def _phrase_regex(phrase: str) -> re.Pattern | None:
+    words = phrase.split()
+    if not words:
+        return None
+    pat = r"\s+".join(_WORD_BREAK.join(re.escape(c) for c in w) for w in words)
+    return re.compile(pat, re.IGNORECASE)
+
+
+def _find_hits(text: str, query: str, context: int, max_hits: int) -> tuple[str, list[dict]]:
+    """(mode, hits) for find_in_paper: the phrase across line breaks and hyphenation first,
+    else every word of 4+ letters. A hit is {offset, terms, text} into `text` itself."""
+    low = text.lower()
+    phrase = " ".join(query.lower().split())
+    rx = _phrase_regex(phrase)
+    starts = [m.start() for m in rx.finditer(text)] if rx else []
+    if starts:
+        mode, terms = "phrase", [phrase]
+        occ = [(pos, phrase) for pos in starts]
+    else:
+        mode, terms = "words", sorted({w for w in re.findall(r"[\w\-]{4,}", phrase) if w in low})
+        occ = sorted((m.start(), t) for t in terms for m in re.finditer(re.escape(t), low))
+    # Every occurrence is a candidate centre; a window scores by how many distinct
+    # terms it contains, so passages where the words co-occur come first.
+    scored = []
+    for pos, _ in occ:
+        a, b = max(0, pos - context // 2), min(len(text), pos + context // 2)
+        present = sorted({t for p, t in occ if a <= p < b})
+        scored.append((len(present), -pos, a, b, present))
+    scored.sort(reverse=True)
+    hits, taken = [], []
+    for n, _, a, b, present in scored:
+        if any(abs(a - t) < context for t in taken):
+            continue
+        taken.append(a)
+        hits.append({"offset": a, "terms": present, "text": text[a:b]})
+        if len(hits) >= max_hits:
+            break
+    return mode, hits
+
+
 def _marked(sn: dict) -> str:
     """A search snippet as plain text with the matched words in «»."""
     text, out, at = sn["text"], [], 0
@@ -232,40 +280,19 @@ def register(mcp: FastMCP):
 
     @json_tool(mcp)
     def find_in_paper(paper_id: str, query: str, context: int = 500, max_hits: int = 8) -> dict:
-        """Find passages in one paper's full text. Tries the exact phrase first, then
-        each word of 4+ letters. Returns snippets with character offsets that can be
-        passed to read_paper_text to read the surrounding section."""
+        """Find passages in one paper's full text. Tries the exact phrase first (also
+        across line breaks and end-of-line hyphens), then each word of 4+ letters.
+        Returns snippets with character offsets that can be passed to read_paper_text
+        to read the surrounding section."""
         context, max_hits = max(100, min(int(context), 3000)), max(1, min(int(max_hits), 25))
         with get_driver().session() as s:
             r = s.run("MATCH (p:Paper {id: $id}) RETURN p.title AS title, coalesce(p.raw_text, '') AS t",
                       id=paper_id).single()
         if not r:
             return {"paper_id": paper_id, "error": f"Paper {paper_id} not found"}
-        text, low = r["t"], r["t"].lower()
-        phrase = query.strip().lower()
-        if phrase and phrase in low:
-            mode, terms = "phrase", [phrase]
-        else:
-            mode, terms = "words", sorted({w for w in re.findall(r"[\w\-]{4,}", phrase) if w in low})
-        # Every occurrence is a candidate centre; a window scores by how many distinct
-        # terms it contains, so passages where the words co-occur come first.
-        occ = sorted((m.start(), t) for t in terms for m in re.finditer(re.escape(t), low))
-        scored = []
-        for pos, _ in occ:
-            a, b = max(0, pos - context // 2), min(len(text), pos + context // 2)
-            present = sorted({t for p, t in occ if a <= p < b})
-            scored.append((len(present), -pos, a, b, present))
-        scored.sort(reverse=True)
-        hits, taken = [], []
-        for n, _, a, b, present in scored:
-            if any(abs(a - t) < context for t in taken):
-                continue
-            taken.append(a)
-            hits.append({"offset": a, "terms": present, "text": text[a:b]})
-            if len(hits) >= max_hits:
-                break
+        mode, hits = _find_hits(r["t"], query, context, max_hits)
         return {"paper_id": paper_id, "title": r["title"], "url": _url(paper_id), "query": query,
-                "mode": mode, "total_chars": len(text), "hits": hits}
+                "mode": mode, "total_chars": len(r["t"]), "hits": hits}
 
     @json_tool(mcp)
     def list_highlights(project: str = "", paper_id: str = "", query: str = "", limit: int = 40) -> dict:
