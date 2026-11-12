@@ -1,11 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "../api/client";
 import { SettingsProvider } from "../contexts/SettingsContext";
 import type { SearchResponse } from "../types";
 import Library from "./Library";
-import { buildSearchParams } from "../components/search/searchUtils";
+
+// The upload button is its own feature; here only the project it was handed matters.
+vi.mock("../components/PaperDrop", () => ({
+  default: ({ defaultProjectId }: { defaultProjectId?: string }) => <div data-testid="paper-drop" data-project={defaultProjectId ?? ""} />,
+}));
 
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();
@@ -25,35 +29,36 @@ const RESPONSE: SearchResponse = {
   took_ms: 42,
 };
 
+const LISTING: SearchResponse = {
+  results: [
+    { id: "p1", title: "Newest paper", created_at: "2026-11-01", year: 2026, score: 0, matched_in: "paper", authors: ["Ada Lovelace"] },
+    { id: "p2", title: "Older paper", created_at: "2026-10-01", year: 2024, score: 0, matched_in: "paper", authors: ["Alan Turing"] },
+  ],
+  total: 1163,
+};
+const READING: SearchResponse = {
+  results: [{ id: "r1", title: "Half-read paper", created_at: "2026-09-01", year: 2025, score: 0, matched_in: "paper", authors: ["Grace Hopper"] }],
+  total: 1,
+};
+
+function Where() {
+  const loc = useLocation();
+  return <div data-testid="where">{loc.search}</div>;
+}
+
 function renderAt(url: string) {
   return render(
     <SettingsProvider>
       <MemoryRouter initialEntries={[url]}>
         <Library />
+        <Where />
       </MemoryRouter>
     </SettingsProvider>,
   );
 }
 
-describe("buildSearchParams", () => {
-  it("adds ranking options and paging for a query", () => {
-    const p = buildSearchParams(new URLSearchParams("q=diffusion&tag=x&mode=semantic&refs=1&sort=year_desc"), 3, 20);
-    expect(Object.fromEntries(p)).toEqual({
-      q: "diffusion", tag: "x", mode: "semantic", sort: "year_desc", include_references: "true",
-      skip: "40", limit: "20",
-    });
-  });
-
-  it("defaults to hybrid relevance without references, and lists all for filters only", () => {
-    const p = buildSearchParams(new URLSearchParams("q=edm"), 1, 0);
-    expect(p.get("mode")).toBe("hybrid");
-    expect(p.get("sort")).toBe("relevance");
-    expect(p.get("include_references")).toBe("false");
-    expect(p.get("limit")).toBe("200");
-    const f = buildSearchParams(new URLSearchParams("topic=Diffusion%20Models&sort=year_desc"), 1, 20);
-    expect(Object.fromEntries(f)).toEqual({ topic: "Diffusion Models", include_references: "false", limit: "2000" });
-  });
-});
+const searchCalls = () => vi.mocked(client.searchLibrary).mock.calls.map((c) => c[0]);
+const listingCalls = () => searchCalls().filter((p) => p.get("reading_status") !== "reading" || p.has("q"));
 
 describe("Library search", () => {
   beforeEach(() => {
@@ -98,5 +103,120 @@ describe("Library search", () => {
     });
     renderAt("/?q=diffusion");
     await waitFor(() => expect(screen.getByText(/still indexing \(100 \/ 8000 papers\)/)).toBeInTheDocument());
+  });
+
+  it("keeps the year range from the URL (it feeds the filter) and shows it as a chip", async () => {
+    renderAt("/?q=diffusion&year_min=2020&year_max=2022");
+    await waitFor(() => expect(client.searchLibrary).toHaveBeenCalled());
+    const params = vi.mocked(client.searchLibrary).mock.calls[0][0];
+    expect(params.get("year_min")).toBe("2020");
+    expect(params.get("year_max")).toBe("2022");
+    expect(screen.getByTestId("where").textContent).toContain("year_min=2020");
+    expect(screen.getByText("Year: 2020 to 2022")).toBeInTheDocument();
+  });
+});
+
+describe("Library dashboard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(client.apiFetch).mockImplementation(async (path: string) => {
+      if (path === "/projects") return [{ id: "p-thesis", name: "Thesis", created_at: "2026-01-01" }];
+      if (path === "/tags") return [{ id: "t", name: "diffusion" }];
+      if (path === "/topics") return [{ id: "o", name: "Flow matching" }];
+      return null;
+    });
+    vi.mocked(client.searchLibrary).mockImplementation(async (p: URLSearchParams) =>
+      p.get("reading_status") === "reading" && !p.has("q") && p.get("limit") === "6" ? { ...READING, results: [] } : LISTING);
+  });
+
+  it("browses through /search, never /papers or /stats, and shows no stat tiles", async () => {
+    renderAt("/");
+    await waitFor(() => expect(screen.getByText("Newest paper")).toBeInTheDocument());
+    const paths = vi.mocked(client.apiFetch).mock.calls.map((c) => c[0]);
+    expect(paths).not.toContain("/papers");
+    expect(paths).not.toContain("/stats");
+    expect(paths.some((p) => String(p).startsWith("/venues"))).toBe(false);
+    const listing = listingCalls()[0];
+    expect(Object.fromEntries(listing)).toEqual({
+      sort: "date_desc", skip: "0", limit: "50", include_references: "false", snippets: "0",
+    });
+    expect(screen.getByText(/· 1,163 papers/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Recently added" })).toBeInTheDocument();
+    expect(screen.queryByText("Reading progress")).not.toBeInTheDocument();
+    expect(screen.queryByText("Papers by year")).not.toBeInTheDocument();
+    expect(screen.queryByText("Venues")).not.toBeInTheDocument();
+  });
+
+  it("shows Continue reading only when the reading call returns rows", async () => {
+    renderAt("/");
+    await waitFor(() => expect(screen.getByText("Newest paper")).toBeInTheDocument());
+    expect(screen.queryByText("Continue reading")).not.toBeInTheDocument();
+    const reading = searchCalls().find((p) => p.get("reading_status") === "reading")!;
+    expect(Object.fromEntries(reading)).toMatchObject({ sort: "updated_desc", limit: "6" });
+  });
+
+  it("lists the papers being read when there are some", async () => {
+    vi.mocked(client.searchLibrary).mockImplementation(async (p: URLSearchParams) =>
+      p.get("reading_status") === "reading" ? READING : LISTING);
+    renderAt("/");
+    await waitFor(() => expect(screen.getByText("Half-read paper")).toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Continue reading" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Half-read paper/ })).toHaveAttribute("href", "/paper/r1");
+  });
+
+  it("pages the listing on the server and sorts through the URL", async () => {
+    renderAt("/");
+    await waitFor(() => expect(screen.getByText("Newest paper")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Next/ }));
+    await waitFor(() => expect(listingCalls().some((p) => p.get("skip") === "50")).toBe(true));
+    fireEvent.change(screen.getByLabelText("Sort results"), { target: { value: "title_asc" } });
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("?sort=title_asc"));
+    await waitFor(() => expect(listingCalls().some((p) => p.get("sort") === "title_asc" && p.get("skip") === "0")).toBe(true));
+    expect(screen.getByRole("heading", { name: "All papers" })).toBeInTheDocument();
+  });
+
+  it("choosing Last 7 days in Filters puts added=7d in the URL and refetches", async () => {
+    renderAt("/");
+    await waitFor(() => expect(screen.getByText("Newest paper")).toBeInTheDocument());
+    const before = listingCalls().length;
+    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("?added=7d"));
+    await waitFor(() => expect(listingCalls().length).toBeGreaterThan(before));
+    const last = listingCalls().at(-1)!;
+    expect(last.get("added_after")).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(screen.getByText("Added: last 7 days")).toBeInTheDocument();
+    // the dashboard gives way to the filtered listing
+    expect(screen.queryByText(/· 1,163 papers/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1,163/)).toBeInTheDocument();
+  });
+
+  it("Clear all removes every filter chip and the query", async () => {
+    renderAt("/?q=flow&tag=a&has_pdf=1&added_from=2026-01-01&rating_min=3&sort=year_desc");
+    await waitFor(() => expect(screen.getByText("Tag: a")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("?sort=year_desc"));
+    expect(screen.queryByText("Tag: a")).not.toBeInTheDocument();
+  });
+
+  it("dismisses a single chip", async () => {
+    renderAt("/?tag=a&has_pdf=1");
+    await waitFor(() => expect(screen.getByText("Has PDF")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Remove Has PDF" }));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("?tag=a"));
+  });
+
+  it("hands the active project to the upload button", async () => {
+    renderAt("/?project_id=p-thesis");
+    await waitFor(() => expect(screen.getByText("Project: Thesis")).toBeInTheDocument());
+    expect(screen.getByTestId("paper-drop")).toHaveAttribute("data-project", "p-thesis");
+  });
+
+  it("offers relevance in Filters only with a query", async () => {
+    renderAt("/");
+    await waitFor(() => expect(screen.getByText("Newest paper")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    const sort = screen.getByLabelText("Sort by") as HTMLSelectElement;
+    expect([...sort.options].map((o) => o.value)).not.toContain("relevance");
   });
 });

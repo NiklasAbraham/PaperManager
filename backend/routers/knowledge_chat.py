@@ -17,11 +17,12 @@ from db.queries.conversations import (
     get_messages, compact_conversation, compact_conversation_sliding_window,
     delete_conversation, get_paper_context_snippets, get_message,
     set_message_concepts, fork_conversation, rename_conversation,
-    set_branch_label_if_empty, set_message_error,
+    set_branch_label_if_empty, set_message_error, delete_last_turn,
 )
 from models.schemas import KnowledgeChatRequest, ConversationOut, MessageOut
 from services.ai import knowledge_chat_stream, estimate_tokens, summarize_paper, CONTEXT_WINDOW
 from services.auth import get_current_user
+from services.suggestions import filter_events as with_suggestions  # .specs/015_suggestions.md
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/knowledge-chat", tags=["knowledge-chat"], dependencies=[Depends(get_current_user)])
@@ -252,10 +253,51 @@ def _fallback_all_papers(session, question: str = "") -> list[dict]:
     return list(papers_by_id.values()) + posts
 
 
+# ── Running answers (Stop) and the stored tool trace ──────────────────────────
+
+# user message id -> event that asks the running producer to stop; present only while it runs.
+_running: dict[str, threading.Event] = {}
+_running_lock = threading.Lock()
+
+_MAX_TRACE_BYTES = 200_000
+
+
+def _paper_refs(papers: list[dict], limit: int = 30) -> list[dict]:
+    return [{"id": p["id"], "title": p.get("title"), "year": p.get("year")} for p in papers[:limit]]
+
+
+def _cap_trace(steps: list[dict], limit: int = _MAX_TRACE_BYTES) -> list[dict]:
+    """Keep the stored trace under *limit* bytes: drop result previews, oldest first."""
+    def size(items: list[dict]) -> int:
+        return len(json.dumps(items, default=str).encode("utf-8"))
+
+    steps = [dict(s) for s in steps]
+    if size(steps) <= limit:
+        return steps
+    for step in steps:
+        if "result" in step:
+            step.pop("result")
+            if size(steps) <= limit:
+                return steps
+    for step in steps:  # still too large: shorten the interim prose too
+        if isinstance(step.get("text"), str) and len(step["text"]) > 2000:
+            step["text"] = step["text"][:2000]
+    return steps
+
+
 # ── SSE stream generator ──────────────────────────────────────────────────────
 
 def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
     driver = get_driver()
+
+    # Retry: the question to ask again, and everything after it, goes first.
+    if body.retry_of and body.conversation_id:
+        if not delete_last_turn(driver, body.conversation_id, body.retry_of):
+            yield _sse({"type": "error", "message": "Only the last question can be retried."})
+            return
+
+    # The steps of this answer, in order, as they are stored with it (the two filler steps are not).
+    trace: list[dict] = []
 
     # Step 1: parse mentions
     mentions = _parse_mentions(body.question)
@@ -268,22 +310,31 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
         if mentions:
             for mtype, mval in mentions:
                 papers, cypher, desc = _fetch_papers_for_mention(session, mtype, mval)
-                yield _sse({
+                step = {
                     "type": "step",
+                    "kind": "scope",
                     "description": desc,
                     "cypher": cypher,
                     "count": len(papers),
-                })
+                    "tool": "mention",
+                    "input": {"type": mtype, "value": mval},
+                    "papers": _paper_refs(papers),
+                }
+                trace.append(step)
+                yield _sse(step)
                 for p in papers:
                     if p["id"] not in papers_by_id:
                         papers_by_id[p["id"]] = p
         else:
-            yield _sse({
+            step = {
                 "type": "step",
+                "kind": "scope",
                 "description": "No scope given: choosing papers by semantic search and recency",
                 "cypher": None,
                 "count": None,
-            })
+            }
+            trace.append(step)
+            yield _sse(step)
             papers = _fallback_all_papers(session, question=body.question)
             for p in papers:
                 papers_by_id[p["id"]] = p
@@ -296,9 +347,11 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
                 "RETURN p.id AS id, p.title AS title, p.year AS year, p.abstract AS abstract, p.summary AS summary",
                 ids=body.paper_ids[:20],
             )]
-        yield _sse({"type": "step", "kind": "attach", "description": "Adding the papers you attached",
-                    "cypher": None, "count": len(attached),
-                    "papers": [{"id": p["id"], "title": p["title"], "year": p.get("year")} for p in attached]})
+        step = {"type": "step", "kind": "attach", "description": "Adding the papers you attached",
+                "cypher": None, "count": len(attached), "tool": "attach",
+                "papers": [{"id": p["id"], "title": p["title"], "year": p.get("year")} for p in attached]}
+        trace.append(step)
+        yield _sse(step)
         for p in attached:
             p["_attached"] = True
         rest = {k: v for k, v in papers_by_id.items() if k not in {p["id"] for p in attached}}
@@ -382,31 +435,71 @@ def _stream(body: KnowledgeChatRequest) -> Generator[str, None, None]:
     user_msg = add_message(driver, conv_id, "user", body.question, paper_ids, question_tokens)
     set_branch_label_if_empty(driver, conv_id, body.question[:80])
 
+    stop = threading.Event()
+    with _running_lock:
+        _running[user_msg["id"]] = stop
+
     def answer() -> Generator[dict, None, None]:
         """Model call and save in one producer: it runs to the end even if the
         browser disconnects, so a dropped connection never loses the answer
-        (the page then finds it by polling the conversation)."""
-        full_answer = ""
+        (the page then finds it by polling the conversation). Only the Stop
+        request (``POST /knowledge-chat/stop``) ends it early; what was written
+        so far is then saved."""
+        full_answer = ""      # text since the last interim: the answer proper
+        since_interim = ""    # same, kept for the trace's text step
+        stopped = False
+        model_events = None
         try:
-            for event in knowledge_chat_stream(
+            model_events = with_suggestions(knowledge_chat_stream(
                 question=body.question,
                 history=[{"role": m.role, "content": m.content} for m in body.history],
                 papers=all_papers,
                 model=body.model,
                 use_web=body.use_web,
                 driver=driver,
-            ):
-                if event.get("type") == "token":
+            ), question=body.question, conversation_id=conv_id)
+            for event in model_events:
+                if stop.is_set():
+                    stopped = True
+                    break
+                kind = event.get("type")
+                if kind == "token":
                     full_answer += event.get("text", "")
+                    since_interim += event.get("text", "")
+                elif kind == "step":
+                    trace.append(event)
+                elif kind == "interim":
+                    if since_interim.strip():
+                        trace.append({"kind": "text", "description": "", "text": since_interim})
+                    full_answer = since_interim = ""
                 yield event
+            if not stopped and stop.is_set():
+                stopped = True  # pressed while the last event was on its way
         except Exception as exc:
             log.error("knowledge_chat_stream error | %s", exc)
             set_message_error(driver, user_msg["id"], str(exc)[:1000])
             yield {"type": "error", "message": str(exc)}
             return
+        finally:
+            if model_events is not None:
+                try:
+                    model_events.close()
+                except Exception:
+                    pass
+            with _running_lock:
+                _running.pop(user_msg["id"], None)
+        if stopped and not full_answer.strip():
+            set_message_error(driver, user_msg["id"], "Stopped.")
+            yield {"type": "done", "conversation_id": conv_id, "message_id": None, "stopped": True}
+            return
         # Step 6: save assistant message and emit done
-        msg = add_message(driver, conv_id, "assistant", full_answer, paper_ids, estimate_tokens(full_answer))
-        yield {"type": "done", "conversation_id": conv_id, "message_id": msg["id"]}
+        steps = _cap_trace(trace)
+        msg = add_message(driver, conv_id, "assistant", full_answer, paper_ids, estimate_tokens(full_answer),
+                          steps=steps, stopped=stopped)
+        done = {"type": "done", "conversation_id": conv_id, "message_id": msg["id"]}
+        if stopped:
+            done["stopped"] = True
+        yield done
 
     # The producer starts now, before anything else is sent: from here on the
     # answer is written and saved whether or not the browser stays connected.
@@ -433,6 +526,21 @@ def stream_chat(body: KnowledgeChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+class StopBody(BaseModel):
+    user_message_id: str
+
+
+@router.post("/stop")
+def stop_answer(body: StopBody):
+    """Stop the answer to a question that is still being written; the part written so far is kept."""
+    with _running_lock:
+        event = _running.get(body.user_message_id)
+    if event is None:
+        return {"stopped": False}
+    event.set()
+    return {"stopped": True}
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -641,18 +749,31 @@ def repair_answer_concept(msg_id: str, index: int, body: RepairBody):
 # ── 3D structures (```structure blocks) ───────────────────────────────────────
 
 @router.get("/structures")
-def get_structure(pdb: str | None = Query(None), afdb: str | None = Query(None)):
-    """Coordinates for the 3D viewer: an RCSB entry or an AlphaFold DB model, cached."""
-    from services.structures import StructureError, alphafold_model, rcsb_entry
+def get_structure(
+    pdb: str | None = Query(None),
+    afdb: str | None = Query(None),
+    ccd: str | None = Query(None),
+    pubchem: str | None = Query(None),
+):
+    """Coordinates for the 3D viewer: an RCSB entry, an AlphaFold DB model, an RCSB
+    chemical component or a PubChem compound (the last two as SDF), cached."""
+    from services.structures import StructureError, alphafold_model, ccd_ligand, pubchem_compound, rcsb_entry
 
     try:
         if pdb:
             return rcsb_entry(pdb)
         if afdb:
             return alphafold_model(afdb)
+        if ccd:
+            return ccd_ligand(ccd)
+        if pubchem:
+            return pubchem_compound(pubchem)
     except StructureError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:  # network trouble
-        log.warning("Structure fetch failed (%s / %s): %s", pdb, afdb, exc)
+        log.warning("Structure fetch failed (%s / %s / %s / %s): %s", pdb, afdb, ccd, pubchem, exc)
         raise HTTPException(status_code=502, detail="Could not fetch the structure.")
-    raise HTTPException(status_code=422, detail="Give ?pdb=<PDB id> or ?afdb=<UniProt accession>")
+    raise HTTPException(
+        status_code=422,
+        detail="Give ?pdb=<PDB id>, ?afdb=<UniProt accession>, ?ccd=<chemical component code> or ?pubchem=<CID>",
+    )

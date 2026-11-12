@@ -13,7 +13,7 @@ A personal research knowledge management system with a graph database backend, A
 - Chat with individual papers or across the entire library (Knowledge Chat)
 - Filter and explore via projects, tags, topics, people, venues
 - Visualise the knowledge graph of connections
-- Discover new papers from arXiv, PubMed, and Semantic Scholar
+- Find new papers on arXiv, PubMed, bioRxiv and Semantic Scholar (Explore → Find papers), with a keyword feed
 - Track authors and auto-import their new publications
 - Read and annotate technical blog posts alongside papers
 - Highlight and annotate PDFs in-browser

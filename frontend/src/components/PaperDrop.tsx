@@ -14,6 +14,8 @@ import {
 interface Props {
   onUploaded: (paper: T_IngestOut) => void;
   debug?: boolean;
+  /** New papers are added to this project on upload (the Library's active project filter). */
+  defaultProjectId?: string;
 }
 
 type Tab = "pdf" | "url" | "bulk" | "queue";
@@ -39,7 +41,7 @@ type QueuedPdf = {
   tagSuggestions?: TagSuggestions;
 };
 
-export default function PaperDrop({ onUploaded, debug }: Props) {
+export default function PaperDrop({ onUploaded, debug, defaultProjectId }: Props) {
   const navigate = useNavigate();
   const { settings } = useAppSettings();
   const [open, setOpen]   = useState(false);
@@ -473,7 +475,7 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
 
         {/* Floating panel */}
         {open && (
-          <div className="absolute right-0 top-11 z-50 w-[480px] bg-white border border-gray-200 rounded-xl shadow-xl p-5 space-y-4">
+          <div className="max-sm:fixed max-sm:inset-x-3 max-sm:top-28 max-sm:max-h-[80vh] max-sm:overflow-y-auto sm:absolute sm:right-0 sm:top-11 sm:w-[480px] z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-5 space-y-4">
             {/* Tab bar */}
             <div className="flex border border-gray-200 rounded-lg overflow-hidden text-sm font-medium">
               <button
@@ -639,6 +641,7 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
             }}
             onCancel={() => setActiveIdx(-1)}
             debug={debug}
+            defaultProjectId={defaultProjectId}
           />
         );
       })()}
@@ -652,6 +655,7 @@ export default function PaperDrop({ onUploaded, debug }: Props) {
           onConfirmed={(paper) => { setPendingUrl(null); setUrlMeta(null); onUploaded(paper); }}
           onCancel={() => { setPendingUrl(null); setUrlMeta(null); }}
           debug={debug}
+          defaultProjectId={defaultProjectId}
         />
       )}
     </>

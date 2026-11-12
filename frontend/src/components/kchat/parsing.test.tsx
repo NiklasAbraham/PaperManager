@@ -33,7 +33,7 @@ describe("parseSource (```structure blocks)", () => {
   });
 
   it("reads a JSON spec and a flat one-model spec", () => {
-    expect(parseSource('{"models": [{"pdb": "1UBQ"}], "title": "Ubiquitin"}')?.spec.title).toBe("Ubiquitin");
+    expect(parseSource('{"models": [{"pdb": "1UBQ"}], "title": "Ubiquitin"}')).toMatchObject({ spec: { title: "Ubiquitin" } });
     expect(normalise({ pdb: "1UBQ", caption: "c" })).toMatchObject({ caption: "c", models: [{ pdb: "1UBQ" }] });
   });
 

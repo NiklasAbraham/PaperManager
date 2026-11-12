@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ChatLinksContext, Markdown } from "./Markdown";
 
@@ -26,6 +27,36 @@ describe("Markdown: maths", () => {
   it("shows broken LaTeX instead of throwing", () => {
     const { container } = renderMd("$\\frac{a$");
     expect(container.textContent).toContain("frac");
+  });
+});
+
+describe("Markdown: maths for copy-TeX", () => {
+  it("keeps the TeX source in a MathML annotation", () => {
+    const { container } = renderMd("Inline $x^2$.");
+    const ann = container.querySelector('annotation[encoding="application/x-tex"]');
+    expect(ann?.textContent).toBe("x^2");
+  });
+});
+
+describe("Markdown: without a ChatLinksContext", () => {
+  it("opens an image in a new tab", () => {
+    render(<Markdown text={`![Figure 2](/papers/${ID}/figures/f1/image)`} />);
+    const a = screen.getByAltText("Figure 2").closest("a")!;
+    expect(a.getAttribute("target")).toBe("_blank");
+    expect(a.getAttribute("href")).toMatch(new RegExp(`/papers/${ID}/figures/f1/image$`));
+  });
+
+  it("links a citation to the paper page in the same tab", () => {
+    render(<Markdown text={`See [RFdiffusion](/paper/${ID}).`} />);
+    const a = screen.getByText("RFdiffusion");
+    expect(a.getAttribute("href")).toBe(`/paper/${ID}`);
+    expect(a.getAttribute("target")).toBeNull();
+    expect(a.className).toContain("kc-cite");
+  });
+
+  it("uses the router for the citation when there is one", () => {
+    render(<MemoryRouter><Markdown text={`See [RFdiffusion](/paper/${ID}).`} /></MemoryRouter>);
+    expect(screen.getByText("RFdiffusion").getAttribute("href")).toBe(`/paper/${ID}`);
   });
 });
 
@@ -114,6 +145,11 @@ describe("Markdown: concept and structure blocks", () => {
       expect(container.querySelector(".kc-card-pending")?.textContent).toContain("structure");
     },
   );
+
+  it("explains a structure spec that is complete JSON but unusable", async () => {
+    renderMd('```structure\n{"title": "no source", "models": [{"label": "x"}]}\n```');
+    expect(await screen.findByText(/structure spec not usable/)).toBeInTheDocument();
+  });
 
   it("leaves other fenced blocks as code", () => {
     const { container } = renderMd("```json\n{\"type\": \"formula\"}\n```");

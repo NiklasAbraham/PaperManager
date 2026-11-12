@@ -1,10 +1,11 @@
 import json
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from pydantic import BaseModel
 from db.connection import get_driver
 from db.queries.search import search_papers
+from services.library_search.engine import normalize_added
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
@@ -22,14 +23,30 @@ def search(
     year_max: Optional[int] = None,
     reading_status: Optional[str] = None,
     bookmarked: Optional[bool] = None,
+    added_after: Optional[str] = Query(None, description="added on or after: YYYY-MM-DD or an ISO datetime"),
+    added_before: Optional[str] = Query(None, description="added before: YYYY-MM-DD (that day included) or an ISO datetime"),
+    has_pdf: Optional[bool] = None,
+    has_text: Optional[bool] = Query(None, description="full text extracted"),
+    has_note: Optional[bool] = None,
+    has_highlights: Optional[bool] = None,
+    document_type: Optional[str] = Query(None, description="paper | book | lecture_deck | news_article"),
+    rating_min: Optional[int] = Query(None, ge=1, le=5),
     include_references: bool = True,
-    sort: str = Query("relevance", description="relevance | date_desc | date_asc | year_desc | year_asc | title_asc"),
+    sort: str = Query("relevance", description=(
+        "relevance | date_desc | date_asc | year_desc | year_asc | title_asc | "
+        "rating_desc | citations_desc | updated_desc")),
     mode: str = Query("lexical", description="lexical | hybrid | semantic"),
     snippets: int = Query(2, ge=0, le=6),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=2000),
 ):
     """Ranked library search (see .specs/012_search.md), or filters only without ``q``."""
+    for name, value, before in (("added_after", added_after, False), ("added_before", added_before, True)):
+        try:
+            normalize_added(value, before=before)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"{name}: {exc}") from None
+    document_type = (document_type or "").strip().lower() or None
     return search_papers(
         get_driver(),
         q=q,
@@ -41,6 +58,15 @@ def search(
         year_max=year_max,
         reading_status=reading_status,
         bookmarked=bookmarked,
+        added_after=added_after,
+        added_before=added_before,
+        has_pdf=has_pdf,
+        has_text=has_text,
+        has_note=has_note,
+        has_highlights=has_highlights,
+        document_type=document_type,
+        rating_min=rating_min,
+        cache=True,
         skip=skip,
         limit=limit,
         venue=venue,

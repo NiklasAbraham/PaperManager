@@ -83,30 +83,6 @@ export function suggestionItems(s: SearchSuggestions | null): SuggestionItem[] {
   return out;
 }
 
-// URL keys that narrow the paper list on the Library page (the query itself is "q").
-export const FILTER_KEYS = ["tag", "topic", "project_id", "person_id", "reading_status", "bookmarked", "venue"] as const;
-export const QUERY_PAGE_ALL = 200; // page size for a query when "All" papers per page is set
-
-/** The /search parameters for a Library URL: filters always, plus the ranked-query options
- * (mode, sort, references, paging) when there is a query. */
-export function buildSearchParams(url: URLSearchParams, page: number, perPage: number): URLSearchParams {
-  const out = new URLSearchParams();
-  const q = url.get("q")?.trim();
-  if (q) out.set("q", q);
-  for (const k of FILTER_KEYS) {
-    const v = url.get(k);
-    if (v) out.set(k, v);
-  }
-  if (q) {
-    const size = perPage || QUERY_PAGE_ALL;
-    out.set("mode", url.get("mode") || "hybrid");
-    out.set("sort", url.get("sort") || "relevance");
-    out.set("include_references", url.get("refs") === "1" ? "true" : "false");
-    out.set("skip", String((page - 1) * size));
-    out.set("limit", String(size));
-  } else {
-    out.set("include_references", "false");
-    out.set("limit", "2000");
-  }
-  return out;
-}
+// Filter URL state (keys, /search mapping, chips) lives in filterState.ts; re-exported here
+// because the Library page and its tests have always imported it from this module.
+export { FILTER_KEYS, QUERY_PAGE_ALL, buildSearchParams } from "./filterState";

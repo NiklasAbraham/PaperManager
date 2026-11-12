@@ -12,6 +12,7 @@ which decides which units a hit covers and where to put the ``<mark>`` spans of 
 from __future__ import annotations
 
 import re
+import threading
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
@@ -308,10 +309,74 @@ def matchers_for(pq: ParsedQuery) -> list[UnitMatcher]:
     return [UnitMatcher(u) for u in pq.units]
 
 
+class _Vocabulary:
+    """Every distinct word of every text that ``token_set`` has seen, in first-seen order,
+    and per term unit the words that satisfy it (``accepted``). Texts recur across queries
+    (the same abstracts), so a unit's word list is computed once over this vocabulary and
+    afterwards only extended with words that appeared since. A word the vocabulary has
+    never seen cannot occur in any text a Coverage looks at, so a larger vocabulary than
+    the candidates' own never changes which units a text covers."""
+
+    MAX_WORDS = 2_000_000
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.words: list[str] = []
+        self.seen: set[str] = set()
+        self.units: dict[tuple, list] = {}   # (term, prefix, fuzzy) -> [accepted set, words checked]
+
+    def reset_if_huge(self) -> None:
+        """Start over (and forget the cached token sets, whose words would be missing)."""
+        with self.lock:
+            if len(self.words) <= self.MAX_WORDS:
+                return
+            self.words, self.seen, self.units = [], set(), {}
+        token_set.cache_clear()
+
+    def add(self, toks: frozenset) -> None:
+        with self.lock:
+            new = toks - self.seen
+            if new:
+                self.seen |= new
+                self.words.extend(new)
+
+    def accepted(self, t: str, prefix: bool, fuzzy: bool) -> frozenset:
+        key = (t, prefix, fuzzy)
+        with self.lock:
+            ent = self.units.get(key)
+            if ent is None:
+                if len(self.units) > 4096:
+                    self.units.clear()
+                ent = self.units[key] = [{t}, 0]
+            acc, done = ent
+            if done < len(self.words):
+                tail = self.words[done:]
+                if prefix:
+                    acc.update(w for w in tail if w.startswith(t))
+                if fuzzy:
+                    n = len(t)
+                    near = (w for w in tail if n - 1 <= len(w) <= n + 1)
+                    if n >= 4:
+                        # One edit leaves the first or the last letter in place, or (same
+                        # length) the second: a cheap necessary test before the real one.
+                        first, last, second = t[0], t[-1], t[1]
+                        near = (w for w in near
+                                if w[0] == first or w[-1] == last or (len(w) == n and w[1] == second))
+                    acc.update(w for w in near if within_one_edit(w, t))
+                ent[1] = len(self.words)
+            return frozenset(acc)
+
+
+_VOCAB = _Vocabulary()
+
+
 @lru_cache(maxsize=50000)
 def token_set(text: str) -> frozenset[str]:
-    """Distinct folded tokens of a text (cached: the same abstracts recur across queries)."""
-    return frozenset(TOKEN.findall(fold(text)))
+    """Distinct folded tokens of a text (cached: the same abstracts recur across queries).
+    The tokens also join the shared vocabulary that ``Coverage`` expands terms over."""
+    ts = frozenset(TOKEN.findall(fold(text)))
+    _VOCAB.add(ts)
+    return ts
 
 
 def within_one_edit(a: str, b: str) -> bool:
@@ -344,47 +409,32 @@ def within_one_edit(a: str, b: str) -> bool:
 class Coverage:
     """Decides which units a set of texts contains, for many candidates of one query.
 
-    Built once per query from the vocabulary of all candidate texts: for every term unit,
-    the word forms that satisfy it (the term, words it prefixes, words one edit away).
+    Built once per query: for every term unit, the word forms that satisfy it (the term,
+    words it prefixes, words one edit away), expanded over the shared vocabulary of all
+    texts seen so far (cached per unit, see ``_Vocabulary``).
     A text then covers the term if its token set meets that set, a C-level set operation,
     so checking a thousand candidates costs a few milliseconds. Phrases use the regex."""
 
     def __init__(self, units: list[Unit], texts):
         self.units = units
-        vocab: set[str] = set()
-        for t in texts:
+        _VOCAB.reset_if_huge()
+        for t in texts:   # registers every word of every text in the shared vocabulary
             if t:
-                vocab |= token_set(t)
-        need_prefix = any(u.prefix for u in units if not u.is_phrase)
-        need_fuzzy = any(u.fuzzy for u in units if not u.is_phrase)
-        by_head: dict[str, list[str]] = {}
-        by_len: dict[int, list[str]] = {}
-        if need_prefix or need_fuzzy:
-            for w in vocab:
-                if need_prefix:
-                    by_head.setdefault(w[:2], []).append(w)
-                if need_fuzzy:
-                    by_len.setdefault(len(w), []).append(w)
+                token_set(t)
         self.accept: list[frozenset[str] | None] = []
         self.phrase: list[re.Pattern | None] = []
+        # A phrase can only match in a text that has all its words (or its joined spelling)
+        # as whole words, so the regex runs only on texts whose token set passes this test.
+        self.need: list[list[frozenset[str]] | None] = []
         for u in units:
             if u.is_phrase:
                 self.accept.append(None)
                 self.phrase.append(UnitMatcher(u).strict)
+                self.need.append([frozenset(u.tokens)] + ([frozenset(u.alt[:1])] if u.alt else []))
                 continue
-            t = u.tokens[0]
-            acc = {t}
-            if u.prefix:
-                acc.update(w for w in by_head.get(t[:2], ()) if w.startswith(t))
-            if u.fuzzy:
-                n = len(t)
-                # One deletion from the term: a set intersection. Same length or one
-                # longer: checked word by word, only within those two length buckets.
-                acc.update({t[:i] + t[i + 1:] for i in range(n)}.intersection(by_len.get(n - 1, ())))
-                for k in (n, n + 1):
-                    acc.update(w for w in by_len.get(k, ()) if within_one_edit(w, t))
-            self.accept.append(frozenset(acc))
+            self.accept.append(_VOCAB.accepted(u.tokens[0], u.prefix, u.fuzzy))
             self.phrase.append(UnitMatcher(u).strict if u.alt else None)
+            self.need.append(None)
 
     def covered(self, texts) -> set[int]:
         texts = [t for t in texts if t]
@@ -393,8 +443,11 @@ class Coverage:
         for i, acc in enumerate(self.accept):
             if acc is not None and any(not ts.isdisjoint(acc) for ts in toks):
                 hit.add(i)
-            elif self.phrase[i] is not None and any(self.phrase[i].search(fold(t)) for t in texts):
-                hit.add(i)
+            elif self.phrase[i] is not None:
+                need = self.need[i]
+                if any((need is None or any(n <= ts for n in need)) and self.phrase[i].search(fold(t))
+                       for t, ts in zip(texts, toks)):
+                    hit.add(i)
         return hit
 
 

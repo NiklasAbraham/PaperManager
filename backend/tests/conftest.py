@@ -15,6 +15,15 @@ os.environ.setdefault("REQUIRE_LOGIN", "false")
 # Extracted references have their DOIs / arXiv ids resolved online (services/citecheck.py);
 # off in tests, test_citecheck.py turns it on with the resolvers patched.
 os.environ.setdefault("REFERENCE_ID_CHECK", "0")
+# GET /search keeps ranked results for a minute (services/library_search/cache.py); the demo
+# fixtures wipe and reload the database behind its back, so it is off here and
+# test_library_search_cache.py turns it on for its own checks.
+os.environ.setdefault("LIBRARY_SEARCH_CACHE", "0")
+# The token ledger (services/usage) records every SDK call; keep test calls out of the real
+# backend/data/usage.sqlite.
+import tempfile as _tempfile
+
+os.environ.setdefault("USAGE_DB_PATH", os.path.join(_tempfile.gettempdir(), f"pm-test-usage-{os.getpid()}.sqlite"))
 
 
 # Many tests create and delete real nodes through get_driver(). Run against anything but a

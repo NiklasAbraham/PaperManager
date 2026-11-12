@@ -268,6 +268,9 @@ class KnowledgeChatRequest(BaseModel):
     use_web: bool = True
     # Library papers attached in the composer: always loaded into context.
     paper_ids: list[str] = []
+    # Retry: the user message (the last question of conversation_id) to delete,
+    # with everything after it, before this question is saved.
+    retry_of: str | None = None
 
 
 class ConversationOut(BaseModel):
@@ -305,6 +308,10 @@ class MessageOut(BaseModel):
     concepts_error: str | None = None
     # Set on a question whose answer failed (the stream may have been lost).
     answer_error: str | None = None
+    # Tool trace of an answer: step dicts and {"kind": "text", "text"} interim prose, in order.
+    steps: list[dict] | None = None
+    # True on an answer the user stopped before it was complete.
+    stopped: bool | None = None
 
 
 # ── Figures ──────────────────────────────────────────────────────────────────

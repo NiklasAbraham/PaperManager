@@ -44,9 +44,9 @@ This means every capability is available both via HTTP (browser) and via MCP too
 | `topics.py` | `/topics` | Topic CRUD + rename |
 | `projects.py` | `/projects` | Project CRUD + paper membership |
 | `search.py` | `/search` | Full-text + filtered search |
-| `graph.py` | `/graph` | Graph visualisation data + custom Cypher graph |
+| `graph.py` | `/graph` | Graph visualisation data + admin Cypher query (`/graph/query`, read-only by default) |
 | `stats.py` | `/stats` | Library statistics |
-| `cypher.py` | `/cypher` | Raw Cypher editor + AI assist + node delete |
+| `cypher.py` | `/cypher` | Cypher schema, AI assist, raw run, node delete (admin only; the UI is the Graph page query panel, `/cypher` redirects to `/graph?view=query`) |
 | `export.py` | `/export` | BibTeX export |
 | `backfill.py` | `/backfill` | Bulk AI enrichment (topics, summaries, figures, embeddings) |
 | `knowledge_chat.py` | `/knowledge-chat` | Multi-paper chat with SSE streaming |

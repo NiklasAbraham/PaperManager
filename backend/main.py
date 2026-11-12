@@ -8,6 +8,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from logger import setup_logging
 setup_logging()
 
+# Record every LLM call (tokens, list-price cost) in the token ledger: .specs/013_tokens.md
+from services.usage import install as install_usage_ledger
+install_usage_ledger()
+
 from config import settings
 from db.connection import get_driver, close_driver, reset_driver
 from db.schema import run_schema_setup
@@ -51,6 +55,10 @@ from routers.merge import router as merge_router
 from routers.audit_log import router as audit_log_router
 from routers.ideogram import router as ideogram_router
 from routers.conferences import router as conferences_router
+from routers.tokens import router as tokens_router
+from routers.reports import router as reports_router
+from routers.suggestions import router as suggestions_router
+from routers.system_health import router as system_health_router
 
 
 @asynccontextmanager
@@ -66,6 +74,8 @@ async def lifespan(app: FastAPI):
     get_driver().verify_connectivity()
     log.info("Neo4j connection verified")
     run_schema_setup(get_driver())
+    from services.reports.jobs import recover_interrupted
+    recover_interrupted(get_driver())
     log.info("Schema ready")
     seed_default_tags(get_driver())
     log.info("Default tags ready")
@@ -176,6 +186,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+
+@app.middleware("http")
+async def invalidate_search_cache(request: Request, call_next):
+    """Any write (non-GET request) drops the cached library search results."""
+    try:
+        return await call_next(request)
+    finally:
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            from services.library_search import cache as search_cache
+            search_cache.bump()
+
 if settings.rate_limit_enabled:
     app.add_middleware(
         RateLimitMiddleware,
@@ -230,6 +251,10 @@ app.include_router(merge_router)
 app.include_router(audit_log_router)
 app.include_router(ideogram_router)
 app.include_router(conferences_router)
+app.include_router(tokens_router)
+app.include_router(reports_router)
+app.include_router(suggestions_router)
+app.include_router(system_health_router)
 
 
 @app.get("/litellm/models", response_model=list[str])

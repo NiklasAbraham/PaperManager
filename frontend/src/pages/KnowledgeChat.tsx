@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch, compactConversation, deleteConversation, forkConversation, getAnswerConcepts,
   getConversationMessages, listConversations, renameConversation, repairAnswerConcept,
-  streamKnowledgeChat, visualiseAnswer,
+  stopKnowledgeChat, streamKnowledgeChat, visualiseAnswer,
 } from "../api/client";
 import { BranchLane, type Branch } from "../components/kchat/BranchLane";
 import { Composer, type AttachedPaper, type Entities } from "../components/kchat/Composer";
@@ -20,24 +20,31 @@ import ConceptCard from "../components/kchat/ConceptCard";
 import { ConversationList } from "../components/kchat/ConversationList";
 import { ChatLinksContext, Markdown, type ChatLinks } from "../components/kchat/Markdown";
 import { PreviewPane, type Preview } from "../components/kchat/PreviewPane";
-import { citedPapers, splitSections } from "../components/kchat/sections";
+import { splitSections } from "../components/kchat/sections";
+import { answerSources } from "../components/kchat/sources";
+import { Trace } from "../components/kchat/ToolCall";
+import { TurnSources } from "../components/kchat/TurnSources";
+import { applyEvent, type ChatEvent, type SavedMessage, type TraceStep } from "../components/kchat/types";
 import "../components/kchat/kchat.css";
+import SuggestionChip from "../components/insights/SuggestionChip";
+import type { SuggestionOut } from "../api/insights";
 import { useAppSettings } from "../contexts/SettingsContext";
 import { CHAT_MODEL_LABELS, useChatModels, type ChatModel } from "../lib/chatModels";
 import type {
-  ChatConcept, ChatConceptsState, ContextPaper, Conversation, KnowledgeMessage, MessagePaper,
-  StepKind, TokenTotals,
+  ChatConcept, ChatConceptsState, ContextPaper, Conversation, MessagePaper, TokenTotals,
 } from "../types";
 
 // ── Transcript items ─────────────────────────────────────────────────────────
 
-type Step = { kind?: StepKind; description: string; cypher?: string | null; count?: number | null; papers?: MessagePaper[] };
 type UserItem = { kind: "user"; key: string; id?: string; text: string };
 type AnswerItem = {
-  kind: "assistant"; key: string; id?: string; text: string; steps: Step[];
+  kind: "assistant"; key: string; id?: string; text: string; steps: TraceStep[];
   streaming?: boolean; error?: string; stopped?: boolean; reconnecting?: boolean;
-  papers: MessagePaper[];
+  /** The papers that were in the model's context, and those among them the user attached. */
+  papers: MessagePaper[]; attached: MessagePaper[];
   concepts: ChatConcept[] | null; conceptsStatus: ChatConceptsState["status"]; conceptsError: string | null;
+  /** An improvement the model proposed in this turn (.specs/015_suggestions.md). */
+  suggestion?: SuggestionOut;
 };
 type SystemItem = { kind: "system"; key: string; text: string };
 type Item = UserItem | AnswerItem | SystemItem;
@@ -45,19 +52,20 @@ type Item = UserItem | AnswerItem | SystemItem;
 let keySeq = 0;
 const nextKey = () => `k${++keySeq}`;
 
-const answerOf = (m: KnowledgeMessage): AnswerItem => ({
-  kind: "assistant", key: m.id, id: m.id, text: m.content, steps: [], papers: m.papers ?? [],
+const answerOf = (m: SavedMessage): AnswerItem => ({
+  kind: "assistant", key: m.id, id: m.id, text: m.content, steps: m.steps ?? [], stopped: !!m.stopped,
+  papers: m.papers ?? [], attached: (m.papers ?? []).filter((p) => (p as { attached?: boolean }).attached),
   concepts: m.concepts ?? null, conceptsStatus: m.concepts_status ?? null, conceptsError: m.concepts_error ?? null,
 });
 
-export function toItems(msgs: KnowledgeMessage[]): Item[] {
+export function toItems(msgs: SavedMessage[]): Item[] {
   return msgs.flatMap((m, i): Item[] => {
     if (m.role === "system") return [{ kind: "system", key: m.id, text: m.content }];
     if (m.role === "assistant") return [answerOf(m)];
     const user: Item = { kind: "user", key: m.id, id: m.id, text: m.content };
     // A question whose answer failed shows the failure in place of the answer.
     if (m.answer_error && msgs[i + 1]?.role !== "assistant") {
-      return [user, { ...answerOf({ ...m, content: "" }), key: `${m.id}-err`, id: undefined, error: m.answer_error }];
+      return [user, { ...answerOf({ ...m, content: "", steps: null, stopped: null }), key: `${m.id}-err`, id: undefined, error: m.answer_error }];
     }
     return [user];
   });
@@ -70,10 +78,10 @@ export function toItems(msgs: KnowledgeMessage[]): Item[] {
 export async function awaitSavedAnswer(
   conversationId: string, userMessageId: string,
   opts: { every?: number; timeout?: number; signal?: { stopped: boolean } } = {},
-): Promise<KnowledgeMessage | { error: string }> {
+): Promise<SavedMessage | { error: string }> {
   const every = opts.every ?? 4000, deadline = Date.now() + (opts.timeout ?? 20 * 60_000);
   while (Date.now() < deadline && !opts.signal?.stopped) {
-    const msgs = await getConversationMessages(conversationId).catch(() => null);
+    const msgs: SavedMessage[] | null = await getConversationMessages(conversationId).catch(() => null);
     const i = msgs ? msgs.findIndex((m) => m.id === userMessageId) : -1;
     if (msgs && i >= 0) {
       if (msgs[i + 1]?.role === "assistant") return msgs[i + 1];
@@ -106,38 +114,6 @@ const STARTERS = [
 const fmtK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 // ── Small pieces ─────────────────────────────────────────────────────────────
-
-const STEP_LABEL: Record<StepKind, string> = {
-  cypher: "Graph", search: "Search", fulltext: "Read", figures: "Figures", web: "Web", attach: "Attach",
-};
-
-function StepRow({ step, onPaper }: { step: Step; onPaper: (p: MessagePaper) => void }) {
-  const [open, setOpen] = useState(false);
-  const detail = !!step.cypher || !!step.papers?.length;
-  return (
-    <div className={`kc-step ${open ? "open" : ""}`}>
-      <button type="button" className="kc-step-head" onClick={() => detail && setOpen((o) => !o)} aria-expanded={open}>
-        <span className="kc-step-dot" />
-        <span className="kc-step-kind">{step.kind ? STEP_LABEL[step.kind] : "Library"}</span>
-        <span className="kc-step-desc">{step.description}</span>
-        {step.count != null && <span className="kc-step-count">{step.count}</span>}
-        {detail && <span className="kc-chev">{open ? "▾" : "▸"}</span>}
-      </button>
-      {open && (
-        <div className="kc-step-body">
-          {step.cypher && !step.cypher.startsWith("[vector search]") && <pre><code>{step.cypher}</code></pre>}
-          {!!step.papers?.length && (
-            <div className="kc-src-list">
-              {step.papers.map((p) => (
-                <button type="button" key={p.id} className="kc-src-chip" onClick={() => onPaper(p)}>{p.title}{p.year ? ` · ${p.year}` : ""}</button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function ContextStrip({ totals, papers, answerTokens, onPaper }: {
   totals: TokenTotals | null; papers: ContextPaper[]; answerTokens: number; onPaper: (p: MessagePaper) => void;
@@ -191,9 +167,12 @@ const ForkIcon = () => (
 );
 
 /** An answer: its library steps, its sections with their concept cards, and a footer of sources and actions. */
-function Answer({ item, onPaper, onVisualise, onRepair }: {
+function Answer({ item, onPaper, onFigure, onVisualise, onRepair, onRetry }: {
   item: AnswerItem;
   onPaper: (p: MessagePaper) => void;
+  onFigure: (src: string, caption: string) => void;
+  /** Given for the last answer of the conversation when it failed or was stopped. */
+  onRetry?: () => void;
   onVisualise: (item: AnswerItem) => void;
   onRepair: (item: AnswerItem, index: number, error: string) => void;
 }) {
@@ -201,7 +180,7 @@ function Answer({ item, onPaper, onVisualise, onRepair }: {
   const [copied, setCopied] = useState(false);
   const [crashed, setCrashed] = useState<Record<number, string>>({});
   const sections = useMemo(() => splitSections(item.text), [item.text]);
-  const cited = useMemo(() => citedPapers(item.text), [item.text]);
+  const sources = useMemo(() => answerSources(item.steps, item.text, item.attached), [item.steps, item.text, item.attached]);
   const cards = (item.concepts ?? []).map((c, i) => ({ c, i }));
   const placed = (s: number) => cards.filter(({ c }) => Math.min(c.section, sections.length - 1) === s);
   const failed = cards.filter(({ c }) => !c.spec);
@@ -213,7 +192,7 @@ function Answer({ item, onPaper, onVisualise, onRepair }: {
 
   return (
     <div className="msg assistant">
-      {item.steps.length > 0 && <div className="kc-steps">{item.steps.map((s, i) => <StepRow key={i} step={s} onPaper={onPaper} />)}</div>}
+      <Trace steps={item.steps} waiting={!!item.streaming && !item.text} onPaper={onPaper} onFigure={onFigure} />
       {sections.map((sec, s) => (
         <div key={s} className="kc-section">
           {sec.trim() && <Markdown text={sec} />}
@@ -232,8 +211,18 @@ function Answer({ item, onPaper, onVisualise, onRepair }: {
       {item.reconnecting && (
         <div className="kc-working"><span className="kc-spinner" /> connection lost; the answer is still being written and will appear here…</div>
       )}
-      {item.error && <div className="kc-note error">{item.error}</div>}
-      {item.stopped && <div className="kc-note">stopped</div>}
+      {item.error && (
+        <div className="kc-note error">
+          {item.error}
+          {onRetry && <button type="button" className="kc-mini kc-retry" onClick={onRetry} title="Ask this question again">retry</button>}
+        </div>
+      )}
+      {item.stopped && (
+        <div className="kc-note">
+          stopped
+          {onRetry && !item.error && <button type="button" className="kc-mini kc-retry" onClick={onRetry} title="Ask this question again">retry</button>}
+        </div>
+      )}
       {running && (
         <div className="kc-card kc-card-pending kc-visualising">
           <span className="kc-spinner" /> Making concept cards from this answer… formulas and graphs take about a minute, animations a few.
@@ -244,12 +233,10 @@ function Answer({ item, onPaper, onVisualise, onRepair }: {
       {failed.length > 0 && (
         <div className="kc-note">{failed.length} card{failed.length > 1 ? "s" : ""} could not be made ({failed.map(({ c }) => c.label).join(", ")}).</div>
       )}
+      {item.suggestion && !item.streaming && <SuggestionChip suggestion={item.suggestion} />}
       {!item.streaming && !item.reconnecting && item.text && (
         <div className="kc-answer-foot">
-          {cited.length > 0 && <span className="kc-kicker">Cited</span>}
-          {cited.map((p) => (
-            <button type="button" key={p.id} className="kc-src-chip k-paper" onClick={() => onPaper(p)} title={p.title}><span>{p.title}</span></button>
-          ))}
+          <TurnSources sources={sources} onPaper={onPaper} />
           {item.papers.length > 0 && (
             <button type="button" className="kc-src-more" onClick={() => setShowContext((v) => !v)}>
               {item.papers.length} in context {showContext ? "▾" : "▸"}
@@ -304,6 +291,10 @@ export default function KnowledgeChat() {
   const [compacting, setCompacting] = useState(false);
   const [entities, setEntities] = useState<Entities>({ tags: [], topics: [], projects: [], people: [], users: [], papers: [] });
   const abort = useRef<AbortController | null>(null);
+  // The running request: its question's server id (from the conversation event), whether Stop was pressed, the abort timer.
+  const runUser = useRef<string | undefined>(undefined);
+  const stopping = useRef(false);
+  const stopTimer = useRef<number | undefined>(undefined);
   const scroller = useRef<HTMLDivElement>(null);
   const thread = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -395,7 +386,7 @@ export default function KnowledgeChat() {
     const stripped = question.replace(/@user:\S+\s*/gi, "").trim() || question;
     const key = nextKey();
     setItems((xs) => [...xs, { kind: "user", key: nextKey(), text: question },
-      { kind: "assistant", key, text: "", steps: [], papers: [], streaming: true, concepts: null, conceptsStatus: null, conceptsError: null }]);
+      { kind: "assistant", key, text: "", steps: [], papers: [], attached: [], streaming: true, concepts: null, conceptsStatus: null, conceptsError: null }]);
     setRunning(true);
     try {
       const data = await apiFetch<{ message_count: number; answer: string }>(`/users/${encodeURIComponent(userName)}/ask`, {
@@ -409,52 +400,77 @@ export default function KnowledgeChat() {
     }
   };
 
-  const send = async (question: string) => {
+  /**
+   * Ask `question`. A retry drops the last question and answer from the transcript first and
+   * names the question's server id, so the server deletes it too before answering again.
+   */
+  const send = async (question: string, opts: { retry?: { id?: string } } = {}) => {
     if (running) return;
     const teammate = question.match(/@user:(\S+)/i);
-    if (teammate) return askTeammate(question, teammate[1]);
+    const retry = opts.retry;
+    if (teammate) {
+      if (retry) setItems((xs) => xs.slice(0, -2));
+      return askTeammate(question, teammate[1]);
+    }
 
-    const history = historyOf(items);
+    const history = historyOf(retry ? items.slice(0, -2) : items);
     const key = nextKey();
+    const userKey = nextKey();
     stick.current = true;
-    setItems((xs) => [...xs, { kind: "user", key: nextKey(), text: question },
-      { kind: "assistant", key, text: "", steps: [], papers: [], streaming: true, concepts: null, conceptsStatus: null, conceptsError: null }]);
+    const pair: Item[] = [
+      { kind: "user", key: userKey, text: question },
+      { kind: "assistant", key, text: "", steps: [], papers: [], attached: [], streaming: true, concepts: null, conceptsStatus: null, conceptsError: null },
+    ];
+    setItems((xs) => [...(retry ? xs.slice(0, -2) : xs), ...pair]);
     setRunning(true);
     setAnswerTokens(0);
     const ctl = new AbortController();
     abort.current = ctl;
-    let text = "";
+    stopping.current = false;
+    runUser.current = undefined;
+    // What the stream has built so far: the answer text and the trace (tool calls, interim prose).
+    let acc = { text: "", steps: [] as TraceStep[] };
     let messageId: string | undefined;
     let convId = activeId;
     let userMessageId: string | undefined;
     let lost = false;
     try {
-      for await (const ev of streamKnowledgeChat({
+      for await (const raw of streamKnowledgeChat({
         question, history, model, conversation_id: activeId ?? undefined, use_web: useWeb,
         paper_ids: attached.map((p) => p.id),
+        ...(retry?.id && activeId ? { retry_of: retry.id } : {}),
       }, ctl.signal)) {
+        const ev = raw as ChatEvent;
         if (ev.type === "status") setStatus(ev.text);
-        else if (ev.type === "step") {
-          if (ev.description === "Sending to Claude…" || ev.description.startsWith("Parsing @mentions")) continue;
-          const step: Step = { kind: ev.kind, description: ev.description, cypher: ev.cypher, count: ev.count, papers: ev.papers };
-          patchAnswer((it) => it.key === key, (it) => ({ steps: [...it.steps, step] }));
+        else if (ev.type === "step" || ev.type === "token" || ev.type === "interim") {
+          const next = applyEvent(acc, ev);
+          if (next === acc) continue;
+          acc = next;
+          if (ev.type === "token") setAnswerTokens(Math.ceil(acc.text.length / 4));
+          const now = acc;
+          patchAnswer((it) => it.key === key, () => ({ text: now.text, steps: now.steps }));
         } else if (ev.type === "context") {
           setTotals(ev.token_totals);
           setContextPapers(ev.papers);
-          patchAnswer((it) => it.key === key, () => ({ papers: ev.papers.map((p) => ({ id: p.id, title: p.title, year: p.year })) }));
+          patchAnswer((it) => it.key === key, () => ({
+            papers: ev.papers.map((p) => ({ id: p.id, title: p.title, year: p.year })),
+            attached: ev.papers.filter((p) => p.attached).map((p) => ({ id: p.id, title: p.title, year: p.year })),
+          }));
         } else if (ev.type === "conversation") {
           convId = ev.conversation_id;
           userMessageId = ev.user_message_id;
+          runUser.current = ev.user_message_id;
+          setItems((xs) => xs.map((it) => (it.kind === "user" && it.key === userKey ? { ...it, id: ev.user_message_id } : it)));
           if (!activeId) { setActiveId(ev.conversation_id); refreshList(); }
-        } else if (ev.type === "token") {
-          text += ev.text;
-          setAnswerTokens(Math.ceil(text.length / 4));
-          const now = text;
-          patchAnswer((it) => it.key === key, () => ({ text: now }));
         } else if (ev.type === "done") {
-          messageId = ev.message_id;
+          messageId = ev.message_id ?? undefined;
           setActiveId(ev.conversation_id);
-          patchAnswer((it) => it.key === key, () => ({ id: ev.message_id, streaming: false }));
+          patchAnswer((it) => it.key === key, () => ({ id: ev.message_id ?? undefined, streaming: false, ...(ev.stopped ? { stopped: true } : {}) }));
+          // A stop the server has now confirmed: close the connection.
+          if (stopping.current) ctl.abort();
+        } else if ((raw as { type?: string }).type === "suggestion") {
+          const suggestion = (raw as unknown as { suggestion: SuggestionOut }).suggestion;
+          patchAnswer((it) => it.key === key, () => ({ suggestion }));
         } else if (ev.type === "error") {
           patchAnswer((it) => it.key === key, () => ({ error: ev.message, streaming: false }));
         }
@@ -464,6 +480,7 @@ export default function KnowledgeChat() {
       else if (convId && userMessageId) lost = true;
       else patchAnswer((it) => it.key === key, () => ({ error: (e as Error).message || "Chat failed" }));
     } finally {
+      if (stopTimer.current) { window.clearTimeout(stopTimer.current); stopTimer.current = undefined; }
       patchAnswer((it) => it.key === key, () => ({ streaming: false }));
       setRunning(false);
       setStatus("");
@@ -480,19 +497,44 @@ export default function KnowledgeChat() {
         patchAnswer((it) => it.key === key, () => ({ reconnecting: false, error: saved.error }));
       } else {
         messageId = saved.id;
-        text = saved.content;
-        patchAnswer((it) => it.key === key, (it) => ({ ...answerOf(saved), key, steps: it.steps, reconnecting: false }));
+        acc = { ...acc, text: saved.content };
+        // The saved trace is the complete one; the live one has gaps after a drop.
+        patchAnswer((it) => it.key === key, (it) => ({
+          ...answerOf(saved), key, reconnecting: false,
+          steps: saved.steps && saved.steps.length >= it.steps.length ? saved.steps : it.steps,
+        }));
       }
       refreshList();
     }
-    if (messageId && autoConcepts && text.length > 400) {
+    runUser.current = undefined;
+    if (messageId && autoConcepts && acc.text.length > 400) {
       const id = messageId;
       patchAnswer((it) => it.id === id, () => ({ conceptsStatus: "running" }));
       visualiseAnswer(id).catch((e: Error) => patchAnswer((it) => it.id === id, () => ({ conceptsStatus: "failed", conceptsError: e.message })));
     }
   };
 
-  const stop = () => abort.current?.abort();
+  /**
+   * Stop the running answer. With the question's server id known the server is told to stop and
+   * save what it has (the stream then ends with `done`, stopped); the connection is closed once
+   * that arrives or after three seconds. Without it the fetch is simply aborted.
+   */
+  const stop = () => {
+    const ctl = abort.current, id = runUser.current;
+    if (id) {
+      stopping.current = true;
+      stopKnowledgeChat(id).catch(() => ctl?.abort());
+      if (ctl && !stopTimer.current) stopTimer.current = window.setTimeout(() => ctl.abort(), 3000);
+    } else ctl?.abort();
+  };
+
+  /** Ask the last question again: it and its failed or stopped answer leave the transcript. */
+  const retryLast = () => {
+    if (running || items.length < 2) return;
+    const q = items[items.length - 2], a = items[items.length - 1];
+    if (q.kind !== "user" || a.kind !== "assistant") return;
+    send(q.text, { retry: { id: q.id } });
+  };
 
   // ── Forks ──
   const active = conversations.find((c) => c.id === activeId) ?? null;
@@ -616,7 +658,12 @@ export default function KnowledgeChat() {
                     </div>
                   );
                 }
-                return <Answer key={it.key} item={it} onPaper={openPaper} onVisualise={visualise} onRepair={repair} />;
+                const last = it === items[items.length - 1];
+                const canRetry = last && !running && !it.streaming && !it.reconnecting && !!(it.error || it.stopped) && items.length >= 2 && items[items.length - 2].kind === "user";
+                return (
+                  <Answer key={it.key} item={it} onPaper={openPaper} onFigure={links.openFigure} onVisualise={visualise} onRepair={repair}
+                    onRetry={canRetry ? retryLast : undefined} />
+                );
               })}
               {running && status && <div className="kc-working"><span className="kc-spinner" /> {status}</div>}
             </div>

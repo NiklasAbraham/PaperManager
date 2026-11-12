@@ -830,6 +830,8 @@ export async function* streamKnowledgeChat(body: {
   conversation_id?: string;
   use_web?: boolean;
   paper_ids?: string[];
+  /** The id of the conversation's last question: the server drops it and what followed before answering again. */
+  retry_of?: string;
 }, signal?: AbortSignal): AsyncGenerator<SseEvent> {
   const res = await fetch(`${BASE}/knowledge-chat/stream`, {
     method: "POST",
@@ -859,6 +861,12 @@ export async function* streamKnowledgeChat(body: {
     }
   }
 }
+
+/** Really stop a running answer on the server; the partial answer is saved as stopped. */
+export const stopKnowledgeChat = (userMessageId: string) =>
+  apiFetch<{ stopped: boolean }>("/knowledge-chat/stop", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_message_id: userMessageId }),
+  });
 
 // ── Bulk import ───────────────────────────────────────────────────────────────
 

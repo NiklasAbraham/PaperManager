@@ -33,6 +33,11 @@ from tools import paper_tools, note_tools, tag_tools, person_tools, project_tool
 
 set_request_user(settings.default_user_name)
 
+# LLM calls made by MCP tools land in the same token ledger as the backend's (.specs/013_tokens.md).
+# Lazily: the MCP server keeps anthropic/openai out of its startup (tests/test_mcp_lean.py).
+from services.usage import install_lazy as install_usage_ledger  # noqa: E402
+install_usage_ledger()
+
 mcp = FastMCP("PaperManager")
 
 paper_tools.register(mcp)

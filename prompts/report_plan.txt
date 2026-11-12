@@ -1,0 +1,23 @@
+You plan a long-read report that will be written from a personal research library. You see only the question and a list of candidate papers from the library (numbered C1, C2, ...). Do not answer the question yet; decide what the report must cover.
+
+Question or topic:
+{{QUESTION}}
+
+Report length: {{LENGTH}}. Plan exactly {{SECTIONS}} sections.
+
+Candidate papers (label | title (year) | start of the summary):
+{{CANDIDATES}}
+
+Return one JSON object and nothing else, with these keys:
+- "title": a title that states the finding or the angle, not just the topic (at most 14 words).
+- "lede": two or three sentences saying what the report covers and in which order.
+- "sections": a list of exactly {{SECTIONS}} objects, in reading order, each with
+  - "title": a descriptive section title (a full phrase, no numbering),
+  - "focus": one or two sentences on what this section must establish,
+  - "queries": one to three short search queries (keywords, not sentences) to find more papers for this section in the library,
+  - "candidates": the labels (for example "C3") of the candidate papers this section should draw on, at most 8, most relevant first.
+
+Rules:
+- Use only labels from the candidate list. A section may share papers with others.
+- Order the sections so each builds on the one before; the first sets out background or definitions, the last covers limits, disagreement or open problems.
+- Write in British English. Do not invent papers or facts.

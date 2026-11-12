@@ -40,10 +40,10 @@ describe("ConceptCard", () => {
     const post = vi.spyOn(frame.contentWindow!, "postMessage");
     const on = (name: string) => screen.getByText(name).className.includes("on");
 
-    expect(on("1×")).toBe(true);
+    expect(on("0.5×")).toBe(true);
     fireEvent.click(screen.getByText("❚❚ pause"));
     expect(screen.getByText("▶ play")).toBeInTheDocument();
-    expect(on("1×")).toBe(false);
+    expect(on("0.5×")).toBe(false);
     expect(post).toHaveBeenCalledWith({ type: "concept-anim-speed", speed: 0 }, "*");
 
     fireEvent.click(screen.getByText("2×"));

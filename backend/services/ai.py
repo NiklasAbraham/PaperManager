@@ -480,6 +480,81 @@ def _condense_paper_for_budget(title: str, raw_text: str, target_tokens: int) ->
     return msg.content[0].text.strip()
 
 
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+RESULT_PREVIEW_CHARS = 4000
+_MAX_TRACE_PAPERS = 30
+_MAX_TRACE_LINKS = 12
+
+
+def _preview(text: Any, limit: int = RESULT_PREVIEW_CHARS) -> str:
+    """What went back to the model, cut for the tool trace."""
+    s = text if isinstance(text, str) else json.dumps(text, default=str)
+    if len(s) <= limit:
+        return s
+    return s[:limit] + f"\n… ({len(s) - limit} more characters)"
+
+
+def _paper_entry(pid: Any, title: Any, year: Any) -> dict[str, Any] | None:
+    if not isinstance(pid, str) or not _UUID_RE.match(pid):
+        return None
+    return {
+        "id": pid,
+        "title": title if isinstance(title, str) else None,
+        "year": year if isinstance(year, int) and not isinstance(year, bool) else None,
+    }
+
+
+def _papers_from_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    """Library papers named in Cypher result rows (id + title pairs, or Paper node dicts)."""
+    found: dict[str, dict[str, Any]] = {}
+
+    def add(pid: Any, title: Any, year: Any) -> None:
+        entry = _paper_entry(pid, title, year)
+        if entry and entry["id"] not in found and len(found) < _MAX_TRACE_PAPERS:
+            found[entry["id"]] = entry
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key, value in row.items():
+            if key == "id" or key == "paper_id":
+                prefix = ""
+            elif key.endswith(".id"):
+                prefix = key[:-2]
+            else:
+                if isinstance(value, dict) and "id" in value and "title" in value:
+                    add(value.get("id"), value.get("title"), value.get("year"))
+                continue
+            title = row.get(prefix + "title", row.get("paper_title") if key == "paper_id" else None)
+            if title is None and key == "paper_id":
+                title = row.get("title")
+            if title is not None:
+                add(value, title, row.get(prefix + "year"))
+    return list(found.values())
+
+
+def _trace_step(
+    step: dict[str, Any],
+    name: str,
+    args: dict[str, Any],
+    content: str,
+    *,
+    is_error: bool = False,
+    papers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Add the tool-trace fields (the step event contract) to a library tool's step."""
+    step["tool"] = name
+    step["input"] = args if isinstance(args, dict) else {}
+    step["result"] = _preview(content)
+    step["is_error"] = bool(is_error)
+    step["papers"] = (papers or [])[:_MAX_TRACE_PAPERS]
+    return step
+
+
+def _is_error_rows(rows: list[Any]) -> bool:
+    return len(rows) == 1 and isinstance(rows[0], dict) and "error" in rows[0]
+
+
 def execute_library_tool(name: str, args: dict[str, Any], driver: Any) -> tuple[dict[str, Any], str] | None:
     """Run one of the Knowledge Chat library tools.
 
@@ -487,20 +562,27 @@ def execute_library_tool(name: str, args: dict[str, Any], driver: Any) -> tuple[
     reasoning-step dict and ``result_text`` is what goes back to the model, or
     None when *name* is not a library tool. Shared by the API-key loop and the
     Claude Code (subscription) path in ``services.claude_code_chat``.
+
+    Besides ``kind`` / ``description`` / ``cypher`` / ``count`` the step carries
+    the trace fields ``tool``, ``input``, ``result`` (a preview), ``is_error``,
+    ``papers`` and, for ``list_figures``, ``figures``.
     """
     desc: str = args.get("description", "Running tool")
 
     if name == "run_cypher":
         query: str = args.get("query", "")
         rows = _run_cypher_safe(driver, query) if driver else [{"error": "No DB driver available"}]
+        failed = _is_error_rows(rows)
         step = {
             "type": "step",
             "kind": "cypher",
             "description": desc,
             "cypher": query,
-            "count": len(rows) if not (len(rows) == 1 and "error" in rows[0]) else None,
+            "count": len(rows) if not failed else None,
         }
-        return step, json.dumps(rows)
+        content = json.dumps(rows)
+        return _trace_step(step, name, args, content, is_error=failed,
+                           papers=[] if failed else _papers_from_rows(rows)), content
 
     if name == "semantic_search":
         sem_query: str = args.get("query", "")
@@ -529,29 +611,37 @@ def execute_library_tool(name: str, args: dict[str, Any], driver: Any) -> tuple[
                 sem_rows = [{"error": str(exc)}]
         else:
             sem_rows = [{"error": "Vector search unavailable"}]
+        failed = _is_error_rows(sem_rows)
+        sem_papers = [
+            {"id": r["id"], "title": r.get("title"), "year": r.get("year")}
+            for r in sem_rows if r.get("id")
+        ]
         step = {
             "type": "step",
             "kind": "search",
             "description": desc,
             "cypher": f"[vector search] {sem_query}",
-            "count": len(sem_rows) if not (len(sem_rows) == 1 and "error" in sem_rows[0]) else None,
-            "papers": [
-                {"id": r["id"], "title": r.get("title"), "year": r.get("year")}
-                for r in sem_rows if r.get("id")
-            ],
+            "count": len(sem_rows) if not failed else None,
         }
-        return step, json.dumps(sem_rows)
+        content = json.dumps(sem_rows)
+        return _trace_step(step, name, args, content, is_error=failed, papers=sem_papers), content
 
     if name == "load_full_text":
         lft_paper_id: str = args.get("paper_id", "")
         lft_title = lft_paper_id  # fallback label
+        lft_real_title: str | None = None
+        lft_year: Any = None
+        lft_failed = False
         if driver and lft_paper_id:
             try:
                 with driver.session() as _sess:
                     row = _sess.run(
-                        "MATCH (p:Paper {id: $id}) RETURN p.raw_text AS raw_text, p.title AS title",
+                        "MATCH (p:Paper {id: $id}) RETURN p.raw_text AS raw_text, p.title AS title, p.year AS year",
                         id=lft_paper_id,
                     ).single()
+                if row:
+                    lft_real_title = row["title"]
+                    lft_year = row.get("year") if hasattr(row, "get") else None
                 if row and row["raw_text"]:
                     raw = row["raw_text"]
                     lft_title = row["title"] or lft_paper_id
@@ -570,22 +660,27 @@ def execute_library_tool(name: str, args: dict[str, Any], driver: Any) -> tuple[
                 log.warning("load_full_text tool failed | %s", exc)
                 lft_content = f"[Error loading full text: {exc}]"
                 tok_label = "error"
+                lft_failed = True
         else:
             lft_content = "[Full text unavailable — no database connection]"
             tok_label = "unavailable"
+            lft_failed = True
         step = {
             "type": "step",
             "kind": "fulltext",
             "description": f"Loading full text: {lft_title[:60]} ({tok_label})",
             "cypher": None,
             "count": None,
-            "papers": [{"id": lft_paper_id, "title": lft_title}] if lft_title != lft_paper_id else [],
         }
-        return step, lft_content
+        lft_papers = [{"id": lft_paper_id, "title": lft_real_title, "year": lft_year}] if lft_paper_id else []
+        return _trace_step(step, name, args, lft_content, is_error=lft_failed, papers=lft_papers), lft_content
 
     if name == "list_figures":
         fig_paper_id: str = args.get("paper_id", "")
         figures: list[dict[str, Any]] = []
+        fig_title: str | None = None
+        fig_year: Any = None
+        fig_failed = not (driver and fig_paper_id)
         if driver and fig_paper_id:
             from db.queries.figures import list_figures as _list_figures
             try:
@@ -601,6 +696,16 @@ def execute_library_tool(name: str, args: dict[str, Any], driver: Any) -> tuple[
                 ]
             except Exception as exc:
                 log.warning("list_figures tool failed | %s", exc)
+                fig_failed = True
+            try:
+                with driver.session() as _sess:
+                    trow = _sess.run(
+                        "MATCH (p:Paper {id: $id}) RETURN p.title AS title, p.year AS year", id=fig_paper_id
+                    ).single()
+                if trow:
+                    fig_title, fig_year = trow["title"], trow.get("year") if hasattr(trow, "get") else None
+            except Exception as exc:
+                log.debug("list_figures title lookup failed | %s", exc)
         step = {
             "type": "step",
             "kind": "figures",
@@ -608,7 +713,16 @@ def execute_library_tool(name: str, args: dict[str, Any], driver: Any) -> tuple[
             "cypher": None,
             "count": len(figures),
         }
-        return step, json.dumps(figures) if figures else "[No extracted figures for this paper]"
+        content = json.dumps(figures) if figures else "[No extracted figures for this paper]"
+        step = _trace_step(
+            step, name, args, content, is_error=fig_failed,
+            papers=[{"id": fig_paper_id, "title": fig_title, "year": fig_year}] if fig_paper_id else [],
+        )
+        step["figures"] = [
+            {"image_url": f["image_url"], "caption": f["caption"], "figure_number": f["figure_number"]}
+            for f in figures
+        ]
+        return step, content
 
     return None
 
@@ -616,6 +730,31 @@ def execute_library_tool(name: str, args: dict[str, Any], driver: Any) -> tuple[
 def estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token."""
     return max(1, len(text) // 4)
+
+
+MAX_TOOL_ROUNDS = 8
+
+
+def _stream_round(client, *, model, system, messages, tools, max_tokens=16000, tool_choice=anthropic.NOT_GIVEN):
+    """One model request, streamed.
+
+    Yields ``("text", delta)`` while the answer arrives and finally
+    ``("message", final_message)`` (the complete message with ``stop_reason``,
+    ``content`` and ``usage``). This is the only place the API-key Knowledge Chat
+    calls the model.
+    """
+    with client.messages.stream(
+        model=model,
+        max_tokens=max_tokens,
+        system=system,
+        messages=messages,
+        tools=tools if tools else anthropic.NOT_GIVEN,
+        tool_choice=tool_choice,
+    ) as stream:
+        for text in stream.text_stream:
+            yield ("text", text)
+        final = stream.get_final_message()
+    yield ("message", final)
 
 
 def knowledge_chat_stream(
@@ -630,13 +769,16 @@ def knowledge_chat_stream(
 
     Yields event dicts consumed directly by the SSE router:
       {"type": "status",  "text": str}
-      {"type": "step",    "description": str, "cypher": str|None, "count": int|None}
+      {"type": "step",    "kind", "description", "cypher", "count", "tool", "input",
+                          "result", "is_error", "papers", "links"?, "figures"?}
       {"type": "token",   "text": str}
+      {"type": "interim"}   # the text streamed since the last interim was prose
+                            # before a tool call, not the answer
 
-    The model may call ``run_cypher`` zero or more times before composing
-    its final answer.  Each tool call is executed against Neo4j, yielded as
-    a step event so the frontend can display the reasoning trace, and its
-    results are fed back into the conversation before the next call.
+    The model may call the library tools zero or more times before composing
+    its final answer.  Each tool call is executed, yielded as a step event so
+    the frontend can display the reasoning trace, and its results are fed back
+    into the conversation before the next round (at most MAX_TOOL_ROUNDS).
     """
     def _paper_block(p: dict) -> str:
         parts = [f"### {p.get('title', 'Untitled')}", f"id: {p.get('id')}" + (f" · year: {p['year']}" if p.get("year") else "")]
@@ -665,7 +807,21 @@ def knowledge_chat_stream(
     if use_web:
         yield {"type": "status", "text": "Searching the web..."}
         try:
-            web_context = _fetch_web_context(question, history)
+            web_context, web_urls, web_queries = _web_presearch(question, history)
+            if web_queries:
+                yield {
+                    "type": "step",
+                    "kind": "web",
+                    "description": "Searched the web: " + "; ".join(web_queries)[:120],
+                    "cypher": None,
+                    "count": len(web_urls),
+                    "tool": "web_presearch",
+                    "input": {"queries": web_queries},
+                    "result": _preview(web_context or "No results found."),
+                    "is_error": False,
+                    "papers": [],
+                    "links": web_urls,
+                }
         except Exception as exc:
             log.warning("Knowledge chat web pre-search failed (non-fatal) | %s", exc)
         yield {"type": "status", "text": ""}
@@ -719,54 +875,40 @@ def knowledge_chat_stream(
 
     tools = list(LIBRARY_TOOLS) if driver is not None else []
 
-    # ── Agentic tool-use loop (non-streaming) ─────────────────────────────────
-    # Phase 1: let Claude call run_cypher / semantic_search as many times as
-    # it needs.  Each tool call is executed, the result is fed back, and a step
-    # event is yielded so the frontend can show the reasoning trace.  The loop
-    # exits when Claude returns stop_reason != "tool_use".
+    # ── Agentic tool-use loop (one streamed request per round) ────────────────
+    # Each round is one streamed request: text reaches the browser as it is
+    # written. When a round ends in tool calls, the text streamed so far was
+    # prose before the call ("interim"), the tools run (one step event each),
+    # their results go back to the model and the next round starts. The loop
+    # ends when a round stops for another reason than tool_use.
     messages: list[dict[str, Any]] = list(history)
     messages.append({"role": "user", "content": question})
 
-    had_tool_calls = False
-
-    while True:
-        response = client.messages.create(
-            model=claude_model,
-            max_tokens=16000,
-            system=system,
-            messages=messages,
-            tools=tools if tools else anthropic.NOT_GIVEN,
-        )
-
-        if response.stop_reason != "tool_use":
-            # No more tool calls — Claude is ready to write its final answer.
-            if not had_tool_calls:
-                # No tool calls at all → stream for better responsiveness
-                with client.messages.stream(
-                    model=claude_model,
-                    max_tokens=16000,
-                    system=system,
-                    messages=messages,
-                ) as stream:
-                    for text in stream.text_stream:
-                        yield {"type": "token", "text": text}
+    for round_no in range(MAX_TOOL_ROUNDS):
+        last_round = round_no == MAX_TOOL_ROUNDS - 1
+        streamed = False
+        final = None
+        round_kwargs: dict[str, Any] = {}
+        if last_round and tools:
+            round_kwargs["tool_choice"] = {"type": "none"}  # the cap: answer now
+        for kind, value in _stream_round(
+            client, model=claude_model, system=system, messages=messages, tools=tools, **round_kwargs
+        ):
+            if kind == "text":
+                if value:
+                    streamed = True
+                    yield {"type": "token", "text": value}
             else:
-                # Tool calls happened → chunk the already-computed final text
-                CHUNK = 40
-                final_text = ""
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        final_text = block.text
-                        break
-                for i in range(0, len(final_text), CHUNK):
-                    yield {"type": "token", "text": final_text[i : i + CHUNK]}
-            break
+                final = value
+
+        if final is None or final.stop_reason != "tool_use":
+            break  # the answer is complete
 
         # ── Execute tool calls ────────────────────────────────────────────────
-        had_tool_calls = True
+        if streamed:
+            yield {"type": "interim"}
         tool_results: list[dict[str, Any]] = []
-
-        for block in response.content:
+        for block in final.content:
             if block.type != "tool_use":
                 continue
             executed = execute_library_tool(block.name, block.input, driver)
@@ -786,7 +928,7 @@ def knowledge_chat_stream(
 
         # Feed tool results back into the conversation and loop
         messages = list(messages)
-        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "assistant", "content": final.content})
         messages.append({"role": "user", "content": tool_results})
 
 
@@ -1115,27 +1257,40 @@ Question: {question}"""
         return []
 
 
+def _web_presearch(question: str, history: list[dict]) -> tuple[str, list[str], list[str]]:
+    """Run the pre-search: returns ``(prompt_text, result_urls, queries)``.
+
+    Empty text and no queries when none were generated or all searches fail.
+    """
+    from services.web_search import search_web, format_results_for_prompt
+
+    queries = _generate_search_queries(question, history)
+    if not queries:
+        return "", [], []
+
+    all_results = []
+    for query in queries:
+        results = search_web(query, max_results=5)
+        all_results.extend(results)
+
+    urls: list[str] = []
+    for r in all_results:
+        url = r.get("url")
+        if url and url not in urls:
+            urls.append(url)
+    if not all_results:
+        return "", [], queries
+
+    return format_results_for_prompt(all_results), urls[:12], queries
+
+
 def _fetch_web_context(question: str, history: list[dict]) -> str:
     """
     Runs _generate_search_queries(), executes each via search_web(),
     formats results with format_results_for_prompt().
     Returns empty string if no queries generated or all searches fail.
     """
-    from services.web_search import search_web, format_results_for_prompt
-    
-    queries = _generate_search_queries(question, history)
-    if not queries:
-        return ""
-    
-    all_results = []
-    for query in queries:
-        results = search_web(query, max_results=5)
-        all_results.extend(results)
-    
-    if not all_results:
-        return ""
-    
-    return format_results_for_prompt(all_results)
+    return _web_presearch(question, history)[0]
 
 
 def synthesize_papers(

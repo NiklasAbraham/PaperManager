@@ -54,6 +54,10 @@ production library (8.7k papers, 376 with full text) all six were online again b
 
 `message_search` (conversations) keeps its original analyzer.
 
+Range indexes for the listing's date and year filters and sorts, created idempotently
+(`IF NOT EXISTS`) at startup: `paper_created_at` (Paper.created_at), `paper_year` (Paper.year),
+`paper_updated_at` (Paper.updated_at).
+
 ## Retrieval (`engine.py`)
 
 One Lucene query per source, run in parallel on separate sessions (thread pool of 8), each
@@ -110,7 +114,47 @@ score = (Σ weight · score/max + bonuses) · (0.4 + 0.6 · coverage)
 Only hits with coverage 1 are returned. If none has it, all hits are returned ordered by score
 and the response says `relaxed: true`. Ties break on title, then id. `total` is the number of
 hits after this filter; `skip` / `limit` page it. `sort` (`relevance`, `date_desc`, `date_asc`,
-`year_desc`, `year_asc`, `title_asc`) reorders the full ranked list before paging.
+`year_desc`, `year_asc`, `title_asc`, `rating_desc`, `citations_desc`, `updated_desc`) reorders
+the full ranked list before paging; the fields only a sort needs are loaded once for the ranked
+list, not by every retrieval source. Missing years, ratings and citation counts sort last.
+
+### Filters (`Filters`, `filter_clause`)
+
+Shared by the ranked search and the filter-only listing. Long-standing filters keep the
+`$x IS NULL OR …` shape; the newer ones are appended only when set, so an unfiltered search
+runs the query it always did.
+
+| `/search` parameter | Predicate |
+|---|---|
+| `tag`, `topic`, `venue` | case-insensitive name match |
+| `project_id`, `person_id` | `IN_PROJECT` / `AUTHORED_BY\|INVOLVES` |
+| `year_min`, `year_max` | `p.year` bounds |
+| `reading_status` | no status counts as `unread`; case-insensitive |
+| `bookmarked` | missing property = false |
+| `added_after` | `p.created_at >= …`; `YYYY-MM-DD` (UTC midnight) or ISO datetime (converted to UTC) |
+| `added_before` | `p.created_at < …`; a bare date includes that day; bad values give 422 |
+| `has_pdf` | `drive_file_id` set |
+| `has_text` | `raw_text` set and non-empty |
+| `has_note` | a `HAS_NOTE` note with non-blank content |
+| `has_highlights` | any `HAS_ANNOTATION` |
+| `document_type` | missing type counts as `paper` |
+| `rating_min` | `p.rating >= n` (1..5) |
+
+Visibility (`paper_visibility_clause`) is always ANDed in: only the admin account sees papers
+of projects it is not a member of.
+
+### Cache (`cache.py`)
+
+`GET /search` keeps the ranked candidate list (before sorting, paging and hydration) for 60 s,
+at most 64 entries, LRU, keyed by (user, query, mode, filters). Paging, changing the sort and
+going back to a search reuse it. A middleware in `main.py` bumps a generation counter after
+every non-GET request, which drops all entries; a search that raced a write is stored under the
+old generation and never served. Background jobs and the MCP process do not bump; the TTL bounds
+the staleness. `LIBRARY_SEARCH_CACHE=0` turns it off (the test suite does, except
+`test_library_search_cache.py`). The response carries `cached: true|false`.
+
+The filter-only listing runs its count and its page-of-ids queries in parallel and loads the
+display fields for the page's ids only.
 
 `matched_fields` lists where a hit matched, in the order `doi, title, author, topic, tag, venue,
 abstract, summary, note, highlight, claim, fulltext, semantic`. `matched_in` keeps the old
@@ -183,12 +227,39 @@ count query, `sort` defaults to `date_desc`). `raw_text` and `embedding` are nev
   last keystroke from 2 characters on, previous request aborted; ↑/↓/Enter/Esc, mouse. Picking
   a paper opens it; an author sets `person_id`, a topic `topic`, a tag `tag`, a project
   `project_id`, and clears the text.
-- URL: `q`, the filters, `sort`, `mode` (absent = hybrid), `refs=1` (include reference stubs).
-  The page number is local state keyed by the URL, so any change resets it to 1.
-- With a query: rows (`SearchResultRow`) in server order, paged server-side (`skip`/`limit` =
-  papers-per-page setting, 200 for "All"); the settings sort only applies to browsing. Stale
-  responses are dropped by request key; while a new query loads, the old rows stay dimmed
-  rather than disappearing.
+- URL state lives in `components/search/filterState.ts` (pure, unit-tested; `searchUtils.ts`
+  re-exports `FILTER_KEYS`, `QUERY_PAGE_ALL`, `buildSearchParams`). Keys: `q`, `mode` (absent =
+  hybrid), `refs=1`, `sort`, and the filters `tag`, `topic`, `project_id`, `person_id`, `venue`,
+  `reading_status`, `bookmarked`, `year_min`, `year_max`, `added` (`today|7d|30d|90d`) or
+  `added_from`/`added_to` (`YYYY-MM-DD`), `has_pdf`, `has_text`, `has_note`, `has_highlights`
+  (`1`/`0`), `document_type`, `rating_min`. A filtered search is shareable by its URL. The page
+  number is local state keyed by the URL, so any change resets it to 1.
+- `buildSearchParams(url, page, perPage, now, defaultSort)` maps the URL to `/search`:
+  presets become `added_after` = local midnight N days ago as ISO UTC (computed on every
+  request, so "7d" stays relative), a custom range passes its dates as `added_after` /
+  `added_before`, `1`/`0` become `true`/`false` (`bookmarked=true` of old links works too),
+  junk numbers and dates are dropped. Both listings are paged by the server (`skip`/`limit` =
+  papers-per-page, 200 for "All"). With `q`: `mode`, `include_references`, sort default
+  relevance. Without: `sort` = URL sort or the settings default, `include_references=false`,
+  `snippets=0`. `activeFilterChips` lists the active filters (label + URL keys to remove),
+  `clearFilters` removes them (and with `query` the query), `FILTER_KEYS` drives "has filters".
+- Library page (`pages/Library.tsx`), top to bottom: a sticky bar (search box with the AI
+  button, `FilterMenu` = Filters button with a count badge and a popover that is a bottom sheet
+  on phones, the upload button `PaperDrop`, `LibraryMenu` = the overflow menu with Surprise me,
+  Find research gaps and the `EntityPanel` types); the active-filter chips with Clear all; then
+  one of three bodies. Dashboard (no `q`, no filter): "Library, N papers" from the listing's
+  `total`, Continue reading (one extra `/search`: `reading_status=reading`, `sort=updated_desc`,
+  `limit=6`, three shown on phones; hidden when empty), then the paged cards ("Recently added" under date_desc, else
+  "All papers") with the sort menu. Filters without `q`: "N papers", sort menu, paged cards.
+  With `q`: result rows (`SearchResultRow`) in server order, mode switch, References, sort.
+  The page no longer calls `GET /papers`, `/stats` or `/venues`.
+- Stale responses are dropped by request key; while a new page loads, the old rows stay dimmed
+  rather than disappearing. A new upload is prepended in the unfiltered newest-first view and
+  triggers a reload in every other view; if the URL has `project_id`, `PaperDrop` /
+  `UploadConfirmModal` receive it as `defaultProjectId`, add the paper to that project and skip
+  the project step.
+- The Filters panel fetches `/tags`, `/topics` and `/venues` the first time it opens (datalist
+  inputs); the project select uses `/projects`, loaded with the page.
 
 ## Tests and relevance check
 

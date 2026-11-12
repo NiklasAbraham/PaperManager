@@ -41,9 +41,9 @@ backend/
 │   ├── tags.py              # CRUD for Tag nodes + tag seeding
 │   ├── projects.py          # CRUD for Project nodes
 │   ├── search.py            # GET /search
-│   ├── graph.py             # GET /graph (graph visualisation data)
+│   ├── graph.py             # GET /graph (graph visualisation data), POST /graph/query (admin Cypher)
 │   ├── stats.py             # GET /stats
-│   ├── cypher.py            # Cypher editor endpoints
+│   ├── cypher.py            # Cypher schema / assist / run / node-delete endpoints (admin only)
 │   ├── export.py            # BibTeX export
 │   ├── backfill.py          # Bulk enrichment (topics, summaries, figures)
 │   ├── knowledge_chat.py    # Multi-paper chat (SSE)

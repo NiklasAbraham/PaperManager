@@ -1,3 +1,4 @@
+// Ported from the thesis desk's structure/viewer.ts (keep in sync); coordinates come from the backend's proxy or inline, never from a file path.
 import { apiUrl } from '../../../api/client';
 import type { ModelSpec, Resi, Selection, StructureSpec } from './types';
 
@@ -22,10 +23,43 @@ export function load3Dmol(): Promise<any> {
   return lib;
 }
 
-export type Coordinates = { name: string; format: 'pdb' | 'cif'; data: string };
+export type CoordFormat = 'pdb' | 'cif' | 'sdf' | 'mol2';
+export type Coordinates = { name: string; format: CoordFormat; data: string };
+
+/** The request a model needs (`pdb=6VXX`, `ccd=ATP`, ...), or null for inline data. */
+export function sourceQuery(m: ModelSpec): string | null {
+  if (m.data != null && !m.pdb && !m.afdb && !m.ccd && m.pubchem == null) return null;
+  if (m.pdb) return `pdb=${encodeURIComponent(m.pdb)}`;
+  if (m.afdb) return `afdb=${encodeURIComponent(m.afdb)}`;
+  if (m.ccd) return `ccd=${encodeURIComponent(String(m.ccd).toUpperCase())}`;
+  if (m.pubchem != null && String(m.pubchem) !== '') return `pubchem=${encodeURIComponent(String(m.pubchem))}`;
+  return null;
+}
+
+/** A short name for the model's source, for "loading ..." lines and chips: 6VXX, AF-P69905, ATP, CID 2244, inline. */
+export function sourceName(m: ModelSpec): string {
+  if (m.pdb) return m.pdb;
+  if (m.afdb) return `AF-${m.afdb}`;
+  if (m.ccd) return String(m.ccd).toUpperCase();
+  if (m.pubchem != null && String(m.pubchem) !== '') return `CID ${m.pubchem}`;
+  return 'inline';
+}
+
+/** The format of inline coordinates when the spec does not say: sniffed from the text, PDB otherwise. */
+export function sniffFormat(data: string): CoordFormat {
+  if (/@<TRIPOS>MOLECULE/.test(data)) return 'mol2';
+  if (/V[23]000\b|^\$\$\$\$/m.test(data)) return 'sdf';
+  if (/^data_|^_atom_site\./m.test(data)) return 'cif';
+  return 'pdb';
+}
+
 const fetched = new Map<string, Promise<Coordinates>>();
 export function fetchCoordinates(m: ModelSpec): Promise<Coordinates> {
-  const q = m.pdb ? `pdb=${encodeURIComponent(m.pdb)}` : `afdb=${encodeURIComponent(m.afdb ?? '')}`;
+  const q = sourceQuery(m);
+  if (q === null) {
+    if (typeof m.data !== 'string' || !m.data.trim()) return Promise.reject(new Error('model has no coordinates'));
+    return Promise.resolve({ name: sourceName(m), format: m.format ?? sniffFormat(m.data), data: m.data });
+  }
   let p = fetched.get(q);
   if (!p) {
     p = fetch(apiUrl(`/knowledge-chat/structures?${q}`), { credentials: 'include' }).then(async (r) => {
@@ -81,15 +115,33 @@ const PDB_ID = /^[0-9][A-Za-z0-9]{3}$/;
 const AF_ID = /^AF-([A-Z0-9]{6,10})(?:-F1)?$/i;
 
 /**
- * The block's text as a spec, or null while it is still streaming (or not a spec):
- * a bare PDB id, `AF-<UniProt>` for an AlphaFold DB model, or the spec as JSON.
+ * A small molecule (SDF / MOL / MOL2) has no residues, chains or het records, so 3Dmol leaves its atoms
+ * unlabelled. Make it a ligand like a HETATM residue in a PDB: chain L, residue 1, the residue name
+ * from the file's title when it is a 1-3 character code (else LIG), atoms named element + 1-based index
+ * (C1, O13, as RDKit writes them to PDB), so highlights by resn / hetero / atom and clicks work as usual.
+ * (Ported from the desk's viewer.ts.)
  */
-export function parseSource(raw: string): { spec: StructureSpec } | null {
+export function asLigand(atoms: Atom3D[], c: Coordinates) {
+  if (c.format !== 'sdf' && c.format !== 'mol2') return;
+  const title = (c.format === 'sdf' ? c.data.split('\n')[0] : c.data.split('@<TRIPOS>MOLECULE')[1]?.split('\n')[1] ?? '').trim();
+  const resn = /^[A-Za-z0-9]{1,3}$/.test(title) ? title.toUpperCase() : 'LIG';
+  atoms.forEach((a, i) => {
+    a.hetflag = true; a.chain = 'L'; a.resi = 1; a.resn = resn;
+    if (c.format === 'sdf' || !a.atom) a.atom = `${a.elem}${i + 1}`;
+  });
+}
+
+/**
+ * The block's text as a spec: `{ spec }`; `{ error }` when it is JSON but not a usable spec;
+ * null while it is still streaming (incomplete JSON) or not a spec at all. A bare PDB id and
+ * `AF-<UniProt>` (AlphaFold DB) are shorthand; anything else is JSON (see types.ts).
+ */
+export function parseSource(raw: string): { spec: StructureSpec } | { error: string } | null {
   const t = raw.trim().replace(/^`|`$/g, '');
   if (t.startsWith('{')) {
-    try {
-      return { spec: normalise(JSON.parse(t)) };
-    } catch { return null; }
+    let d: unknown;
+    try { d = JSON.parse(t); } catch { return null; }
+    try { return { spec: normalise(d) }; } catch (e) { return { error: e instanceof Error ? e.message : 'not a structure spec' }; }
   }
   if (PDB_ID.test(t)) return { spec: { models: [{ pdb: t.toUpperCase() }] } };
   const af = AF_ID.exec(t);
@@ -99,12 +151,17 @@ export function parseSource(raw: string): { spec: StructureSpec } | null {
 
 export function normalise(d: any): StructureSpec {
   if (!d || typeof d !== 'object') throw new Error('not a structure spec');
-  if (Array.isArray(d.models) && d.models.length) return d as StructureSpec;
-  if (d.pdb || d.afdb) {
+  const hasSource = (m: any) => !!m && typeof m === 'object' && !!(m.pdb || m.afdb || m.ccd || (m.pubchem != null && m.pubchem !== '') || (typeof m.data === 'string' && m.data.trim()));
+  if (Array.isArray(d.models) && d.models.length) {
+    const bad = d.models.findIndex((m: any) => !hasSource(m));
+    if (bad >= 0) throw new Error(`model ${bad} needs one of "pdb", "afdb", "ccd", "pubchem" or "data"`);
+    return d as StructureSpec;
+  }
+  if (hasSource(d)) {
     const { title, caption, highlights, focus, ligands, dim, representation, height, distances, ...model } = d;
     return { title, caption, highlights, focus, ligands, dim, representation, height, distances, models: [model] };
   }
-  throw new Error('a structure spec needs "models" (or "pdb" / "afdb")');
+  throw new Error('a structure spec needs "models" (or one of "pdb" / "afdb" / "ccd" / "pubchem" / "data")');
 }
 
 /* ------------------------------------------------------------- selection */

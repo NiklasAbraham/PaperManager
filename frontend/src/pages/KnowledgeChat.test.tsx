@@ -5,6 +5,7 @@ import type { KnowledgeMessage, SseEvent } from "../types";
 
 const api = vi.hoisted(() => ({
   streamKnowledgeChat: vi.fn(),
+  stopKnowledgeChat: vi.fn(async () => ({ stopped: true })),
   listConversations: vi.fn(async () => [] as unknown[]),
   getConversationMessages: vi.fn(async () => [] as unknown[]),
   visualiseAnswer: vi.fn(async () => ({ status: "running", error: null, concepts: null })),
@@ -71,7 +72,8 @@ describe("KnowledgeChat page", () => {
     expect(screen.getByText("Explain the loss")).toHaveClass("user-text");
     expect(screen.getByText("Find diffusion papers")).toBeInTheDocument();
     expect(document.querySelectorAll(".kc-cite")).toHaveLength(1);
-    expect(screen.getByText("Cited")).toBeInTheDocument();
+    expect(screen.getByText("Sources")).toBeInTheDocument();
+    expect(screen.getByText("1 search")).toBeInTheDocument();
     expect(screen.getByText("1 in context ▸")).toBeInTheDocument();
     expect(api.streamKnowledgeChat.mock.calls[0][0]).toMatchObject({ question: "Explain the loss", history: [], use_web: false, paper_ids: [] });
 
@@ -128,6 +130,122 @@ describe("KnowledgeChat page", () => {
   });
 });
 
+describe("KnowledgeChat trace, sources, stop and retry", () => {
+  const ID = "c7d9ec3d-0df1-4c18-970f-7f6dc34e5e3e";
+
+  it("moves interim prose into the trace, shows tool calls and links the sources to /paper/<id>", async () => {
+    api.streamKnowledgeChat.mockReturnValue(events([
+      { type: "conversation", conversation_id: "c1", user_message_id: "u1" },
+      { type: "step", description: "Sending to Claude…" },
+      { type: "token", text: "I will search the library." },
+      { type: "interim" },
+      { type: "step", kind: "search", tool: "semantic_search", description: "Find", input: { query: "alphafold" }, count: 1,
+        papers: [{ id: ID, title: "AlphaFold 3", year: 2024 }], result: "[{\"id\": 1}]" },
+      { type: "token", text: `The answer cites [AlphaFold 3](/paper/${ID}).` },
+      { type: "done", conversation_id: "c1", message_id: "a1" },
+    ] as never));
+    render(<MemoryRouter><KnowledgeChat /></MemoryRouter>);
+    ask("q");
+    expect(await screen.findByText("✦ Visualise")).toBeInTheDocument();
+    expect(screen.getByText("I will search the library.").closest(".kc-trace-text")).not.toBeNull();
+    expect(document.querySelectorAll(".kc-tool")).toHaveLength(1);
+    expect(screen.getByText("“alphafold”")).toBeInTheDocument();
+    const chip = document.querySelector(`.kc-turn-sources a[href="/paper/${ID}"]`)!;
+    expect(chip).toHaveAttribute("title", "cited, found");
+    fireEvent.click(chip);
+    expect(await screen.findByLabelText("Preview")).toBeInTheDocument();
+  });
+
+  it("stop tells the server through the question's id, keeps the partial answer and offers retry", async () => {
+    let finish!: () => void;
+    api.streamKnowledgeChat.mockImplementation(async function* () {
+      yield { type: "conversation", conversation_id: "c1", user_message_id: "u1" };
+      yield { type: "token", text: "Partial thought" };
+      await new Promise<void>((r) => { finish = r; });
+      yield { type: "done", conversation_id: "c1", message_id: "a1", stopped: true };
+    });
+    render(<MemoryRouter><KnowledgeChat /></MemoryRouter>);
+    ask("long question");
+    expect(await screen.findByText("Partial thought")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("■ Stop"));
+    expect(api.stopKnowledgeChat).toHaveBeenCalledWith("u1");
+    await act(async () => { finish(); });
+    expect(await screen.findByText("stopped")).toBeInTheDocument();
+    expect(screen.getByText("Partial thought")).toBeInTheDocument();
+    expect(screen.getByText("retry")).toBeInTheDocument();
+  });
+
+  it("stop without a known question id just aborts the request", async () => {
+    api.streamKnowledgeChat.mockImplementation(async function* (_b: unknown, signal: AbortSignal) {
+      await new Promise<void>((_r, rej) => signal.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError"))));
+      yield { type: "token", text: "never" };
+    });
+    render(<MemoryRouter><KnowledgeChat /></MemoryRouter>);
+    ask("q");
+    fireEvent.click(await screen.findByText("■ Stop"));
+    expect(api.stopKnowledgeChat).not.toHaveBeenCalled();
+    expect(await screen.findByText("stopped")).toBeInTheDocument();
+  });
+
+  it("retry resends the last question with retry_of and replaces the failed answer", async () => {
+    api.listConversations.mockResolvedValue([{ id: "c1", title: "Chat", created_at: "1", updated_at: "1", compacted: false, message_count: 2 }]);
+    api.getConversationMessages.mockResolvedValue([
+      msg("u1", "user", "first", {}), msg("a1", "assistant", "first answer"),
+      msg("u2", "user", "second", { answer_error: "model unavailable" }),
+    ]);
+    render(<MemoryRouter><KnowledgeChat /></MemoryRouter>);
+    fireEvent.click(await screen.findByText("Chat"));
+    expect(await screen.findByText("model unavailable")).toBeInTheDocument();
+    api.streamKnowledgeChat.mockReturnValue(events([
+      { type: "token", text: "Now it works." }, { type: "done", conversation_id: "c1", message_id: "a2" },
+    ]));
+    fireEvent.click(screen.getByText("retry"));
+    expect(await screen.findByText("Now it works.")).toBeInTheDocument();
+    const body = api.streamKnowledgeChat.mock.calls[0][0];
+    expect(body).toMatchObject({ question: "second", conversation_id: "c1", retry_of: "u2" });
+    expect(body.history).toEqual([{ role: "user", content: "first" }, { role: "assistant", content: "first answer" }]);
+    expect(screen.queryByText("model unavailable")).toBeNull();
+    expect(screen.getAllByText("second")).toHaveLength(1);
+    expect(screen.queryByText("retry")).toBeNull();
+  });
+
+  it("retry without a server id resends without retry_of", async () => {
+    api.streamKnowledgeChat.mockReturnValueOnce(events([{ type: "error", message: "boom" }]));
+    render(<MemoryRouter><KnowledgeChat /></MemoryRouter>);
+    ask("q");
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    api.streamKnowledgeChat.mockReturnValueOnce(events([{ type: "token", text: "ok" }, { type: "done", conversation_id: "c1", message_id: "a1" }]));
+    fireEvent.click(screen.getByText("retry"));
+    expect(await screen.findByText("ok")).toBeInTheDocument();
+    expect(api.streamKnowledgeChat.mock.calls[1][0]).not.toHaveProperty("retry_of");
+  });
+
+  it("offers no retry on a complete answer", async () => {
+    api.streamKnowledgeChat.mockReturnValue(events([{ type: "token", text: "fine" }, { type: "done", conversation_id: "c1", message_id: "a1" }]));
+    render(<MemoryRouter><KnowledgeChat /></MemoryRouter>);
+    ask("q");
+    await screen.findByText("fine");
+    expect(screen.queryByText("retry")).toBeNull();
+  });
+
+  it("a saved conversation shows its tool calls, sources and stopped note from the stored steps", async () => {
+    api.listConversations.mockResolvedValue([{ id: "c1", title: "Saved", created_at: "1", updated_at: "1", compacted: false, message_count: 2 }]);
+    api.getConversationMessages.mockResolvedValue([
+      msg("u1", "user", "q"),
+      msg("a1", "assistant", "Partial", {
+        stopped: true,
+        steps: [{ kind: "text", description: "", text: "Checking first." }, { tool: "load_full_text", description: "Reading", papers: [{ id: ID, title: "AF3" }] }],
+      } as never),
+    ]);
+    render(<MemoryRouter><KnowledgeChat /></MemoryRouter>);
+    fireEvent.click(await screen.findByText("Saved"));
+    expect(await screen.findByText("Checking first.")).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+    expect(document.querySelector(`.kc-turn-sources a[href="/paper/${ID}"]`)).toHaveAttribute("title", "read");
+    expect(screen.getByText("stopped")).toBeInTheDocument();
+  });
+});
+
 describe("toItems / awaitSavedAnswer", () => {
   it("turns stored messages into items, with a failed question's error in place of its answer", () => {
     const items = toItems([
@@ -138,6 +256,14 @@ describe("toItems / awaitSavedAnswer", () => {
     expect(items.map((i) => i.kind)).toEqual(["system", "user", "assistant", "user", "assistant"]);
     expect(items[4]).toMatchObject({ error: "boom", id: undefined });
     expect(items[2]).toMatchObject({ id: "a1", conceptsStatus: "done" });
+  });
+
+  it("keeps the saved steps and the stopped flag of an answer", () => {
+    const steps = [{ kind: "text", description: "", text: "hm" }, { tool: "run_cypher", description: "Count" }];
+    const items = toItems([msg("u1", "user", "q"), msg("a1", "assistant", "partial", { steps, stopped: true } as never), msg("u2", "user", "q2"), msg("a2", "assistant", "old")]);
+    expect(items[0]).toMatchObject({ kind: "user", id: "u1" });
+    expect(items[1]).toMatchObject({ id: "a1", steps, stopped: true });
+    expect(items[3]).toMatchObject({ id: "a2", steps: [], stopped: false });
   });
 
   it("returns the answer once saved, or the saved error", async () => {

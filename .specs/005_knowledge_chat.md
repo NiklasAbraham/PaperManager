@@ -16,11 +16,11 @@ When you send a message, the backend runs a multi-phase pipeline:
 3. Enrich with notes/convs   →  attach your notes and past conversation excerpts
 4. Build token budget        →  estimate context size, route model if needed
 5. Agentic tool-use loop     →  Claude calls run_cypher / semantic_search as needed
-6. Stream final answer       →  tokens streamed to frontend via SSE
-7. Persist to graph          →  message saved, conversation updated
+6. Stream final answer       →  every model round streamed to the frontend via SSE
+7. Persist to graph          →  message saved with its tool trace, conversation updated
 ```
 
-The frontend displays each phase as a step row above the answer as it arrives.
+The frontend displays each scope step and tool call as a row above the answer as it arrives (see "Tool trace").
 
 ---
 
@@ -32,12 +32,16 @@ thesis desk (a local Claude Code chat the concept and structure cards were first
 | Part | Component | What it does |
 |---|---|---|
 | Conversation list | `ConversationList.tsx` | Newest first, search over titles, `+ New`, rename and delete on hover; forks nested under the conversation they came from |
-| Transcript | `KnowledgeChat.tsx` | Reading-width column; questions in a tinted bubble; library steps (graph query, vector search, full text, figures, web) as collapsible rows above each answer; under each answer the cited papers as chips, the papers that were in context, `✦ Visualise` and `copy` |
+| Transcript | `KnowledgeChat.tsx` | Reading-width column; questions in a tinted bubble; the tool trace above each answer; under each answer the Sources row, the papers that were in context, `✦ Visualise`, `copy`, and `retry` on a failed or stopped last answer |
+| Tool trace | `ToolCall.tsx`, `types.ts` | One collapsed row per scope step and tool call (label, one-line summary of the input, count, status dot); expanded: the Cypher query or input JSON, the result preview, paper chips, figure thumbnails, web links. Prose the model wrote before a tool call (`interim`) shows as a muted line between the rows. `applyEvent()` folds the stream into text + trace |
+| Sources | `sources.ts`, `TurnSources.tsx` | `answerSources()` merges per paper id what the answer did with it: cited (a `/paper/<id>` link in the text), read (`load_full_text`), figures, attached, found (returned by `semantic_search` / `run_cypher`); ranked in that order, 10 chips then `+N`, chips are links to `/paper/<id>` (click opens the preview, Ctrl/Cmd-click the page). Then web pages and the number of searches. Scope papers are not sources (they are under "N in context") |
 | Branch lane | `BranchLane.tsx` | A git-style line beside the transcript: a dot per question, a curve where a strand was forked; hover a stretch to see its question, click a knob to open a strand |
 | Context strip | `KnowledgeChat.tsx` | Tokens used of the context window, split into system prompt, papers, history, question and answer; unfolds to the papers in context |
 | Composer | `Composer.tsx` | `@project:` / `@topic:` / `@tag:` / `@paper:` / `@person:` / `@user:` autocomplete, the mentions shown as scope chips, `+ paper` to attach library papers by id, web and concept toggles, model choice, Stop |
 | Preview pane | `PreviewPane.tsx` | Opens a cited paper (title, year, venue, summary, abstract, figures, `Open in library`, `PDF`) or a figure, beside the chat |
-| Answer rendering | `Markdown.tsx` | GFM, KaTeX (`\(` / `\[` normalised to `$`), highlighted code, library figures (`/papers/<id>/figures/<fid>/image` only), `[title](/paper/<id>)` citations as chips that open the preview, ```` ```concept ```` and ```` ```structure ```` blocks as cards |
+| Answer rendering | `Markdown.tsx` | GFM, KaTeX (`\(` / `\[` normalised to `$`, rendered as HTML and MathML), highlighted code, library figures (`/papers/<id>/figures/<fid>/image` only), figure strips, `[title](/paper/<id>)` citations as chips that open the preview, ```` ```concept ```` and ```` ```structure ```` blocks as cards. Works without the chat page around it (the single-paper chat in `ChatPanel.tsx` uses it): images then open in a new tab and citations are plain links |
+| Copy as TeX | `copyTex.ts` | One document-level copy listener: a selection holding rendered maths copies as `$...$` / `$$...$$` from KaTeX's MathML annotation |
+| Figure strips | `figureStrips.ts`, `FigureStrip.tsx`, `strip.css` | A rehype plugin wraps three or more images in a row (consecutive lines, or paragraphs with only an image) into one strip; `![title](/papers/<id>/figures/*)` alone on a line becomes a strip of all that paper's figures (`GET /papers/{id}/figures`). Thumbnails are labelled by the part of the alt texts that differs; a click opens a lightbox (←/→, Esc, `beside the chat`) |
 
 Papers attached in the composer travel as `paper_ids` on the request and are always put first in context.
 
@@ -63,15 +67,21 @@ that section. `sections.ts` mirrors the backend's `split_sections` (fence-aware)
 
 A ```` ```structure ```` block renders a 3Dmol.js card (`components/kchat/structure/`, ported from the desk). 3Dmol.js is
 vendored in `frontend/public/vendor/3dmol/` (BSD-3-Clause) and loaded on the first structure; nothing is fetched from a
-CDN. The block holds a PDB id (`6VXX`), `AF-<UniProt>` for an AlphaFold DB model, or a JSON spec with models
-(`pdb` / `afdb`, chains, colour by chain / spectrum / pLDDT / role, superposition by Cα), highlights (chain, residues,
-residue names, het groups; cartoon, sticks, spheres or surface) and a caption. The card has surface, dim, spin, reset,
+CDN. The block holds a PDB id (`6VXX`), `AF-<UniProt>` for an AlphaFold DB model, or a JSON spec (`types.ts` documents
+every field) with models (`pdb`, `afdb`, `ccd` for an RCSB chemical component, `pubchem` for a PubChem CID, or inline
+`data` + `format` sdf / mol2 / pdb / cif; chains, colour by chain / spectrum / pLDDT / role, `chainColors`, opacity,
+superposition by Cα with `align` `to` / `chain` / `toChain` / `offset`), highlights (model, chain, residues, residue
+names, atoms, het groups; cartoon, sticks, spheres or surface; `hidden`), `focus`, a caption, multi-model entries
+played as frames (`frames`) and `distances` drawn as a strip chart under the player. A small molecule (SDF / MOL2) is
+made one het group (`asLigand()`: chain L, residue 1, resn from a 1-3 character title, else LIG). A spec that parses
+but is invalid shows an error card. The card has surface, dim, spin, reset,
 a taller stage, fullscreen and PNG; hovering names the residue and B-factor, clicking collects residues into a copyable
 list; pLDDT colouring shows its legend.
 
-Coordinates come from `GET /knowledge-chat/structures?pdb=<id>` or `?afdb=<accession>` (`services/structures.py`): the
-RCSB mmCIF, or the AlphaFold DB model named by its prediction API, fetched once and cached in `/data/structures`
-(`STRUCTURE_CACHE_DIR` to change). Ids are validated before any request.
+Coordinates come from `GET /knowledge-chat/structures?pdb=<id>`, `?afdb=<accession>`, `?ccd=<code>` or
+`?pubchem=<cid>` (`services/structures.py`): the RCSB mmCIF, the AlphaFold DB model named by its prediction API, the
+RCSB ideal SDF of a chemical component (title line set to the code), or PubChem's 3D SDF, fetched once and cached in
+`/data/structures` (`STRUCTURE_CACHE_DIR` to change). Ids are validated before any request; inline `data` needs none.
 
 ## Strands (forks)
 
@@ -81,11 +91,45 @@ and `⑂ strand` (copy it up to that answer and continue there). `POST /knowledg
 `parent_id`, `fork_at` and `fork_kind`; the first question asked in it becomes its `branch_label`. The original is never
 changed. Deleting a parent leaves its strands as top-level conversations.
 
+## Tool trace, stop and retry
+
+Every step event carries, besides `kind` (`scope`, `attach`, `cypher`, `search`, `fulltext`, `figures`, `web`),
+`description`, `cypher` and `count`: `tool` (`mention`, `attach`, `run_cypher`, `semantic_search`, `load_full_text`,
+`list_figures`, `WebSearch`, `web_presearch`), `input` (the arguments as the model sent them), `result` (what went back
+to the model, cut at 4,000 characters), `is_error`, `papers` (the library papers the call touched or returned, at most
+30; for `run_cypher` read from rows with a paper id and title), `links` (web steps) and `figures` (`list_figures`).
+Built in `execute_library_tool()` (`services/ai.py`), so the API-key loop and the Claude Code path share them.
+
+`{"type": "interim"}` says the text streamed since the previous interim was prose written before a tool call, not the
+answer: the page moves it into the trace as `{kind: "text", text}` and starts the answer afresh. The router stores the
+answer's steps in order (scope and attach steps too, not the two filler steps "Parsing @mentions…" and "Sending to
+Claude…", which are still sent for older pages) as `steps_json` on the assistant `Message`, at most ~200 KB (result
+previews dropped oldest first); `GET .../messages` returns them as `steps`, forks copy them.
+
+Stop: the router keeps a `threading.Event` per running question (`_running`); `POST /knowledge-chat/stop` sets it, the
+producer stops reading the model between two events, closes the model generator, saves the text so far with
+`stopped: true` (or marks the question `answer_error: "Stopped."` when nothing was written) and sends `done` with
+`stopped`. A dropped connection without Stop still lets the answer finish and be saved. Retry: `retry_of` makes the
+router call `delete_last_turn()` (the question and every later non-system message, only if no later question exists)
+before answering again; otherwise the stream sends one error.
+
+## Shared with the desk
+
+The chat machinery is ported from Niklas's desk chat and kept close to it so the two can be synced file by file:
+`Markdown.tsx` (desk `Markdown.tsx`), `copyTex.ts` (desk `copyTex.ts`, unchanged but for `replaceMath` exported),
+`structure/*` (desk `components/structure/*`; PaperManager adds `afdb`, `ccd`, `pubchem`, inline `data` and the pLDDT
+legend instead of repository paths), `ConceptBlock` / `ConceptCard` and `components/concepts/` (desk
+`components/concepts/`, same speeds 0.25×-2×), `BranchLane.tsx` (desk `BranchLane.tsx`), `ToolCall.tsx` (desk
+`Chat.tsx` `ToolCall`), `TurnSources.tsx` and `sources.ts` (desk `Chat.tsx` `TurnSources`, `sources.ts`). Figure
+strips are described in the desk's prompt but built here first. Not shared: anything private to the desk (its modes,
+tools, inbox, calendar, permissions, subagents, uploads, dictation, token ledger).
+
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/knowledge-chat/stream` | Ask (SSE: `step`, `status`, `context`, `conversation`, `token`, `done`, `error`) |
+| POST | `/knowledge-chat/stream` | Ask (SSE: `step`, `status`, `context`, `conversation`, `token`, `interim`, `done`, `error`); `retry_of` = id of the last question to replace |
+| POST | `/knowledge-chat/stop` | `{user_message_id}`: stop that running answer; the part written so far is saved with `stopped` |
 | GET | `/knowledge-chat/conversations` | Knowledge Chat conversations (per-paper chats are listed on their paper) |
 | PATCH / DELETE | `/knowledge-chat/conversations/{id}` | Rename / delete |
 | GET | `/knowledge-chat/conversations/{id}/messages` | Messages with cited papers and concept cards |
@@ -93,7 +137,7 @@ changed. Deleting a parent leaves its strands as top-level conversations.
 | POST | `/knowledge-chat/conversations/{id}/fork` | New strand |
 | POST / GET | `/knowledge-chat/messages/{id}/visualise`, `.../concepts` | Concept cards for an answer |
 | POST | `/knowledge-chat/messages/{id}/concepts/{index}/repair` | Regenerate one card with its error |
-| GET | `/knowledge-chat/structures` | Cached RCSB / AlphaFold DB coordinates |
+| GET | `/knowledge-chat/structures` | Cached RCSB / AlphaFold DB / CCD / PubChem coordinates |
 
 All routes require a login.
 
@@ -211,16 +255,18 @@ The loop continues until Claude returns `stop_reason != "tool_use"`. An infinite
 
 ## Phase 6 — Final Answer Streaming
 
-After all tool calls are done:
-- **No tool calls made**: Claude's final answer is streamed token by token (true SSE, low latency)
-- **Tool calls made**: final answer is already computed (non-streaming agentic API), so it is chunked at 40 characters per SSE event to simulate streaming
+Every model round is one streamed request (`_stream_round()`, the only place the API-key path calls the model; it
+returns the final message with its `usage`). Text reaches the browser as it is written; when a round ends in tool
+calls, the router is told with `interim` (see "Tool trace") and the tools run. At most 8 rounds; the last one is sent
+with `tool_choice: none`, so the model has to answer. Before, a question without tool calls was asked twice (once to
+check for tool use, once to stream) and an answer after tool calls was chunked from a finished text.
 
 ---
 
 ## Phase 7 — Persistence
 
 After the answer is complete:
-- User message + assistant answer saved as `Message` nodes in Neo4j
+- User message + assistant answer saved as `Message` nodes in Neo4j; the answer carries its tool trace (`steps_json`) and, if stopped, `stopped: true`
 - Both messages linked to the paper IDs used as context
 - Conversation auto-created on first turn (title = first 60 chars of your question)
 

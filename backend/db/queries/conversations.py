@@ -45,9 +45,18 @@ def add_message(
     content: str,
     paper_ids: list[str],
     tokens_used: int = 0,
+    steps: list[dict] | None = None,
+    stopped: bool = False,
 ) -> dict:
+    """Save a message. *steps* is an answer's tool trace (stored as ``steps_json``),
+    *stopped* marks an answer the user cut short."""
     now = _now()
     msg_id = str(uuid.uuid4())
+    extra: dict = {}
+    if steps is not None:
+        extra["steps_json"] = json.dumps(steps)
+    if stopped:
+        extra["stopped"] = True
     with driver.session() as session:
         # Create message and link to conversation
         result = session.run(
@@ -57,11 +66,12 @@ def add_message(
                 id: $msg_id, role: $role, content: $content,
                 tokens_used: $tokens, created_at: $now
             })
+            SET m += $extra
             CREATE (c)-[:HAS_MESSAGE]->(m)
             RETURN m
             """,
             conv_id=conv_id, msg_id=msg_id, role=role,
-            content=content, tokens=tokens_used, now=now,
+            content=content, tokens=tokens_used, now=now, extra=extra,
         )
         msg = dict(result.single()["m"])
 
@@ -108,6 +118,12 @@ def _message_row(m: dict, papers: list[dict] | None = None) -> dict:
         d["concepts"] = json.loads(raw) if raw else None
     except (TypeError, ValueError):
         d["concepts"] = None
+    raw_steps = d.pop("steps_json", None)
+    try:
+        steps = json.loads(raw_steps) if raw_steps else None
+        d["steps"] = steps if isinstance(steps, list) else None
+    except (TypeError, ValueError):
+        d["steps"] = None
     papers = [p for p in (papers or []) if p and p.get("id")]
     d["paper_refs"] = [p["id"] for p in papers]
     d["papers"] = papers
@@ -176,6 +192,32 @@ def set_message_concepts(
         )
 
 
+def delete_last_turn(driver: Driver, conv_id: str, user_message_id: str) -> bool:
+    """Delete a question and every message after it, so it can be asked again.
+
+    Only the last question of a conversation qualifies: False (and nothing
+    deleted) when the message is not a question of this conversation or a later
+    question exists. Compaction summaries (role ``system``) stay.
+    """
+    with driver.session() as session:
+        row = session.run(
+            """
+            MATCH (c:Conversation {id: $cid})-[:HAS_MESSAGE]->(m:Message {id: $mid, role: 'user'})
+            OPTIONAL MATCH (c)-[:HAS_MESSAGE]->(later:Message {role: 'user'})
+            WHERE later.created_at > m.created_at
+            WITH c, m, count(later) AS newer
+            WHERE newer = 0
+            MATCH (c)-[:HAS_MESSAGE]->(x:Message)
+            WHERE x.created_at >= m.created_at AND x.role <> 'system'
+            WITH collect(x) AS doomed
+            FOREACH (n IN doomed | DETACH DELETE n)
+            RETURN size(doomed) AS deleted
+            """,
+            cid=conv_id, mid=user_message_id,
+        ).single()
+    return bool(row and row["deleted"])
+
+
 def set_message_error(driver: Driver, msg_id: str, error: str) -> None:
     """Mark a question whose answer failed, so a page that lost the stream can tell."""
     with driver.session() as session:
@@ -225,6 +267,10 @@ def fork_conversation(driver: Driver, conv_id: str, keep: int, kind: str = "stra
             if m.get("concepts") is not None:
                 props["concepts_json"] = json.dumps(m["concepts"])
                 props["concepts_status"] = m.get("concepts_status") or "done"
+            if m.get("steps") is not None:
+                props["steps_json"] = json.dumps(m["steps"])
+            if m.get("stopped"):
+                props["stopped"] = True
             session.run(
                 """
                 MATCH (c:Conversation {id: $conv})

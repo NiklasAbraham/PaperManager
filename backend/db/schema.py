@@ -23,6 +23,8 @@ _CONSTRAINTS = [
     "CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (c:Concept) REQUIRE c.id IS UNIQUE",
     "CREATE CONSTRAINT map_concept_id IF NOT EXISTS FOR (c:MapConcept) REQUIRE c.id IS UNIQUE",
     "CREATE CONSTRAINT map_concept_key IF NOT EXISTS FOR (c:MapConcept) REQUIRE c.key IS UNIQUE",
+    "CREATE CONSTRAINT report_id IF NOT EXISTS FOR (r:Report) REQUIRE r.id IS UNIQUE",
+    "CREATE CONSTRAINT suggestion_id IF NOT EXISTS FOR (n:Suggestion) REQUIRE n.id IS UNIQUE",
 ]
 
 # Full-text indexes of the library search (.specs/012_search.md), analysed with
@@ -51,6 +53,10 @@ _INDEXES = [
          `vector.dimensions`: 768,
          `vector.similarity_function`: 'cosine'
        }}""",
+    # Range indexes for the library listing's date/year filters and sorts (.specs/012_search.md).
+    "CREATE INDEX paper_created_at IF NOT EXISTS FOR (p:Paper) ON (p.created_at)",
+    "CREATE INDEX paper_year IF NOT EXISTS FOR (p:Paper) ON (p.year)",
+    "CREATE INDEX paper_updated_at IF NOT EXISTS FOR (p:Paper) ON (p.updated_at)",
 ]
 
 

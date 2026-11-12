@@ -171,11 +171,16 @@ def sweep_once() -> int:
 
 def _sweep_forever() -> None:
     time.sleep(60)  # let startup finish
+    from services import heartbeat
+
     while True:
+        ok, error = True, None
         try:
             sweep_once()
-        except Exception:  # noqa: BLE001 — never kill the sweeper
+        except Exception as exc:  # noqa: BLE001 — never kill the sweeper
             log.exception("Concept map sweep failed")
+            ok, error = False, f"{type(exc).__name__}: {exc}"
+        heartbeat.beat("concept-map-sweeper", ok=ok, error=error, interval_s=SWEEP_INTERVAL_S)
         time.sleep(SWEEP_INTERVAL_S)
 
 

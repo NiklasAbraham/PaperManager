@@ -7,7 +7,8 @@
    .kchat so the rest of the app is untouched.
    ========================================================================== */
 
-.kchat {
+/* The tokens also serve .kc-host: the single-paper chat panel renders answers with the same Markdown. */
+.kchat, .kc-host {
   --ink: var(--color-ink);
   --ink-2: var(--color-ink-2);
   --ink-3: #6b7280;
@@ -42,7 +43,9 @@
   --shadow-2: 0 12px 32px -18px rgba(46, 16, 101, .35);
   --ring: 0 0 0 3px rgba(124, 58, 237, .18);
   --fast: 130ms cubic-bezier(.4, 0, .2, 1);
+}
 
+.kchat {
   height: 100%;
   display: grid;
   grid-template-columns: 284px minmax(0, 1fr);
@@ -196,35 +199,55 @@
 @keyframes kc-spin { to { transform: rotate(360deg); } }
 @keyframes kc-pulse { 50% { opacity: .28; } }
 
-/* library steps above an answer */
+/* tool calls above an answer (ported from the desk's .tool rows) */
 .kc-steps { display: flex; flex-direction: column; gap: 3px; margin-bottom: 14px; }
-.kc-step { border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--surface); font-size: 12px; }
-.kc-step.open { border-color: var(--line); }
-.kc-step-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border: 0; background: none; text-align: left; color: var(--ink-2); }
-.kc-step-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; opacity: .7; }
-.kc-step-kind { font-family: var(--mono); font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--accent); flex: none; min-width: 50px; }
-.kc-step-desc { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kc-step-count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 0 7px; }
-.kc-step-body { padding: 0 10px 8px 24px; }
-.kc-step-body pre { margin: 0 0 6px; padding: 8px 10px; background: var(--raised); border: 1px solid var(--line-2); border-radius: var(--r-sm); font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; color: var(--ink-2); }
+.kc-tool { border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--surface); font-size: 12px; }
+.kc-tool:hover, .kc-tool.open { border-color: var(--line); }
+.kc-tool-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border: 0; background: none; text-align: left; color: var(--ink-2); }
+.kc-tool-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; opacity: .7; }
+.kc-tool.error .kc-tool-dot { background: var(--warm); opacity: 1; }
+.kc-tool-name { font-family: var(--mono); font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--accent); flex: none; min-width: 50px; }
+.kc-tool.error .kc-tool-name { color: var(--warm); }
+.kc-tool-sum { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kc-tool-count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 0 7px; }
+.kc-tool-body { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 8px 24px; }
+.kc-tool-body pre { margin: 0; padding: 8px 10px; background: var(--raised); border: 1px solid var(--line-2); border-radius: var(--r-sm); font-family: var(--mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--ink-2); }
+.kc-tool-body pre.kc-tool-result { max-height: 240px; overflow: auto; color: var(--ink-3); }
+.kc-tool-body pre.kc-tool-result.error { color: var(--warm); background: var(--warm-soft); }
+.kc-tool-figs { display: flex; flex-wrap: wrap; gap: 6px; }
+.kc-tool-figs button { width: 84px; height: 64px; padding: 3px; border: 1px solid var(--line); border-radius: var(--r-sm); background: #fff; overflow: hidden; }
+.kc-tool-figs button:hover { border-color: var(--accent); }
+.kc-tool-figs img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* prose the model wrote between tool calls */
+.kc-trace-text { margin: 3px 2px; padding-left: 10px; border-left: 2px solid var(--line); font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.kc-trace-text .kc-md p { margin: .2em 0; font-style: italic; }
+.kc-trace-text .kc-md :is(h1, h2, h3, h4) { font-size: 1em; margin: .4em 0 .2em; color: var(--ink-3); }
 
 /* sources and actions under an answer */
 .kc-answer-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 14px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .kc-answer-foot .kc-kicker { margin-right: 3px; }
+.kc-turn-sources { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; margin-bottom: 3px; }
+.kc-turn-sources .kc-kicker { margin-right: 4px; }
 .kc-src-list { display: flex; flex-wrap: wrap; gap: 5px; }
 .kc-context-papers { margin-top: 8px; }
 .kc-src-chip {
   display: inline-flex; align-items: center; gap: 5px; max-width: 300px;
   font-size: 11.5px; line-height: 20px; padding: 0 9px;
   border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--raised); color: var(--ink-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
 }
 .kc-src-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .kc-src-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--ink-4); }
 .kc-src-chip.k-paper::before, .kc-src-chip.attached::before { background: var(--accent); }
+.kc-src-chip.k-web::before { background: #138374; }
+.kc-src-chip.strong { border-color: var(--accent-line); background: var(--accent-soft); color: #5b21b6; }
+.kc-src-chip.weak { border-style: dashed; color: var(--ink-3); }
+.kc-src-chip.weak::before { background: var(--ink-4); }
 .kc-src-chip:hover { border-color: var(--accent); color: var(--accent); }
 .kc-src-more { font-family: var(--mono); font-size: 10.5px; border: 0; background: none; color: var(--ink-3); padding: 0 6px; }
 .kc-src-more:hover { color: var(--accent); }
+.kc-src-count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); cursor: help; margin-left: 2px; }
+.kc-retry { margin-left: 8px; }
 
 /* ---------- markdown -------------------------------------------------- */
 .kc-md > :first-child { margin-top: 0; }

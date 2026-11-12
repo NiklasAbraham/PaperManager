@@ -183,7 +183,8 @@ All endpoints are served from `http://localhost:8000`. Interactive API docs (Swa
 | `GET` | `/search/suggest` | Type-ahead: `papers` (title), `authors`, `topics`, `tags`, `projects` for a prefix (`?q=&limit=5`); each entity with its paper count |
 | `GET` | `/search/status` | Semantic index state (`state`, `indexed`, `done`/`todo` while building) and the full-text indexes' state |
 | `GET` | `/graph` | Graph data for visualisation |
-| `POST` | `/graph/cypher` | Custom Cypher → graph nodes + links |
+| `POST` | `/graph/query` | Admin only. One Cypher run returning `columns`, `rows` (max 500), `row_count`, `truncated`, `counters`, `nodes`, `links` (graph view, max 5,000 nodes) and `took_ms`. Body `{query, read_only}`; `read_only` defaults to `true` (managed read transaction, writes are rejected) |
+| `POST` | `/graph/cypher` | Admin only. Legacy: custom Cypher → graph nodes + links |
 | `GET` | `/stats` | Library statistics |
 
 ### `/search` Query Parameters
@@ -376,9 +377,9 @@ SSE event types: `progress`, `token`, `done`, `error`.
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | `GET` | `/cypher/schema` | Live Neo4j schema (labels, types, keys) |
-| `POST` | `/cypher/run` | Run raw Cypher (max 500 rows) |
+| `POST` | `/cypher/run` | Run raw Cypher (max 500 rows); admin only |
 | `POST` | `/cypher/assist` | Ollama generates Cypher from natural language |
-| `DELETE` | `/cypher/nodes/{id}` | Delete any node by ID |
+| `DELETE` | `/cypher/nodes/{id}` | Delete any node by ID; admin only |
 | `GET` | `/export/bibtex` | Download BibTeX for all papers |
 | `POST` | `/backfill/topics` | Bulk AI topic assignment |
 | `POST` | `/backfill/summary` | Bulk AI summarisation |

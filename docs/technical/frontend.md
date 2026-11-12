@@ -48,9 +48,9 @@ frontend/
         ├── PaperDetail.tsx      # Single paper: metadata, PDF, figures, notes, chat
         ├── People.tsx           # People list + person detail
         ├── Projects.tsx         # Project list + project detail
-        ├── Graph.tsx            # Knowledge graph (WebGL force-graph)
+        ├── Graph.tsx            # Knowledge graph (WebGL force-graph) + Cypher query panel (components/graph/)
         ├── KnowledgeChat.tsx    # Multi-paper AI chat
-        ├── Cypher.tsx           # Cypher editor
+        ├── Cypher.tsx           # Redirects to /graph?view=query
         ├── Settings.tsx         # App settings
         ├── BulkImport.tsx       # Bulk paper import
         ├── LiteratureSearch.tsx # Stream recent papers from arXiv / PubMed / bioRxiv
@@ -77,9 +77,9 @@ React Router v7 defines the page routes in `App.tsx`:
 | `/venues` | `Venues` | Venue browser |
 | `/conferences` | `Conferences` | Conference explorer: every conference-year |
 | `/conferences/:key` | `Conferences` | One conference: overview, institutions (`?view=institutions&inst=`), topics (`?view=topics&q=`) |
-| `/graph` | `Graph` | Knowledge graph visualisation |
+| `/graph` | `Graph` | Knowledge graph visualisation; `?view=query` opens the admin Cypher query panel, `?q=` preloads it |
 | `/knowledge` | `KnowledgeChat` | Multi-paper AI chat |
-| `/cypher` | `Cypher` | Cypher query editor |
+| `/cypher` | `Cypher` | Redirect to `/graph?view=query` (keeps `?q=`) |
 | `/bulk-import` | `BulkImport` | Bulk paper import |
 | `/literature` | `LiteratureSearch` | Recent paper stream from external sources |
 | `/discover` | `Discover` | Search external sources + add to library |

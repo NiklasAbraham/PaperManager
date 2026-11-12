@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { mdPlugins } from "../lib/markdown";
+import { Markdown } from "./kchat/Markdown";
+import "./kchat/kchat.css";
 import {
   listPaperConversations, getPaperConversationMessages,
   renamePaperConversation, compactPaperConversation,
@@ -179,7 +181,6 @@ export default function ChatPanel({ paperId }: Props) {
         <div className="flex items-center justify-between shrink-0">
           <h2 className="text-sm font-semibold text-gray-700">Chat</h2>
           <button
-            onClick={() => { setActiveConvId(null); setMessages([]); inputRef.current?.focus(); }}
             className="text-xs bg-violet-600 text-white px-3 py-1 rounded-lg hover:bg-violet-700 font-medium"
             onClick={() => {
               // Start new conversation inline — clear activeConvId so send() creates one
@@ -363,8 +364,9 @@ export default function ChatPanel({ paperId }: Props) {
                 }`}>
                   {msg.role === "assistant" ? (
                     <>
-                      <div className="prose prose-sm max-w-none overflow-x-auto">
-                        <ReactMarkdown {...mdPlugins}>{msg.content}</ReactMarkdown>
+                      {/* The same renderer as Knowledge Chat: maths, copy-TeX, figures, structures, concept cards. */}
+                      <div className="kc-host max-w-none overflow-x-auto">
+                        <Markdown text={msg.content} />
                       </div>
                       <div className="flex items-center gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => navigator.clipboard.writeText(msg.content)}

@@ -65,9 +65,9 @@ This means every capability is available both via HTTP (for the browser) and via
 | `topics.py` | `/topics` | Topic CRUD + rename |
 | `projects.py` | `/projects` | Project CRUD + paper membership |
 | `search.py` | `/search` | Full-text + filter search |
-| `graph.py` | `/graph` | Graph visualisation data |
+| `graph.py` | `/graph` | Graph visualisation data + admin Cypher query (`/graph/query`) |
 | `stats.py` | `/stats` | Library statistics |
-| `cypher.py` | `/cypher` | Raw Cypher editor + AI assist |
+| `cypher.py` | `/cypher` | Schema, AI assist, raw run, node delete (admin only) |
 | `export.py` | `/export` | BibTeX export |
 | `backfill.py` | `/backfill` | Bulk AI enrichment (topics, summaries, figures) |
 | `knowledge_chat.py` | `/knowledge-chat` | Multi-paper chat (SSE streaming) |

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
+import CypherPanel from "../components/graph/CypherPanel";
+import { isMutation } from "../components/graph/resultFormat";
+import type { QueryResult, ResultTab } from "../components/graph/types";
 import { useAppSettings } from "../contexts/SettingsContext";
+import { useAuth } from "../contexts/AuthContext";
 import type { GraphData, GraphNode } from "../types";
 
 type Mode = "full" | "papers";
@@ -56,12 +60,8 @@ const DEFAULT_SETTINGS: VisSettings = {
   bgColor: "#f9fafb",
 };
 
-function defaultQuery(mode: Mode, maxNodes: number): string {
-  if (mode === "papers") {
-    return `MATCH (n)\nWHERE n:Paper OR n:Person OR n:Project\nWITH n LIMIT ${maxNodes}\nOPTIONAL MATCH (n)-[r]-(m)\nWHERE m:Paper OR m:Person OR m:Topic OR m:Project\nRETURN n, r, m`;
-  }
-  return `MATCH (n)\nWITH n LIMIT ${maxNodes}\nOPTIONAL MATCH (n)-[r]->(m)\nRETURN n, r, m`;
-}
+// Editor text when the query panel opens without ?q=
+const DEFAULT_QUERY = "MATCH (p:Paper)-[r]->(n)\nRETURN p, r, n\nLIMIT 50";
 
 const SKIP_PROPS = new Set(["x", "y", "vx", "vy", "fx", "fy", "__indexColor", "index"]);
 
@@ -119,21 +119,23 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 
 // ── Node properties panel ─────────────────────────────────────────────────────
 
-function NodePanel({ node, onClose, onNavigate, onDelete, nodeColors }: {
+function NodePanel({ node, onClose, onNavigate, onDelete, nodeColors, canDelete }: {
   node: GraphNode;
   onClose: () => void;
   onNavigate: () => void;
-  onDelete: () => void;
+  onDelete: () => Promise<void> | void;
   nodeColors: Record<string, string>;
+  canDelete: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const color = nodeColors[node.type] ?? NODE_COLORS.unknown;
   const entries = Object.entries(node).filter(
     ([k, v]) => !SKIP_PROPS.has(k) && k !== "label" && k !== "type" && v !== null && v !== undefined && v !== ""
   );
 
   return (
-    <div className="w-72 shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-hidden">
+    <div className="w-60 sm:w-72 shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
         <span className="w-3 h-3 rounded-full shrink-0" style={{ background: color }} />
         <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{node.type}</span>
@@ -156,7 +158,7 @@ function NodePanel({ node, onClose, onNavigate, onDelete, nodeColors }: {
         )}
       </div>
 
-      <div className="px-4 py-3 border-t border-gray-100 space-y-2">
+      <div className={`px-4 py-3 border-t border-gray-100 space-y-2 ${node.type !== "paper" && !canDelete ? "hidden" : ""}`}>
         {node.type === "paper" && (
           <button
             onClick={onNavigate}
@@ -165,19 +167,23 @@ function NodePanel({ node, onClose, onNavigate, onDelete, nodeColors }: {
             Open paper →
           </button>
         )}
-        {!confirmDelete ? (
+        {canDelete && !confirmDelete && (
           <button
             onClick={() => setConfirmDelete(true)}
             className="w-full px-3 py-1.5 text-xs font-medium border border-red-200 text-red-500 rounded hover:bg-red-50 transition-colors"
           >
             Delete node
           </button>
-        ) : (
+        )}
+        {canDelete && confirmDelete && (
           <div className="space-y-1.5">
             <p className="text-[11px] text-red-600 text-center">Delete this node and all its relationships?</p>
+            {deleteError && <p className="text-[11px] text-red-600 text-center break-words">{deleteError}</p>}
             <div className="flex gap-1.5">
               <button
-                onClick={onDelete}
+                onClick={async () => {
+                  try { await onDelete(); } catch { setDeleteError("Delete failed."); }
+                }}
                 className="flex-1 px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
               >
                 Yes, delete
@@ -341,9 +347,14 @@ export default function Graph() {
     showEdgeLabels: appSettings.graphShowEdgeLabels,
   });
 
-  const [queryText, setQueryText]     = useState(() => defaultQuery(appSettings.defaultGraphMode as Mode, DEFAULT_SETTINGS.maxNodes));
-  const [queryError, setQueryError]   = useState<string | null>(null);
-  const [queryRunning, setQueryRunning] = useState(false);
+  // Query panel: admin only. ?view=query opens it, ?q= preloads the editor (read once).
+  const { isAdmin } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const panelOpen = isAdmin && searchParams.get("view") === "query";
+  const [initialQuery] = useState(() => searchParams.get("q") ?? DEFAULT_QUERY);
+  const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
+  const [resultTab, setResultTab]     = useState<ResultTab>("table");
+  const [reloadKey, setReloadKey]     = useState(0);
 
   const containerRef  = useRef<HTMLDivElement>(null);
   const graphRef      = useRef<unknown>(null);
@@ -352,50 +363,45 @@ export default function Graph() {
   const degreeRef     = useRef<Map<string, number>>(new Map());
 
   const navigate = useNavigate();
-  const location = useLocation();
 
   const patchSettings = useCallback((patch: Partial<VisSettings>) => {
     setSettings(prev => ({ ...prev, ...patch }));
   }, []);
 
-  const hasCypherState = !!(location.state as { cypherQuery?: string } | null)?.cypherQuery;
+  const setPanelOpen = useCallback((open: boolean) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (open) next.set("view", "query"); else next.delete("view");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  // The canvas shows the query result while its Graph tab is active, else the explorer data.
+  const queryGraph: GraphData | null =
+    panelOpen && resultTab === "graph" && queryResult && queryResult.nodes.length > 0
+      ? { nodes: queryResult.nodes, links: queryResult.links }
+      : null;
+  const shownData = queryGraph ?? data;
+
+  const handleQueryResult = useCallback((res: QueryResult | null) => {
+    setQueryResult(res);
+    // A write changed the library: the explorer's copy is stale.
+    if (res && isMutation(res.counters)) setReloadKey(k => k + 1);
+  }, []);
 
   // Filtered data: exclude hidden node types and their links
   const filteredData = useMemo(() => {
-    if (settings.hiddenTypes.length === 0) return data;
+    if (settings.hiddenTypes.length === 0) return shownData;
     const hidden = new Set(settings.hiddenTypes);
-    const nodes = data.nodes.filter(n => !hidden.has(n.type));
+    const nodes = shownData.nodes.filter(n => !hidden.has(n.type));
     const nodeIds = new Set(nodes.map(n => n.id));
-    const links = data.links.filter(l => {
+    const links = shownData.links.filter(l => {
       const src = typeof l.source === "object" ? (l.source as GraphNode).id : l.source as string;
       const tgt = typeof l.target === "object" ? (l.target as GraphNode).id : l.target as string;
       return nodeIds.has(src) && nodeIds.has(tgt);
     });
     return { nodes, links };
-  }, [data, settings.hiddenTypes]);
-
-  // Sync query bar text when mode changes
-  useEffect(() => {
-    setQueryText(defaultQuery(mode, settings.maxNodes));
-  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-run Cypher query passed from the Cypher page via router state
-  useEffect(() => {
-    if (!hasCypherState) return;
-    const q = (location.state as { cypherQuery?: string }).cypherQuery!;
-    window.history.replaceState({}, "");
-    setQueryText(q);
-    setLoading(true);
-    apiFetch<GraphData & { error?: string }>("/graph/cypher", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: q }),
-    })
-      .then(res => { if (!res.error) setData(res); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [shownData, settings.hiddenTypes]);
 
   // Recompute node degrees from filtered links
   useEffect(() => {
@@ -409,26 +415,21 @@ export default function Graph() {
     degreeRef.current = map;
   }, [filteredData]);
 
-  // Fetch data on mode change (skip initial load when a cypher query was injected)
-  const initialLoadDone = useRef(false);
+  // Fetch explorer data on mode change, node limit change, or after a write query
   useEffect(() => {
-    if (!initialLoadDone.current && hasCypherState) {
-      initialLoadDone.current = true;
-      return;
-    }
-    initialLoadDone.current = true;
     setLoading(true);
     apiFetch<GraphData>(`/graph?mode=${mode}&max_nodes=${settings.maxNodes}`)
       .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [mode, settings.maxNodes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, settings.maxNodes, reloadKey]);
 
   // Build graph when filtered data is ready
   useEffect(() => {
     if (loading || !containerRef.current || filteredData.nodes.length === 0) return;
 
     import("force-graph").then(({ default: ForceGraph }) => {
+      if (!containerRef.current) return; // unmounted while the module was loading
       if (graphRef.current) {
         (graphRef.current as { _destructor?: () => void })?._destructor?.();
         containerRef.current!.innerHTML = "";
@@ -533,6 +534,19 @@ export default function Graph() {
     };
   }, [filteredData, loading]);
 
+  // Keep the canvas as large as its box when the query panel opens or the window changes size.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (!graphRef.current || el.clientWidth === 0) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (graphRef.current as any).width(el.clientWidth).height(el.clientHeight);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // ── Reactive settings (no full rebuild) ────────────────────────────────────
 
   useEffect(() => {
@@ -615,60 +629,25 @@ export default function Graph() {
     (graphRef.current as { refresh?: () => void }).refresh?.();
   }, [settings.showEdgeLabels, settings.showNodeLabels, settings.sizeByDegree]);
 
-  // ── Query bar ──────────────────────────────────────────────────────────────
-
-  const runQuery = useCallback(async () => {
-    if (!queryText.trim() || queryRunning) return;
-    setQueryRunning(true);
-    setQueryError(null);
-    try {
-      const result = await apiFetch<GraphData & { error?: string }>("/graph/cypher", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: queryText.trim() }),
-      });
-      if (result.error) throw new Error(result.error);
-      setData(result);
-    } catch (e: unknown) {
-      setQueryError(e instanceof Error ? e.message : "Error");
-    } finally {
-      setQueryRunning(false);
-    }
-  }, [queryText, queryRunning]);
-
-  const resetQuery = useCallback(() => {
-    const q = defaultQuery(mode, settings.maxNodes);
-    setQueryText(q);
-    setQueryError(null);
-    setLoading(true);
-    apiFetch<GraphData>(`/graph?mode=${mode}&max_nodes=${settings.maxNodes}`)
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [mode, settings.maxNodes]);
-
   // ── Delete node ────────────────────────────────────────────────────────────
 
   const handleDeleteNode = useCallback(async (node: GraphNode) => {
     await apiFetch(`/cypher/nodes/${node.id}`, { method: "DELETE" });
     setSelected(null);
-    setData(prev => {
-      const filtered: GraphData = {
-        nodes: prev.nodes.filter(n => n.id !== node.id),
-        links: prev.links.filter(l => {
-          const src = typeof l.source === "object" ? (l.source as GraphNode).id : l.source;
-          const tgt = typeof l.target === "object" ? (l.target as GraphNode).id : l.target;
-          return src !== node.id && tgt !== node.id;
-        }),
-      };
-      if (graphRef.current) {
-        (graphRef.current as { graphData: (d: GraphData) => void }).graphData({
-          nodes: filtered.nodes.map(n => ({ ...n })),
-          links: filtered.links.map(l => ({ ...l })),
-        });
-      }
-      return filtered;
+    setQueryResult(prev => prev && {
+      ...prev,
+      nodes: prev.nodes.filter(n => n.id !== node.id),
+      links: prev.links.filter(l => l.source !== node.id && l.target !== node.id),
     });
+    // The canvas rebuilds from the new data, so no in-place graphData update is needed.
+    setData(prev => ({
+      nodes: prev.nodes.filter(n => n.id !== node.id),
+      links: prev.links.filter(l => {
+        const src = typeof l.source === "object" ? (l.source as GraphNode).id : l.source;
+        const tgt = typeof l.target === "object" ? (l.target as GraphNode).id : l.target;
+        return src !== node.id && tgt !== node.id;
+      }),
+    }));
   }, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -677,11 +656,11 @@ export default function Graph() {
     <div className="h-[calc(100vh-53px)] flex flex-col">
 
       {/* Top bar */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-gray-200 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 px-3 sm:px-4 py-2 bg-white border-b border-gray-200 shrink-0">
         {(["full", "papers"] as Mode[]).map(m => (
           <button
             key={m}
-            onClick={() => setMode(m)}
+            onClick={() => { setMode(m); setResultTab("table"); }}
             className={`px-3 py-1 text-xs rounded-full font-medium transition-colors
               ${mode === m ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
           >
@@ -694,7 +673,7 @@ export default function Graph() {
         </span>
 
         {/* Legend — uses live node colors */}
-        <div className="flex items-center gap-3 ml-4">
+        <div className="hidden lg:flex items-center gap-3 ml-4">
           {Object.entries(settings.nodeColors).filter(([k]) => k !== "unknown").map(([type, color]) => {
             const hidden = settings.hiddenTypes.includes(type);
             return (
@@ -705,6 +684,22 @@ export default function Graph() {
             );
           })}
         </div>
+
+        {/* Query panel toggle (admin only: the query endpoints are admin only) */}
+        {isAdmin && (
+          <button
+            onClick={() => setPanelOpen(!panelOpen)}
+            aria-pressed={panelOpen}
+            title="Run Cypher queries and show the result as a graph"
+            className={`ml-3 px-3 py-1 text-xs rounded-full font-medium border transition-colors ${
+              panelOpen
+                ? "bg-violet-50 border-violet-200 text-violet-700"
+                : "border-gray-200 text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            Query
+          </button>
+        )}
 
         {/* Gear icon */}
         <button
@@ -719,42 +714,35 @@ export default function Graph() {
         </button>
       </div>
 
-      {/* Active Cypher query bar */}
-      <div className="shrink-0 bg-white border-b border-gray-200 px-4 py-2">
-        <div className="flex items-start gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-violet-500 pt-2 shrink-0">Cypher</span>
-          <textarea
-            value={queryText}
-            onChange={e => setQueryText(e.target.value)}
-            rows={8}
-            spellCheck={false}
-            className="flex-1 text-xs font-mono border border-gray-200 rounded p-1.5 resize-y focus:outline-none focus:ring-1 focus:ring-violet-400 bg-gray-50 leading-relaxed"
-            onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) runQuery(); }}
-          />
-          <div className="flex flex-col gap-1 shrink-0 pt-0.5">
-            <button
-              onClick={runQuery}
-              disabled={queryRunning}
-              className="px-2.5 py-1 text-xs font-medium bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50 transition-colors"
-            >
-              {queryRunning ? "…" : "Run ⌘↵"}
-            </button>
-            <button
-              onClick={resetQuery}
-              className="px-2.5 py-1 text-xs font-medium border border-gray-200 text-gray-500 rounded hover:bg-gray-50 transition-colors"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-        {queryError && <p className="text-xs text-red-500 mt-1 ml-14">{queryError}</p>}
-      </div>
+      {/* Query panel (left on wide screens, below the canvas on phones) + graph + properties panel */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
-      {/* Graph + properties panel */}
-      <div className="flex-1 flex overflow-hidden">
+        {panelOpen && (
+          <CypherPanel
+            initialQuery={initialQuery}
+            result={queryResult}
+            tab={resultTab}
+            onResult={handleQueryResult}
+            onTabChange={setResultTab}
+            onClose={() => setPanelOpen(false)}
+          />
+        )}
+
+        <div className="order-1 lg:order-2 flex-1 min-h-0 min-w-0 flex overflow-hidden">
 
         {/* Canvas area */}
-        <div className="flex-1 relative overflow-hidden" style={{ background: settings.bgColor }}>
+        <div className="flex-1 min-w-0 relative overflow-hidden" style={{ background: settings.bgColor }}>
+          {queryGraph && (
+            <div className="absolute top-2 left-2 z-10 flex items-center gap-2 bg-white/95 border border-gray-200 rounded-lg shadow-sm px-2.5 py-1.5 text-xs text-gray-600">
+              <span>Query result</span>
+              <button
+                onClick={() => setResultTab("table")}
+                className="px-2 py-0.5 rounded border border-violet-200 text-violet-700 hover:bg-violet-50"
+              >
+                Back to full graph
+              </button>
+            </div>
+          )}
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400 z-10">
               Loading graph…
@@ -762,7 +750,7 @@ export default function Graph() {
           )}
           {!loading && filteredData.nodes.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
-              No data yet — upload some papers or run a Cypher query.
+              {isAdmin ? "No data yet — upload some papers or run a Cypher query." : "No data yet — upload some papers."}
             </div>
           )}
           <div ref={containerRef} className="w-full h-full" />
@@ -785,8 +773,10 @@ export default function Graph() {
             onNavigate={() => navigate(`/paper/${selected.id}`)}
             onDelete={() => handleDeleteNode(selected)}
             nodeColors={settings.nodeColors}
+            canDelete={isAdmin}
           />
         )}
+        </div>
       </div>
     </div>
   );

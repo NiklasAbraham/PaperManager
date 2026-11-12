@@ -58,7 +58,7 @@ Two tabs on the right help with hard papers. Both are explained in
 
 ## 5. Ask across everything
 
-Open **Knowledge** in the top menu and ask a question, for example:
+Open **Chat** in the top bar and ask a question, for example:
 
 ```text
 @project:MyThesis Which papers compare against diffusion baselines, and how do they differ?

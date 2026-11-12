@@ -34,9 +34,11 @@ interface Props {
   precomputedTagSuggestions?: { existing: string[]; new: string[]; all_tags: string[] };
   /** Existing paper without a PDF (reference stub) that this upload fills in instead of creating a new paper. */
   stubId?: string;
+  /** Project the new paper is added to as soon as it is uploaded (the Library's active project filter). The project step is then skipped. */
+  defaultProjectId?: string;
 }
 
-export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug, queuePosition, queueTotal, skipSummaryStep, preprocessKey, analysisKey, precomputedTagSuggestions, stubId }: Props) {
+export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, url, debug, queuePosition, queueTotal, skipSummaryStep, preprocessKey, analysisKey, precomputedTagSuggestions, stubId, defaultProjectId }: Props) {
   const urlMode = !file && !!url;
   const { settings } = useAppSettings();
 
@@ -323,6 +325,13 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
         );
       }
       await applySource(paper.id);
+      if (defaultProjectId) {
+        try {
+          await addPaperToProject(defaultProjectId, paper.id);
+          setProjectOnboardSelectedId(defaultProjectId);
+          setProjectOnboardAdded(true);
+        } catch { /* best-effort: the project step stays available */ }
+      }
       if (urlMode && paper.pdf_fetched === false) setPdfMissing(true);
       const hasRefs = paper.references_found && paper.references_found.length > 0;
       if (hasRefs && !settings.autoSaveReferences) {
@@ -797,8 +806,8 @@ export default function UploadConfirmModal({ file, meta, onConfirmed, onCancel, 
             </div>
           </div>
           <div className="px-6 py-4 border-t border-line-s flex justify-end gap-2">
-            <button onClick={() => setStep(5)} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">Skip</button>
-            <button onClick={() => setStep(5)} className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent">
+            <button onClick={() => setStep(projectOnboardAdded ? 6 : 5)} className="px-4 py-2 text-sm text-ink-3 hover:text-ink">Skip</button>
+            <button onClick={() => setStep(projectOnboardAdded ? 6 : 5)} className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent">
               Next →
             </button>
           </div>

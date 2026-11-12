@@ -70,7 +70,7 @@ When you save a note, all `@mentions` and `#topics` become graph relationships:
 (Note)-[:MENTIONS]->(Topic)
 ```
 
-This means you can later query "all notes that mention @Jan" or "all papers with notes about #transformers" from the Cypher editor or knowledge chat.
+This means you can later query "all notes that mention @Jan" or "all papers with notes about #transformers" from the Graph page's query panel or knowledge chat.
 
 ### Preview
 

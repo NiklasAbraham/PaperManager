@@ -1,46 +1,34 @@
-from fastapi import APIRouter, Body, Depends, Query
+import logging
+import time
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from neo4j import Driver
-from neo4j.graph import Node, Relationship
+from pydantic import BaseModel
 
 from db.connection import get_driver
+from db.queries.users import is_user_admin
+from services.auth import get_current_user
+from services.cypher_result import (
+    GraphCollector,
+    counters_dict,
+    link_dict as _link_dict,  # noqa: F401 — kept for callers of the old name
+    node_dict as _node_dict,
+    node_id as _node_id,
+    node_type as _node_type,  # noqa: F401 — kept for callers of the old name
+    serialize_value,
+)
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/graph", tags=["graph"])
 
-_NODE_TYPES = {
-    "Paper":    "paper",
-    "Person":   "person",
-    "Topic":    "topic",
-    "Tag":      "tag",
-    "Project":  "project",
-    "Note":     "note",
-    "BlogPost": "blogpost",
-    "Blog":     "blog",
-}
+MAX_ROWS = 500
+# Upper bound on records read to build the graph view, so a runaway MATCH cannot stall a request.
+MAX_SCAN_RECORDS = 20_000
 
 
-def _node_type(labels: list[str]) -> str:
-    for lbl in labels:
-        if lbl in _NODE_TYPES:
-            return _NODE_TYPES[lbl]
-    return "unknown"
-
-
-def _node_dict(node) -> dict:
-    props = dict(node)
-    return {
-        "id":    props.get("id") or str(node.element_id),
-        "label": props.get("title") or props.get("name") or props.get("id", "?"),
-        "type":  _node_type(list(node.labels)),
-        **{k: v for k, v in props.items() if k not in ("raw_text", "content", "content_md")},
-    }
-
-
-def _link_dict(rel) -> dict:
-    return {
-        "source": str(rel.start_node.element_id),
-        "target": str(rel.end_node.element_id),
-        "type":   rel.type,
-    }
+def _require_admin(driver: Driver, current_user: str) -> None:
+    if not is_user_admin(driver, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
 
 @router.get("")
@@ -119,13 +107,9 @@ def get_graph(
             r = record.get("r")
             if r is not None:
                 # Re-map source/target to our stable id field
-                src_node = r.start_node
-                tgt_node = r.end_node
-                src_id = dict(src_node).get("id") or str(src_node.element_id)
-                tgt_id = dict(tgt_node).get("id") or str(tgt_node.element_id)
                 links.append({
-                    "source": src_id,
-                    "target": tgt_id,
+                    "source": _node_id(r.start_node),
+                    "target": _node_id(r.end_node),
                     "type":   r.type,
                 })
 
@@ -136,26 +120,97 @@ def get_graph(
 def run_cypher(
     body: dict = Body(...),
     driver: Driver = Depends(get_driver),
+    current_user: str = Depends(get_current_user),
 ):
+    """Legacy graph-only query endpoint (admin only; the Graph page uses POST /graph/query)."""
+    _require_admin(driver, current_user)
     query = (body.get("query") or "").strip()
     if not query:
         return {"nodes": [], "links": [], "error": "Empty query"}
 
-    nodes: dict[str, dict] = {}
-    links: list[dict] = []
-
+    collector = GraphCollector()
     try:
         with driver.session() as session:
             result = session.run(query)
             for record in result:
-                for value in record.values():
-                    if isinstance(value, Node):
-                        nd = _node_dict(value)
-                        nodes[nd["id"]] = nd
-                    elif isinstance(value, Relationship):
-                        src_id = dict(value.start_node).get("id") or str(value.start_node.element_id)
-                        tgt_id = dict(value.end_node).get("id") or str(value.end_node.element_id)
-                        links.append({"source": src_id, "target": tgt_id, "type": value.type})
-        return {"nodes": list(nodes.values()), "links": links}
+                collector.add(list(record.values()))
+        nodes, links = collector.result()
+        return {"nodes": nodes, "links": links}
     except Exception as exc:
         return {"nodes": [], "links": [], "error": str(exc)}
+
+
+class GraphQueryBody(BaseModel):
+    query: str
+    read_only: bool = True
+
+
+def _collect(result) -> dict:
+    """Read a Cypher result once into table rows plus the graph view."""
+    keys = list(result.keys())
+    rows: list[dict] = []
+    collector = GraphCollector()
+    rows_truncated = False
+    scan_cut = False
+    scanned = 0
+    for record in result:
+        scanned += 1
+        values = list(record.values())
+        if len(rows) < MAX_ROWS:
+            rows.append({k: serialize_value(v) for k, v in zip(keys, values)})
+        else:
+            rows_truncated = True
+        if not collector.full:
+            collector.add(values)
+        # Past the row cap only the graph view still needs records.
+        if rows_truncated and collector.full:
+            break
+        if scanned >= MAX_SCAN_RECORDS:
+            scan_cut = True
+            break
+    summary = result.consume()
+    nodes, links = collector.result()
+    return {
+        "columns": keys,
+        "rows": rows,
+        "row_count": len(rows),
+        "truncated": rows_truncated,
+        "counters": counters_dict(summary),
+        "nodes": nodes,
+        "links": links,
+        "graph_truncated": collector.truncated or scan_cut,
+    }
+
+
+@router.post("/query")
+def graph_query(
+    body: GraphQueryBody,
+    driver: Driver = Depends(get_driver),
+    current_user: str = Depends(get_current_user),
+):
+    """Run one Cypher query and return the table view and the graph view together.
+
+    Admin only. With read_only (the default) the query runs in a managed read transaction, so
+    Neo4j itself rejects CREATE/MERGE/SET/DELETE; read_only=false runs it as an auto-commit
+    query that may write.
+    """
+    _require_admin(driver, current_user)
+    query = body.query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Empty query")
+
+    started = time.perf_counter()
+    try:
+        with driver.session() as session:
+            if body.read_only:
+                out = session.execute_read(lambda tx: _collect(tx.run(query)))
+            else:
+                out = _collect(session.run(query))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=getattr(exc, "message", None) or str(exc))
+    out["took_ms"] = int((time.perf_counter() - started) * 1000)
+    log.info(
+        "Graph query | user=%s read_only=%s rows=%d nodes=%d | %.80s",
+        current_user, body.read_only, out["row_count"], len(out["nodes"]), query,
+    )
+    return out

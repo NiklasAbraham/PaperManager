@@ -212,7 +212,7 @@ graph LR
 ```
 
 Every paper, author, topic, project, note and concept is a node in one Neo4j graph, so the
-same data powers the library, the chat, the concept map and the Cypher editor. PDFs stay in
+same data powers the library, the chat, the concept map and the Graph page's Cypher query panel. PDFs stay in
 your own Google Drive. More in [Architecture](technical/architecture.md).
 
 PaperManager is open source. The project page at

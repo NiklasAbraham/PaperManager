@@ -18,8 +18,12 @@ export function tidyCaption(text: string): string {
   return end > t.length / 3 ? t.slice(0, end + 1) : `${t}…`;
 }
 
-/** Playback speeds offered on animation cards; the active one (and pause) is drawn filled. */
-const SPEEDS = [0.5, 1, 2];
+/**
+ * Playback speeds offered on animation cards; the active one (and pause) is drawn filled. Cards start at
+ * DEFAULT_SPEED: generated animations run too fast at 1x (as on the desk, from which both are ported).
+ */
+const SPEEDS = [0.25, 0.5, 1, 2];
+export const DEFAULT_SPEED = 0.5;
 
 const KIND: Record<ConceptSpec["type"], string> = {
   formula: "formula", graph: "graph", "2d-text": "background", "2d-anim": "animation",
@@ -45,7 +49,7 @@ interface Props {
 export default function ConceptCard({ spec, label, actions, onRuntimeError, footnote }: Props) {
   const [run, setRun] = useState(0);
   const [crash, setCrash] = useState<string | null>(null);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [paused, setPaused] = useState(false);
   const fail = (m: string) => { setCrash(m); onRuntimeError?.(m); };
 

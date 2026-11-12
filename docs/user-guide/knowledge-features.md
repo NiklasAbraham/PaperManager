@@ -1,12 +1,12 @@
 # Knowledge Features
 
-PaperManager includes three advanced knowledge tools: an interactive graph, a multi-paper AI chat, and a direct Cypher query editor.
+PaperManager includes two advanced knowledge tools: an interactive graph with a built-in Cypher query panel, and a multi-paper AI chat.
 
 ---
 
 ## Knowledge Graph
 
-Navigate to **Graph** in the nav bar for an interactive WebGL visualisation of your entire library.
+Navigate to **Explore → Graph** in the top bar for an interactive WebGL visualisation of your entire library.
 
 ### Node Types
 
@@ -27,7 +27,7 @@ Navigate to **Graph** in the nav bar for an interactive WebGL visualisation of y
 - **Click a node** — opens a properties panel on the right:
   - View all node properties
   - Navigate to the paper detail page
-  - Delete the node
+  - Delete the node (admins only)
 
 ### Graph Modes
 
@@ -53,7 +53,7 @@ Use the sliders and toggles in the control panel to adjust:
 
 ## Knowledge Chat
 
-Navigate to **Knowledge** in the nav bar to ask questions across your whole library. The page has three parts:
+Navigate to **Chat** in the top bar (the page is still at `/knowledge`; `/chat` redirects there) to ask questions across your whole library. The page has three parts:
 your conversations on the left, the chat in the middle, and a preview pane on the right that opens when you click a
 cited paper or a figure.
 
@@ -73,9 +73,12 @@ semantic search and adds the most recent ones. To choose the context yourself:
 | **+ paper** | Attaches one library paper; it is always in context |
 
 Typing `@` suggests projects, topics, tags, people and papers; the scopes you use show as chips above the text. While
-the model works, the steps it takes (graph queries, searches, reading a paper's full text, listing its figures,
-searching the web) appear as rows above the answer; click one to see the query or the papers it found. **Stop**
-ends an answer early.
+the model works, every tool call it makes (graph queries, semantic searches, reading a paper's full text, listing its
+figures, searching the web) appears as a compact row above the answer, with a short line of the model's intent between
+them where it wrote one; click a row to see what the model sent (the Cypher query, the search terms), a preview of
+what came back, and the papers, figures or web pages it touched. The rows are saved with the answer, so a reopened
+conversation shows them too. **Stop** ends an answer early and keeps what was written so far; an answer that failed
+or was stopped can be asked again with **retry**.
 
 The bar under the text holds **web** (allow web search), **concepts** (make concept cards for every answer),
 and the model: Claude with your API key, Claude Code on a Claude subscription (if the server owner enabled it for
@@ -83,18 +86,30 @@ you), Claude (Work), or the self-hosted LiteLLM model.
 
 ### Answers
 
-Answers render maths, code, tables and figures from your papers. Library papers are cited as violet links: click
-one to open its summary, abstract, figures and PDF beside the chat, or **Open in library** for the full paper page.
-Under each answer you see the papers it cited and how many were in context.
+Answers render maths, code, tables and figures from your papers. Copying text with formulas gives their LaTeX
+(`$...$`, `$$...$$`). Library papers are cited as violet links: click one to open its summary, abstract, figures and
+PDF beside the chat, or **Open in library** for the full paper page.
+
+**Sources.** Under each answer a **Sources** row lists the library papers the answer drew on: those it cites, those
+whose full text or figures its tools read, those you attached, and then those its searches returned (hover a chip for
+which). A click opens the paper beside the chat, Ctrl/Cmd-click opens its page. Web pages it searched follow, then the
+number of searches; **N in context** unfolds all papers that were in the model's context.
+
+**Figures.** A single figure of a paper shows full width. Three or more figures in a row (several figures of one
+paper, or the same kind of figure across papers) show as a strip of thumbnails; click one for a lightbox (arrow keys
+to step, Esc to close, **beside the chat** to keep it open next to the conversation). Asking for "all figures of"
+a paper shows its whole figure set as one strip.
 
 **Concept cards.** Press **✦ Visualise** under an answer (or switch **concepts** to auto) and the app finds the ideas
 in the answer that a picture would explain, then attaches an interactive card at the end of the section that
 discusses each: a formula walked through step by step, a graph, a short sourced note, or an animation with pause,
-play, speed (0.5×, 1×, 2×) and replay. Formulas and graphs take about a minute, animations a few. If an animation
+play, speed (0.25×, 0.5×, 1×, 2×) and replay. Formulas and graphs take about a minute, animations a few. If an animation
 breaks, **fix** asks the model to repair it. The cards are saved with the conversation.
 
 **3D structures.** When a question is about a protein or another molecule, the answer can show it in 3D: an
-experimental structure from the PDB, or an AlphaFold DB prediction coloured by confidence (pLDDT). Drag to rotate,
+experimental structure from the PDB, an AlphaFold DB prediction coloured by confidence (pLDDT), or a small molecule
+(an RCSB ligand code such as ATP, or a PubChem compound) on its own or next to a protein. Structures can be
+superposed (the card prints the RMSD), and ensembles play frame by frame. Drag to rotate,
 scroll to zoom, hover to name a residue, click residues to collect them; the card has surface, spin, reset,
 fullscreen and PNG export, and chips that toggle the highlighted regions. Asking for a structure by its PDB id
 ("show 6VXX and highlight the receptor-binding domain") works well.
@@ -139,25 +154,32 @@ flowchart TD
 
 ---
 
-## Cypher Editor
+## Query Panel (Cypher)
 
-Navigate to **Cypher** in the nav bar for direct access to the Neo4j database.
+The Cypher editor is part of the **Graph** page. Admins click **Query** in the Graph top bar (or open `/graph?view=query`) to get the panel: beside the graph on wide screens, below it on phones. Other users see the graph only. The old **Cypher** page is gone; `/cypher` redirects to `/graph?view=query`, and `/graph?view=query&q=<cypher>` opens the panel with that query in the editor (the **Copy link** button builds such a link).
 
-### Schema Browser
+### Running a query
 
-A live view of all:
+Write Cypher in the editor and press **Run** (or Ctrl/Cmd+Enter). One run feeds two views:
 
-- Node labels and their property keys
-- Relationship types
-- Fulltext indexes
+- **Graph** tab: every node, relationship and path in the result is drawn in the main canvas, replacing the full graph. **Back to full graph** (or the Table tab) brings the full graph back.
+- **Table** tab: the rows, with mutation counters (nodes created/deleted, relationships created/deleted, properties set) and the run time. At most 500 rows are returned; the graph view holds up to 5,000 nodes.
 
-### Query Editor
+A result without nodes opens on the Table tab.
 
-Write and run raw Cypher queries. Results are shown in a table. Mutation counters show nodes created/deleted, relationships created/deleted, and properties set. Maximum 500 rows are returned.
+### Read-only by default
+
+Queries run in a read-only transaction: Neo4j itself rejects `CREATE`, `MERGE`, `SET` and `DELETE`. Tick **Allow writes** to run a query that changes the library (a confirmation appears the first time). Writes cannot be undone.
+
+### Examples, saved queries, schema
+
+- **Examples**: a grouped list of ready-made queries (graph views, discovery, data quality, cleanup, and more) that fill the editor.
+- **Saved**: store the current query under a name; saved queries live in this browser (localStorage) and can be loaded or deleted.
+- **Schema**: a live view of node labels, relationship types and the property keys per label.
 
 ### AI Assist
 
-Describe what you want in plain English — Ollama generates the Cypher query for you. You can then review and run it.
+Describe what you want in plain English; the model writes the Cypher into the editor. Review it, then run it.
 
 ### Example Queries
 

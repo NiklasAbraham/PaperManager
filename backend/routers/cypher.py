@@ -1,11 +1,11 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from neo4j.graph import Node, Relationship
 
 from db.connection import get_driver
 from db.queries.users import is_user_admin
 from services.auth import get_current_user
+from services.cypher_result import counters_dict, serialize_value as _serialize
 
 log = logging.getLogger(__name__)
 router = APIRouter(
@@ -58,21 +58,6 @@ Return ONLY the raw Cypher — no markdown fences, no explanation, no comments.
 
 
 # ── Serialisation ─────────────────────────────────────────────────────────────
-
-def _serialize(v):
-    if isinstance(v, Node):
-        return {"_labels": list(v.labels), **dict(v.items())}
-    if isinstance(v, Relationship):
-        return {"_type": v.type, **dict(v.items())}
-    if isinstance(v, (list, tuple)):
-        return [_serialize(i) for i in v]
-    if isinstance(v, dict):
-        return {k: _serialize(val) for k, val in v.items()}
-    # neo4j Integer → plain int
-    if hasattr(v, "__int__") and type(v).__name__ == "Integer":
-        return int(v)
-    return v
-
 
 # ── Request models ─────────────────────────────────────────────────────────────
 
@@ -137,14 +122,7 @@ def run_query(body: QueryBody, current_user: str = Depends(get_current_user)):
                 if len(rows) >= 500:
                     break
             summary = result.consume()
-            c = summary.counters
-            counters = {
-                "nodes_created":        c.nodes_created,
-                "nodes_deleted":        c.nodes_deleted,
-                "relationships_created": c.relationships_created,
-                "relationships_deleted": c.relationships_deleted,
-                "properties_set":       c.properties_set,
-            }
+            counters = counters_dict(summary)
         log.info("Cypher executed | rows=%d | query=%.80s", len(rows), query)
         return {"columns": keys, "rows": rows, "row_count": len(rows), "counters": counters}
     except Exception as e:
@@ -152,8 +130,9 @@ def run_query(body: QueryBody, current_user: str = Depends(get_current_user)):
 
 
 @router.delete("/nodes/{node_id}", status_code=204)
-def delete_node(node_id: str):
-    """Delete any node by its id property (DETACH DELETE — removes all relationships too)."""
+def delete_node(node_id: str, current_user: str = Depends(get_current_user)):
+    """Delete any node by its id property (DETACH DELETE — removes all relationships too). Admin only."""
+    _require_admin(current_user)
     driver = get_driver()
     with driver.session() as session:
         result = session.run(

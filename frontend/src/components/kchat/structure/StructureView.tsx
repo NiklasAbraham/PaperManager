@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StructureSpec } from './types';
 import {
-  CHAIN_CYCLE, DIM, PICK, THREE_TO_ONE, WATER, colour, fetchCoordinates, kabsch, load3Dmol, matcher, pdbFrames, plddtColour,
-  superpose, type Atom3D, type Frames,
+  CHAIN_CYCLE, DIM, PICK, THREE_TO_ONE, WATER, asLigand, colour, fetchCoordinates, kabsch, load3Dmol, matcher, pdbFrames, plddtColour,
+  sourceName, superpose, type Atom3D, type Frames,
 } from './viewer';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -64,6 +64,7 @@ export function StructureView({ spec: specIn, fill = false }: { spec: StructureS
         const fr = c.format === 'pdb' && want !== false ? pdbFrames(c.data) : null;
         const model = v.addModel(fr ? fr.first : c.data, c.format);
         const atoms = model.selectedAtoms({}) as Atom3D[];
+        asLigand(atoms, c);
         for (const a of atoms) a.dm = mi;
         const L: Loaded = { label: spec.models[mi].label ?? c.name, atoms, model };
         if (fr) {
@@ -328,7 +329,7 @@ export function StructureView({ spec: specIn, fill = false }: { spec: StructureS
       </header>
       <div className="structure-stage" style={height ? { height } : undefined}>
         <div ref={stage} className="structure-canvas" />
-        {!loaded && !error && <div className="structure-wait">loading {spec.models.map((m) => m.pdb ?? (m.afdb ? `AF-${m.afdb}` : '')).join(', ')} …</div>}
+        {!loaded && !error && <div className="structure-wait">loading {spec.models.map(sourceName).join(', ')} …</div>}
         {error && <div className="structure-wait structure-err">{error}</div>}
         <div className="structure-hover">
           {hover
@@ -372,6 +373,8 @@ export function StructureView({ spec: specIn, fill = false }: { spec: StructureS
                 {L.note && <em>{L.note}</em>}
                 {ms.pdb && <a href={`https://www.rcsb.org/structure/${ms.pdb}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="RCSB entry">↗</a>}
                 {ms.afdb && <a href={`https://alphafold.ebi.ac.uk/entry/${ms.afdb}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="AlphaFold DB entry">↗</a>}
+                {ms.ccd && <a href={`https://www.rcsb.org/ligand/${encodeURIComponent(String(ms.ccd).toUpperCase())}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="RCSB chemical component">↗</a>}
+                {ms.pubchem != null && String(ms.pubchem) !== '' && <a href={`https://pubchem.ncbi.nlm.nih.gov/compound/${encodeURIComponent(String(ms.pubchem))}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="PubChem compound">↗</a>}
               </button>
             );
           })}

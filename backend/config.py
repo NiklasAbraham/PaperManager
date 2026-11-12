@@ -120,6 +120,24 @@ class Settings(BaseSettings):
     ssl_verify: bool = True
     ssl_ca_bundle: str = ""  # path to .pem file, e.g. /etc/ssl/certs/corporate.pem
 
+    # Token ledger (services/usage, .specs/013_tokens.md): every LLM call with tokens and list-price cost.
+    usage_ledger_enabled: bool = True
+    usage_db_path: str = ""  # empty = backend/data/usage.sqlite
+    usage_litellm_free: bool = True  # LiteLLM runs on own hardware: cost 0
+    usage_prices_file: str = ""  # optional JSON {"model-prefix": [input, output, cache_write, cache_read]} per MTok
+
+    # Reports (services/reports, .specs/014_reports.md)
+    reports_max_parallel: int = 2
+    reports_claude_model: str = "claude-sonnet-4-6"
+    reports_evidence_chars: int = 0  # evidence budget per section; 0 = by provider
+
+    # Suggestions (.specs/015_suggestions.md): the knowledge chat may propose an improvement.
+    suggestions_from_chat: bool = True
+
+    # System health page (.specs/016_health.md): version shown when the repository is not mounted.
+    git_sha: str = ""
+    app_version: str = ""
+
     # Default user setup
     default_user_name: str = "niklas"
     default_user_password: str = ""

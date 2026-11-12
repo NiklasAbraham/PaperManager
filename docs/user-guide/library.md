@@ -6,12 +6,20 @@ The Library is the main page of PaperManager (`/`). It shows all papers in your 
 
 ## Dashboard
 
-When no filters are active you see a dashboard at the top showing:
+With no query and no filters the page is deliberately quiet:
 
-- **Count cards** — total papers, authors, topics, tags, projects
-- **Papers by year** bar chart
-- **Top topics** list
-- **Recently added** papers
+- A header line, **Library · 1,163 papers**.
+- **Continue reading**: up to six papers whose reading status is *Reading*, most recently
+  touched first (three on a phone). The block is hidden when you are not reading anything.
+- **Recently added**: your papers as cards, newest first, a page at a time (20, 50, 100 or
+  200 per page, see Settings). The sort menu on the right of the heading changes the order.
+
+The papers are loaded one page at a time from the server, so the page opens quickly however
+large the library is. Statistics (counts, papers by year, venues) are no longer on this page.
+
+The bar at the top stays in view while you scroll: the search box, a **Filters** button with a
+badge showing how many filters are active, the **+** button to add papers and a **⋯** menu with
+*Surprise me*, *Find research gaps* and *Manage tags / topics / authors / projects*.
 
 ---
 
@@ -76,8 +84,8 @@ Above the results:
   ("why do co-folding models collapse to one pose"). **Meaning** ranks by meaning alone. Meaning
   search needs a one-time embedding of the library in the background (a few minutes); until it
   is ready, the page says so and shows exact matches.
-- **Sort**: Relevance (default with a query), Newest added, Year, Title. The sort in Settings
-  applies to browsing without a query.
+- **Sort**: Relevance (default with a query) or any of the sorts listed under
+  [Sort](#sort) below. The default sort in Settings applies to browsing without a query.
 - **References**: also search the cited references that have no PDF in your library (hidden by
   default; they rank below your own papers).
 
@@ -90,17 +98,37 @@ AI model.
 
 ## Filters {#filters}
 
-The left sidebar provides filters that narrow down the paper list:
+Click **Filters** next to the search box. A panel opens (a sheet from the bottom on a phone)
+and every change applies at once, so the list updates behind it while you click. Filters work
+with or without a search query and can be combined.
 
 | Filter | How it works |
 |--------|-------------|
-| **Tag** | Shows papers tagged with the selected tag |
-| **Topic** | Shows papers about the selected research topic |
-| **Project** | Shows papers belonging to the selected project |
-| **Person** | Shows papers authored by or involving the selected person (pick an author in the search suggestions) |
+| **Added** | Any time, Today, Last 7 days, Last 30 days, Last 90 days, or a **Custom range** with two dates. "Today" starts at midnight, your local time; the end date of a custom range is included. |
+| **Year** | From and to year of publication (either may stay empty). |
+| **Reading status** | Unread (includes papers you never gave a status), Reading, Read. |
+| **Rating at least** | 1 to 5 stars or more. |
+| **Document type** | Paper, Book, Lecture deck, News article. |
+| **Project** | Papers in the chosen project. |
+| **Properties** | Has PDF, Has full text, Has note, Has highlights, Bookmarked: each *Any / Yes / No*. |
+| **Tag**, **Topic**, **Venue** | Start typing and pick from your own names (case does not matter). |
+| **Author** | Not in the panel: pick an author in the search suggestions. |
+| **Sort by** | Same list as the sort menu above the results. |
 
-Multiple filters can be combined, with or without a search query. Active filters appear as
-removable chips below the search bar. Tag, topic and venue filters ignore case.
+Active filters appear as removable chips under the search bar, with **Clear all**. Picking a
+tag, topic, author or project from the search suggestions adds the same filter. Without a
+query the filtered papers are shown as cards with their count ("37 papers"); with a query they
+are the search result rows.
+
+### Sharing a filtered view
+
+Everything is in the address bar: `q`, `mode`, `sort`, `refs`, `tag`, `topic`, `project_id`,
+`person_id`, `venue`, `reading_status`, `bookmarked`, `year_min`, `year_max`, `rating_min`,
+`document_type`, `has_pdf`, `has_text`, `has_note`, `has_highlights` (`1` or `0`), and `added`
+(`today`, `7d`, `30d`, `90d`) or `added_from` / `added_to` (`YYYY-MM-DD`). Copy the URL to
+bookmark the view or send it to someone with access to the same library. Presets such as
+`added=7d` are relative to the moment the page is opened, so "last 7 days" stays the last 7
+days.
 
 ### Tag Categories
 
@@ -134,25 +162,26 @@ removable chips below the search bar. Tag, topic and venue filters ignore case.
 
 ## View Options
 
-### View mode
+### Sort {#sort}
 
-Toggle between **grid** and **list** view using the buttons in the top-right corner.
-
-- **Grid** — compact cards ideal for large libraries
-- **List** — more detail per row, easier to scan metadata
-
-### Sort
+Offered in the filter panel and in the menu above the results. *Relevance* appears only with
+a search query.
 
 | Sort option | Description |
 |-------------|-------------|
-| Date added ↓ | Newest first (default) |
-| Date added ↑ | Oldest first |
-| Year ↓ | Latest publication year first |
-| Title A→Z | Alphabetical |
+| Relevance | Best match first (queries only) |
+| Newest added | Newest first (default when browsing) |
+| Oldest added | Oldest first |
+| Recently updated | Last changed first |
+| Year, new to old / old to new | By publication year |
+| Title A to Z | Alphabetical |
+| Rating | Highest rated first |
+| Citations | Most cited first |
 
 ### Page size
 
-Choose how many papers to show per page: **20**, **50**, **100**, or **All**.
+Choose how many papers to show per page in Settings: **20**, **50**, **100**, or **All**
+(shown in pages of 200). Changing page scrolls back to the top.
 
 ---
 
@@ -176,8 +205,11 @@ Click any card to open the [Paper Detail](paper-detail.md) view.
 From the Library page:
 
 - **Drag and drop** a PDF file onto the page → upload flow starts
-- Click the **+** button → choose PDF upload or URL/DOI ingest
-- Navigate to **Bulk Import** in the nav bar for batch import
+- Click the **+** button → choose PDF upload or URL/DOI ingest. If the Library is filtered by a
+  project, new papers are added to that project automatically and the project step of the
+  upload wizard is skipped.
+- Open **Tools → Bulk import** in the top bar for batch import
+- Open **Explore → Find papers** to search arXiv, Semantic Scholar, PubMed and bioRxiv (tab **Search**) or to browse recent papers for your keywords (tab **Feed**), and add papers with one click
 
 ---
 
@@ -187,9 +219,8 @@ Library display settings are persisted to `localStorage`:
 
 | Setting | Options | Default |
 |---------|---------|---------|
-| Default view | grid / list | grid |
-| Default sort | date desc/asc, year desc, title asc | date desc |
+| Default sort | date desc/asc, year desc/asc, title asc, rating, citations | date desc |
 | Abstract preview | on / off | on |
-| Papers per page | 20 / 50 / 100 / all | 20 |
+| Papers per page | 20 / 50 / 100 / all | 50 |
 
 See [Settings](../user-guide/getting-started.md) for all available options.

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from services.library_search.query import (
     Coverage,
@@ -58,6 +59,10 @@ class Candidate:
     created_at: str | None = None
     ref: bool = False
     cited: int = 0                                               # library papers citing it
+    rating: int | None = None                                    # sort fields, see sort_candidates
+    citation_count: int | None = None
+    updated_at: str | None = None
+    fields_loaded: bool = False                                  # year/created_at/rating/... are set
     scores: dict[str, float] = field(default_factory=dict)     # source -> best Lucene score
     texts: dict[str, list[str]] = field(default_factory=dict)  # field -> matched texts
     pages: list[int] = field(default_factory=list)             # pages of matched highlights
@@ -75,6 +80,11 @@ class Candidate:
                 bucket.append(text)
 
 
+@lru_cache(maxsize=20000)
+def _title_tokens(title: str) -> tuple[str, ...]:
+    return tuple(tokenize(title))
+
+
 def score_candidates(cands: list[Candidate], pq: ParsedQuery) -> None:
     """Set ``score``, ``coverage`` and ``fields`` on every candidate in place."""
     maxima: dict[str, float] = {}
@@ -84,7 +94,7 @@ def score_candidates(cands: list[Candidate], pq: ParsedQuery) -> None:
     n = len(pq.units)
     cover = Coverage(pq.units, (t for c in cands for t in [c.title, *(x for ts in c.texts.values() for x in ts)]))
     phrase = UnitMatcher(Unit(pq.phrase)) if pq.phrase else None
-    query_tokens = tokenize(pq.raw)
+    query_tokens = tuple(tokenize(pq.raw))
     everything = set(range(n))
 
     for c in cands:
@@ -93,14 +103,16 @@ def score_candidates(cands: list[Candidate], pq: ParsedQuery) -> None:
         title_cov = cover.covered([c.title])
         if "fulltext" in c.scores or "identifier" in c.scores or (n <= 1 and c.scores):
             cov = everything
+        elif len(title_cov) == n:
+            cov = title_cov
         else:
-            cov = cover.covered([c.title] + [t for ts in c.texts.values() for t in ts])
+            cov = title_cov | cover.covered([t for ts in c.texts.values() for t in ts])
         bonus = 0.0
         if n and len(title_cov) == n:
             bonus += TITLE_ALL_UNITS
         if phrase and phrase.found(c.title):
             bonus += TITLE_PHRASE
-        if query_tokens and tokenize(c.title) == query_tokens:
+        if query_tokens and _title_tokens(c.title) == query_tokens:
             bonus += TITLE_EXACT
         if n and c.texts.get("author") and len(cover.covered(c.texts["author"])) == n:
             # Papers BY Karras before papers that cite Karras in their summary.
@@ -185,11 +197,13 @@ def fuse(lexical: list[Candidate], semantic: list[Candidate], weights: dict[str,
     return sorted(by_id.values(), key=lambda c: (-c.score, c.title or "", c.id))
 
 
-SORTS = {"relevance", "year_desc", "year_asc", "date_desc", "date_asc", "title_asc"}
+SORTS = {"relevance", "year_desc", "year_asc", "date_desc", "date_asc", "title_asc",
+         "rating_desc", "citations_desc", "updated_desc"}
 
 
 def sort_candidates(cands: list[Candidate], sort: str) -> list[Candidate]:
-    """Re-order ranked hits by a field; ``relevance`` (or unknown) keeps the order."""
+    """Re-order ranked hits by a field; ``relevance`` (or unknown) keeps the order. Ties
+    keep the incoming (relevance) order; missing ratings / citation counts / years sort last."""
     if sort == "year_desc":
         return sorted(cands, key=lambda c: (-(c.year or 0), -c.score))
     if sort == "year_asc":
@@ -200,6 +214,13 @@ def sort_candidates(cands: list[Candidate], sort: str) -> list[Candidate]:
         return sorted(cands, key=lambda c: str(c.created_at or ""))
     if sort == "title_asc":
         return sorted(cands, key=lambda c: (c.title or "").lower())
+    if sort == "rating_desc":
+        newest = sorted(cands, key=lambda c: str(c.created_at or ""), reverse=True)
+        return sorted(newest, key=lambda c: (c.rating is None, -(c.rating or 0)))
+    if sort == "citations_desc":
+        return sorted(cands, key=lambda c: (c.citation_count is None, -(c.citation_count or 0)))
+    if sort == "updated_desc":
+        return sorted(cands, key=lambda c: str(c.updated_at or c.created_at or ""), reverse=True)
     return cands
 
 

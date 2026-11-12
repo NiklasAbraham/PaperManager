@@ -466,7 +466,14 @@ def stream_env(monkeypatch):
     monkeypatch.setattr(kc, "set_branch_label_if_empty", lambda d, cid, label: None)
     monkeypatch.setattr(kc, "set_message_error", lambda d, mid, err: saved["errors"].append((mid, err)))
 
-    def add_message(d, cid, role, content, paper_ids, tokens):
+    # The unscoped fallback embeds the question; with a LiteLLM endpoint in .env that would reach
+    # the network, so embeddings are unavailable here (the fallback then uses recency only).
+    def no_embeddings(text):
+        raise RuntimeError("no embeddings in tests")
+
+    monkeypatch.setattr("services.embeddings.embed_text", no_embeddings)
+
+    def add_message(d, cid, role, content, paper_ids, tokens, **extra):  # extra: steps, stopped
         saved["messages"].append({"role": role, "content": content, "papers": paper_ids})
         return {"id": f"{role}-id"}
 

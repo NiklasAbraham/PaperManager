@@ -93,7 +93,7 @@ Click **+** → **URL / DOI** tab. Paste any of:
 
 ## Bulk Import
 
-Go to **Bulk Import** in the nav bar. Upload or paste a JSON file:
+Go to **Tools → Bulk import** in the top bar. Upload or paste a JSON file:
 
 ```json
 {

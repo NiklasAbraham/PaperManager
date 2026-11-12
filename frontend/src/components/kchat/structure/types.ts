@@ -1,8 +1,19 @@
-// Ported from the thesis desk's structure card; coordinates come from the backend's
-// cached RCSB / AlphaFold DB proxy (GET /knowledge-chat/structures).
+// Ported from the thesis desk's structure card (keep in sync); coordinates come from the backend's
+// cached RCSB / AlphaFold DB / Chemical Component / PubChem proxy (GET /knowledge-chat/structures),
+// or are written inline. There is no repository tree here, so no `path` and no .json spec files.
 /**
  * The spec of a ```structure block. JSON, or shorthand: a bare PDB id (`6SC6`) or an
  * AlphaFold DB model (`AF-P69905`).
+ *
+ * Every model names exactly one source:
+ *   pdb     an RCSB entry ("6SC6")
+ *   afdb    an AlphaFold DB prediction by UniProt accession ("P69905")
+ *   ccd     an RCSB Chemical Component code, a small molecule as SDF ("ATP")
+ *   pubchem a PubChem compound by CID, as SDF (2244 or "2244")
+ *   data    the coordinates inline (with `format`), no request at all
+ * A model with any of these as a top-level key is a one-model spec: `{ "ccd": "ATP", "title": "…" }`.
+ * Small molecules (SDF / MOL / MOL2) show as a ligand: chain L, residue 1, residue name from the
+ * file's title when that is a 1-3 character code, else LIG.
  *
  * {
  *   "title": "HOIP RBR held by two dAb3 copies",
@@ -42,6 +53,13 @@ export type ModelSpec = {
   pdb?: string;
   /** An AlphaFold DB prediction by UniProt accession; its B-factors hold pLDDT. */
   afdb?: string;
+  /** An RCSB Chemical Component code ("ATP"); served as SDF by GET /knowledge-chat/structures?ccd=ATP. */
+  ccd?: string;
+  /** A PubChem compound by CID; served as SDF by GET /knowledge-chat/structures?pubchem=2244. */
+  pubchem?: string | number;
+  /** Coordinates written inline; needs no request. `format` defaults to what the text looks like. */
+  data?: string;
+  format?: 'pdb' | 'cif' | 'sdf' | 'mol2';
   label?: string;
   /** Chains to show; all when omitted. */
   chains?: string[];
