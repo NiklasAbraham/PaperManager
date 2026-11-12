@@ -218,16 +218,19 @@ def _loop(interval: float) -> None:
 
 
 def ensure_loaded() -> bool:
-    """For processes without the sync thread (the MCP server): read the index file and load
-    the model on first use. Blocks for a few seconds once; never call it in a web request."""
+    """For processes without the sync thread (the MCP server): read the index file and, unless
+    PM_EMBED_URL lets the backend embed the queries, load the model. Blocks for a few seconds
+    once in that case; never call it in a web request."""
     if not enabled():
         return False
     with _lock:
         have = bool(_ids)
     if not have:
         _load()
-    from services.conferences.embedder import embed, ready
-    if not ready():
+    from services.conferences.embedder import embed, ready, remote_url
+    # With PM_EMBED_URL the backend embeds the queries (query() falls back to a local
+    # load if it cannot), so the model is not loaded here up front.
+    if not ready() and not remote_url():
         embed(["warm up"])
     with _lock:
         return bool(_ids)
@@ -248,9 +251,11 @@ def start_background() -> None:
 def query(q: str, k: int = 200) -> list[tuple[str, float]]:
     """``[(paper_id, cosine)]`` of the ``k`` nearest papers, best first; empty while the
     model is not loaded or nothing is indexed yet (this never loads the model)."""
-    from services.conferences.embedder import embed_query, ready
+    from services.conferences.embedder import embed_query, ready, remote_url
 
-    if not enabled() or not ready():
+    # The backend never loads the model in a request; a process with PM_EMBED_URL (the MCP
+    # server) may: embed_query asks the backend first and loads the model only if that fails.
+    if not enabled() or not (ready() or remote_url()):
         return []
     with _lock:
         ids, emb = _ids, _emb

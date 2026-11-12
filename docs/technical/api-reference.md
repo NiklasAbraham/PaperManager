@@ -338,6 +338,7 @@ SSE event types: `progress`, `token`, `done`, `error`.
 | `GET` | `/conferences/catalog` | Every known conference-year with its build state, the area taxonomy, the default set |
 | `GET` | `/conferences/search/query` | Across all loaded conferences (`?q=&kind=all\|paper\|author&series=&field=&year_min=&year_max=&limit=`): `papers` (`title` matches with `title_match`, `semantic` by meaning, `title_total`, `highlight`, `corrected`), `authors` (cards with papers per conference, institutions, `identities`; `highlight`, `corrected`), `suggested` tab, `ms`. Case-insensitive |
 | `POST` | `/conferences/search/topic` | `{query, k=300, series?, field?, year_min?, year_max?, papers?}`: the k closest papers pooled over all loaded conferences (title vectors); `conferences` with `count` and `per_1k`, `trend` per series, pooled `academia` / `industry`, `areas`, `papers`, `threshold`, `skipped` |
+| `POST` | `/conferences/embed` | `{"text"}` → `{"model", "dim", "vector"}`: the bge-small embedding of a text as given (the caller adds the query instruction), for MCP processes that do not load the model; 503 until it is loaded |
 | `GET` | `/conferences/{key}/status` | Build state: `none`, `queued`, `fetching`, `normalising`, `embedding`, `ready`, `partial`, `unavailable`, `error` (+ `progress`) |
 | `POST` | `/conferences/{key}/build` | Queue a download + index (also refreshes a loaded one) |
 | `GET` | `/conferences/{key}/overview` | Counts, area mix, top universities and companies (409 while not loaded) |

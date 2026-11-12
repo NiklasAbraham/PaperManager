@@ -133,6 +133,28 @@ def search_topic_all_conferences(body: SearchTopicBody):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+class EmbedBody(BaseModel):
+    text: str
+
+
+@router.post("/embed")
+def embed_text(body: EmbedBody):
+    """The bge-small embedding of one text (384 floats), for the MCP server.
+
+    Every Claude session runs its own MCP process; loading torch and the model there costs
+    ~7 s and ~300 MB each. This process has the model loaded (the library-search thread), so
+    the MCP's semantic library search and conference tools ask here
+    (services.conferences.embedder.embed_query, PM_EMBED_URL). ``text`` is embedded as given:
+    the caller has already added the query instruction. 503 until the model is in. A plain
+    ``def``: it runs in the threadpool, and the tokenizer lock serialises it with a build."""
+    from services.conferences import embedder
+
+    if not embedder.ready():
+        raise HTTPException(status_code=503, detail="embedding model not loaded yet")
+    vec = embedder.embed([body.text[:4000] or " "], max_length=512)[0]
+    return {"model": embedder.MODEL, "dim": int(vec.shape[0]), "vector": [round(float(x), 7) for x in vec]}
+
+
 @router.get("/{key}/status")
 def conference_status(key: str):
     ed = _edition(key)
