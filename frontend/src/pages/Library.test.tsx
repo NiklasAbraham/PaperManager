@@ -126,7 +126,7 @@ describe("Library dashboard", () => {
       return null;
     });
     vi.mocked(client.searchLibrary).mockImplementation(async (p: URLSearchParams) =>
-      p.get("reading_status") === "reading" && !p.has("q") && p.get("limit") === "6" ? { ...READING, results: [] } : LISTING);
+      p.get("reading_status") === "reading" && !p.has("q") && p.get("limit") === "9" ? { ...READING, results: [] } : LISTING);
   });
 
   it("browses through /search, never /papers or /stats, and shows no stat tiles", async () => {
@@ -152,7 +152,7 @@ describe("Library dashboard", () => {
     await waitFor(() => expect(screen.getByText("Newest paper")).toBeInTheDocument());
     expect(screen.queryByText("Continue reading")).not.toBeInTheDocument();
     const reading = searchCalls().find((p) => p.get("reading_status") === "reading")!;
-    expect(Object.fromEntries(reading)).toMatchObject({ sort: "updated_desc", limit: "6" });
+    expect(Object.fromEntries(reading)).toMatchObject({ sort: "updated_desc", limit: "9" });
   });
 
   it("lists the papers being read when there are some", async () => {

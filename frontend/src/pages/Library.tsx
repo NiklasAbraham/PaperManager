@@ -26,7 +26,7 @@ const MODES: { value: SearchMode; label: string; title: string }[] = [
 ];
 const SECTION_HEADING = "text-xs font-semibold text-ink-3 uppercase tracking-wide";
 const READING_PARAMS = () => new URLSearchParams({
-  reading_status: "reading", sort: "updated_desc", skip: "0", limit: "6", include_references: "false", snippets: "0",
+  reading_status: "reading", sort: "updated_desc", skip: "0", limit: "9", include_references: "false", snippets: "0",
 });
 
 export default function Library() {
@@ -487,21 +487,30 @@ export default function Library() {
             {reading.length > 0 && (
               <section className="space-y-1.5" aria-label="Continue reading">
                 <h2 className={SECTION_HEADING}>Continue reading</h2>
-                {/* One slim row of three: the dashboard above already takes the space (two on phones). */}
-                <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {reading.slice(0, 3).map((p, i) => (
-                    <li key={p.id} className={i >= 2 ? "hidden sm:block" : undefined}>
-                      <Link
-                        to={`/paper/${p.id}`}
-                        title={p.title}
-                        className="flex items-center gap-2 h-9 bg-raised border border-line rounded-lg px-3 hover:border-accent-border transition-colors"
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[#eda100]" />
-                        <span className="text-sm text-ink truncate">{p.title}</span>
-                        {p.year && <span className="text-xs text-ink-3 shrink-0 ml-auto">{p.year}</span>}
-                      </Link>
-                    </li>
-                  ))}
+                {/* Up to nine papers in a 3 x 3 grid, each with its abstract (three on phones). */}
+                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {reading.slice(0, 9).map((p, i) => {
+                    const blurb = (p.abstract || p.summary || "").replace(/\s+/g, " ").trim();
+                    const byline = [p.authors?.slice(0, 2).join(", ") + ((p.authors?.length ?? 0) > 2 ? " et al." : ""), p.venue]
+                      .filter(Boolean).join(" · ");
+                    return (
+                      <li key={p.id} className={i >= 3 ? "hidden sm:block" : undefined}>
+                        <Link
+                          to={`/paper/${p.id}`}
+                          title={p.title}
+                          className="flex flex-col h-full gap-1.5 bg-raised border border-line rounded-xl p-4 hover:border-accent-border hover:shadow-sm transition"
+                        >
+                          <span className="flex items-start gap-2">
+                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 bg-[#eda100]" aria-hidden="true" />
+                            <span className="text-sm font-medium text-ink leading-snug line-clamp-2">{p.title}</span>
+                            {p.year && <span className="text-xs text-ink-3 shrink-0 ml-auto pt-0.5">{p.year}</span>}
+                          </span>
+                          {byline && <span className="text-xs text-ink-3 truncate pl-3.5">{byline}</span>}
+                          {blurb && <span className="text-xs text-ink-2 leading-relaxed line-clamp-4 pl-3.5">{blurb}</span>}
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             )}
