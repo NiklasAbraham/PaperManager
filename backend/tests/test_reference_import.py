@@ -12,6 +12,9 @@ def test_entry_for_maps_arxiv_doi_biorxiv_and_urls():
     assert ri.entry_for("10.1038/nature14539", None) == {"doi": "10.1038/nature14539"}
     assert ri.entry_for(None, "https://doi.org/10.1038/nature14539") == {"doi": "10.1038/nature14539"}
     assert ri.entry_for(None, "https://arxiv.org/abs/1706.03762") == {"arxiv": "1706.03762"}
+    assert ri.entry_for(None, "https://arxiv.org/abs/1706.03762v5") == {"arxiv": "1706.03762"}
+    assert ri.entry_for(None, "http://arxiv.org/pdf/1706.03762v2.pdf") == {"arxiv": "1706.03762"}
+    assert ri.entry_for(None, "https://www.arxiv.org/abs/2301.01234") == {"arxiv": "2301.01234"}
     assert ri.entry_for(None, "https://example.org/paper.pdf") == {"pdf_url": "https://example.org/paper.pdf"}
     assert ri.entry_for(None, "https://openreview.net/forum?id=abc") is None
 

@@ -37,7 +37,7 @@ _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 _KEEP_FINISHED_S = 6 * 3600
 
-_ARXIV_RE = re.compile(r"(?:arxiv[:/.]\s*|10\.48550/arxiv\.)(\d{4}\.\d{4,5}(?:v\d+)?)", re.I)
+_ARXIV_RE = re.compile(r"(?:arxiv\.org/(?:abs|pdf)/|arxiv[:/.]\s*|10\.48550/arxiv\.)(\d{4}\.\d{4,5}(?:v\d+)?)", re.I)
 _BARE_ARXIV_RE = re.compile(r"^\d{4}\.\d{4,5}(?:v\d+)?$")
 _DOI_RE = re.compile(r"(10\.\d{4,9}/[^\s?#]+)", re.I)
 
