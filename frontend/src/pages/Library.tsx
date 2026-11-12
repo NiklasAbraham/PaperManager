@@ -14,6 +14,8 @@ import {
   hasActiveFilters, sortOptions,
 } from "../components/search/filterState";
 import type { EntityType } from "../components/EntityPanel";
+import Dashboard from "../components/dashboard/Dashboard";
+import { parseVariant } from "../components/dashboard/helpers";
 import { useAppSettings } from "../contexts/SettingsContext";
 import type { Paper, Person, Project, SearchMode, SearchResponse, SearchResult, T_IngestOut } from "../types";
 
@@ -247,6 +249,14 @@ export default function Library() {
     return queryMode === "semantic" ? "Nothing in the library is close enough in meaning; showing exact matches." : null;
   })();
 
+  const dashVariant = parseVariant(searchParams);
+  const libraryTitle = (
+    <>
+      Library
+      {res && <span className="font-normal text-ink-3"> · {res.total.toLocaleString()} paper{res.total === 1 ? "" : "s"}</span>}
+    </>
+  );
+
   const sortSelect = (
     <select
       aria-label="Sort results"
@@ -464,26 +474,31 @@ export default function Library() {
           </section>
         ) : (
           <>
-            <h1 className="text-sm font-semibold text-ink">
-              Library
-              {res && <span className="font-normal text-ink-3"> · {res.total.toLocaleString()} paper{res.total === 1 ? "" : "s"}</span>}
-            </h1>
+            {dashVariant === "off" ? (
+              <h1 className="text-sm font-semibold text-ink">{libraryTitle}</h1>
+            ) : (
+              <Dashboard
+                variant={dashVariant}
+                title={libraryTitle}
+                onFilter={(key, value) => update((next) => { next.set(key, value); })}
+              />
+            )}
 
             {reading.length > 0 && (
-              <section className="space-y-2" aria-label="Continue reading">
+              <section className="space-y-1.5" aria-label="Continue reading">
                 <h2 className={SECTION_HEADING}>Continue reading</h2>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-                  {reading.map((p, i) => (
-                    // Phones show three, so the paper list stays near the top.
-                    <li key={p.id} className={i >= 3 ? "hidden sm:block" : undefined}>
+                {/* One slim row of three: the dashboard above already takes the space (two on phones). */}
+                <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {reading.slice(0, 3).map((p, i) => (
+                    <li key={p.id} className={i >= 2 ? "hidden sm:block" : undefined}>
                       <Link
                         to={`/paper/${p.id}`}
-                        className="block bg-raised border border-line rounded-lg px-3 py-2 hover:border-accent-border transition-colors"
+                        title={p.title}
+                        className="flex items-center gap-2 h-9 bg-raised border border-line rounded-lg px-3 hover:border-accent-border transition-colors"
                       >
-                        <p className="text-sm font-medium text-ink line-clamp-1">{p.title}</p>
-                        <p className="text-xs text-ink-3 mt-0.5 line-clamp-1">
-                          {[p.authors?.slice(0, 2).join(", "), p.year].filter(Boolean).join(" · ")}
-                        </p>
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[#eda100]" />
+                        <span className="text-sm text-ink truncate">{p.title}</span>
+                        {p.year && <span className="text-xs text-ink-3 shrink-0 ml-auto">{p.year}</span>}
                       </Link>
                     </li>
                   ))}
