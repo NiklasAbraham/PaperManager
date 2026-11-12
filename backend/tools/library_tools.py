@@ -105,6 +105,33 @@ def register(mcp: FastMCP):
         paper that is not in it yet."""
         return json.dumps(library_lookup(dois, titles, project), ensure_ascii=False, separators=(",", ":"))
 
+    @mcp.tool(name="library_add", structured_output=False)
+    def _library_add(papers: list[dict] = [], path: str = "", project: str = "",  # noqa: B006
+                     dry_run: bool = False) -> str:
+        """Add a whole reference list to the library and to one project in ONE call, instead
+        of library_lookup + add_paper_metadata + add_to_project per paper.
+
+        Give `path`, the absolute path of a report's papers.json (a list of entries, or
+        {"papers": [...]}), or `papers`, the entries inline (up to 200). An entry needs
+        `title`; it may carry `doi`, `arxiv` (an id; becomes DOI 10.48550/arXiv.<id>),
+        `paperId`, `year`, `venue`, `abstract`, `document_type`, `published_date`, and
+        `authors` as a list of full names (a plain string is ignored).
+
+        Per entry: a `paperId` that exists counts as present; otherwise the DOI, then the
+        title, is looked up as in library_lookup; a paper still missing is created as
+        metadata only (no PDF; upload_pdf adds one later). Entries naming the same paper
+        twice are created once (`same_as`). With `project` (name or id; it must exist,
+        create_project first) every paper is linked to it; existing links are kept.
+        With `path` the file is rewritten with each entry's paperId, url and status
+        ("present" or "added"). `dry_run` reports the same counts and writes nothing.
+
+        Returns compact JSON: counts (present, added, same_in_batch, linked) and per entry
+        {i, title, status, id, kind, url}; kind is how a present paper was found (id, doi,
+        title_exact, title_prefix), `duplicates` lists ids when several library papers match."""
+        from services.library_add import add as _add
+        res = _add(get_driver(), papers, project, path, dry_run, url_base=settings.frontend_url)
+        return json.dumps(res, ensure_ascii=False, separators=(",", ":"))
+
     @mcp.tool()
     def library_search(query: str, project: str = "", limit: int = 12) -> dict:
         """Search the whole library for a topic and report WHERE each paper matched.

@@ -227,3 +227,6 @@ backend/scripts/imports/
 
 # Node
 node_modules/
+
+# local test PDFs written by the upload pipeline
+backend/data/
