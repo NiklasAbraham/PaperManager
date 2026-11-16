@@ -1,10 +1,12 @@
 import { useState, FormEvent } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { takeReturnTo } from "../lib/loginRedirect";
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -17,8 +19,9 @@ export default function Login() {
 
     try {
       await login(username, password);
-      // Redirect to home page after successful login
-      navigate("/");
+      // Back to the page that was open when the session ended (home if none)
+      const from = (location.state as { from?: string } | null)?.from;
+      navigate(takeReturnTo(from), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
