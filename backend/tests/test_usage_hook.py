@@ -3,6 +3,7 @@ import json
 
 import anthropic
 import httpx
+import httpx2  # anthropic >= 2.x runs on httpx2; openai still takes httpx
 import openai
 import pytest
 
@@ -30,7 +31,7 @@ def rows():
 
 def anthropic_client(handler, base_url="https://api.anthropic.com"):
     return anthropic.Anthropic(api_key="x", base_url=base_url, max_retries=0,
-                               http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+                               http_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
 
 
 def openai_client(handler, base_url="https://litellm.example/v1"):
@@ -46,7 +47,7 @@ def message_json(model="claude-haiku-4-5-20251001"):
 
 def sse(*events):
     body = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
-    return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body.encode())
+    return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body.encode())
 
 
 def anthropic_events(model="claude-sonnet-4-6"):
@@ -78,7 +79,7 @@ def test_install_is_idempotent_and_uninstall_restores():
 
 
 def test_anthropic_create_records_usage_and_cost():
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json()))
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json()))
     with usage_context(feature="summary", paper_id="p1", user="alice"):
         resp = client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10,
                                       messages=[{"role": "user", "content": "x"}])
@@ -93,13 +94,13 @@ def test_anthropic_create_records_usage_and_cost():
 
 
 def test_gateway_provider_from_base_url():
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json()), base_url="https://gw.corp/anthropic")
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json()), base_url="https://gw.corp/anthropic")
     client.messages.create(model="claude-opus-4-6", max_tokens=10, messages=[{"role": "user", "content": "x"}])
     assert rows()[0]["provider"] == "anthropic-gateway"
 
 
 def test_anthropic_error_is_recorded_and_reraised():
-    client = anthropic_client(lambda req: httpx.Response(500, json={"type": "error", "error": {
+    client = anthropic_client(lambda req: httpx2.Response(500, json={"type": "error", "error": {
         "type": "api_error", "message": "boom"}}))
     with pytest.raises(anthropic.APIStatusError):
         client.messages.create(model="claude-opus-4-6", max_tokens=10, messages=[{"role": "user", "content": "x"}])
@@ -237,7 +238,7 @@ def test_openai_embeddings():
 
 
 def test_unknown_model_has_no_cost():
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json("claude-future-9")))
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json("claude-future-9")))
     client.messages.create(model="claude-future-9", max_tokens=10, messages=[{"role": "user", "content": "x"}])
     (r,) = rows()
     assert r["cost_usd"] is None and not r["price_known"]
@@ -245,7 +246,7 @@ def test_unknown_model_has_no_cost():
 
 def test_disabled_ledger_records_nothing(monkeypatch):
     monkeypatch.setattr(settings, "usage_ledger_enabled", False)
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json()))
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json()))
     assert client.messages.create(model="claude-haiku-4-5", max_tokens=10,
                                   messages=[{"role": "user", "content": "x"}]).content
     assert rows() == []
@@ -256,7 +257,7 @@ def test_ledger_failure_never_reaches_the_caller(monkeypatch):
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(ledger, "_connect", boom)
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json()))
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json()))
     assert client.messages.create(model="claude-haiku-4-5", max_tokens=10,
                                   messages=[{"role": "user", "content": "x"}]).content[0].text == "hi"
 
@@ -273,7 +274,7 @@ def test_usage_context_nests_and_inner_wins():
 
 def test_stack_inference_label_feature_paper_and_user(monkeypatch):
     monkeypatch.setitem(hook.FEATURE_RULES, "tests/test_usage_hook.py:fake_summarize", "summary")
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json()))
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json()))
 
     def fake_summarize(paper_id, current_user):
         return client.messages.create(model="claude-haiku-4-5", max_tokens=10,
@@ -287,7 +288,7 @@ def test_stack_inference_label_feature_paper_and_user(monkeypatch):
 
 def test_private_helper_takes_feature_of_its_public_caller(monkeypatch):
     monkeypatch.setitem(hook.FEATURE_RULES, "tests/test_usage_hook.py:public_caller", "tour")
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json()))
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json()))
 
     def _helper():
         client.messages.create(model="claude-haiku-4-5", max_tokens=10, messages=[{"role": "user", "content": "x"}])
@@ -301,7 +302,7 @@ def test_private_helper_takes_feature_of_its_public_caller(monkeypatch):
 
 
 def test_unmapped_frame_gives_label_as_feature():
-    client = anthropic_client(lambda req: httpx.Response(200, json=message_json()))
+    client = anthropic_client(lambda req: httpx2.Response(200, json=message_json()))
 
     def some_unmapped_function():
         client.messages.create(model="claude-haiku-4-5", max_tokens=10, messages=[{"role": "user", "content": "x"}])

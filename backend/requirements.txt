@@ -6,7 +6,7 @@ pydantic
 pydantic-settings
 python-multipart
 pypdf
-anthropic
+anthropic>=2.8  # 2.x runs on httpx2: tests use httpx2.MockTransport (see tests/test_usage_hook.py)
 # Claude Code on a Claude subscription; the wheel bundles the CLI binary.
 claude-agent-sdk>=0.2.165  # effort + output_format options
 google-api-python-client
