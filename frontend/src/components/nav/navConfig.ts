@@ -19,6 +19,8 @@ export interface NavItem {
   detail?: string;
   /** Keep out of the Tools hub cards (the hub itself). */
   hub?: boolean;
+  /** Shown only when the instance has this optional feature on (see lib/features). */
+  feature?: string;
 }
 
 export const GROUP_LABELS: Record<NavGroup, string> = {
@@ -44,6 +46,7 @@ export const NAV_ITEMS: NavItem[] = [
   { group: "explore", label: "Venues", to: "/venues", description: "Journals and conferences in your library" },
   { group: "explore", label: "Reports", to: "/reports", description: "Generated reports on your library" },
   { group: "explore", label: "Suggestions", to: "/suggestions", description: "Ideas for the app: vote and track status" },
+  { group: "explore", label: "Paper feed", to: "/feed", feature: "feed", description: "New preprints, ranked for you" },
 
   // Tools menu
   { group: "tools", label: "Bulk import", to: "/bulk-import", description: "Import a list of papers from JSON",
@@ -62,8 +65,10 @@ export const NAV_ITEMS: NavItem[] = [
   { group: "account", label: "Health", to: "/health", adminOnly: true, description: "Status of backend services" },
 ];
 
-export function itemsFor(group: NavGroup, isAdmin: boolean): NavItem[] {
-  return NAV_ITEMS.filter((i) => i.group === group && (isAdmin || !i.adminOnly));
+export function itemsFor(group: NavGroup, isAdmin: boolean, features: ReadonlySet<string> = new Set()): NavItem[] {
+  return NAV_ITEMS.filter(
+    (i) => i.group === group && (isAdmin || !i.adminOnly) && (!i.feature || features.has(i.feature)),
+  );
 }
 
 function under(pathname: string, base: string): boolean {
@@ -81,6 +86,6 @@ export function isItemActive(item: NavItem, pathname: string): boolean {
 }
 
 /** Whether the current route belongs to any (visible) item of the group, for menu buttons. */
-export function isGroupActive(group: NavGroup, pathname: string, isAdmin: boolean): boolean {
-  return itemsFor(group, isAdmin).some((i) => isItemActive(i, pathname));
+export function isGroupActive(group: NavGroup, pathname: string, isAdmin: boolean, features: ReadonlySet<string> = new Set()): boolean {
+  return itemsFor(group, isAdmin, features).some((i) => isItemActive(i, pathname));
 }

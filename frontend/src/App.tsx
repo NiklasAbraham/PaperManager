@@ -39,6 +39,7 @@ const Reports       = lazy(() => import("./pages/Reports"));
 const ReportView    = lazy(() => import("./pages/ReportView"));
 const Suggestions   = lazy(() => import("./pages/Suggestions"));
 const Health        = lazy(() => import("./pages/Health"));
+const Feed          = lazy(() => import("./pages/Feed"));   // optional: PAPER_FEED (.specs/018)
 const TopicMapPage  = lazy(() => import("./pages/TopicMapPage"));
 
 function AppLayout() {
@@ -105,6 +106,7 @@ function AppLayout() {
                 <Route path="/reports/:id" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><ReportView /></Suspense>} />
                 <Route path="/suggestions" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Suggestions /></Suspense>} />
                 <Route path="/health" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Health /></Suspense>} />
+                <Route path="/feed" element={<Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading…</div>}><Feed /></Suspense>} />
               </Routes>
             </ProtectedRoute>
           } />

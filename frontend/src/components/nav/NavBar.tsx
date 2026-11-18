@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAppSettings } from "../../contexts/SettingsContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -6,6 +6,7 @@ import { itemsFor, isGroupActive, isItemActive } from "./navConfig";
 import { DropdownMenu, MenuLink } from "./NavMenu";
 import { linkCls, confirmLogout } from "./navStyles";
 import MobileDrawer from "./MobileDrawer";
+import { loadFeatures, useFeatures } from "../../lib/features";
 
 function PrimaryLink({ item }: { item: ReturnType<typeof itemsFor>[number] }) {
   const { pathname } = useLocation();
@@ -89,8 +90,12 @@ function AccountMenu() {
 }
 
 export default function NavBar() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isAuthenticated } = useAuth();
   const { pathname } = useLocation();
+  const features = useFeatures();
+  useEffect(() => {
+    if (isAuthenticated) void loadFeatures();
+  }, [isAuthenticated]);
   // Tied to the route it was opened on, so any navigation closes it.
   const [drawerAt, setDrawerAt] = useState<string | null>(null);
   const drawerOpen = drawerAt === pathname;
@@ -107,8 +112,8 @@ export default function NavBar() {
         {itemsFor("primary", isAdmin).map((item) => (
           <PrimaryLink key={item.to} item={item} />
         ))}
-        <DropdownMenu label="Explore" active={isGroupActive("explore", pathname, isAdmin)}>
-          {(close) => itemsFor("explore", isAdmin).map((item) => <MenuLink key={item.to} item={item} onNavigate={close} />)}
+        <DropdownMenu label="Explore" active={isGroupActive("explore", pathname, isAdmin, features)}>
+          {(close) => itemsFor("explore", isAdmin, features).map((item) => <MenuLink key={item.to} item={item} onNavigate={close} />)}
         </DropdownMenu>
         <DropdownMenu label="Tools" active={isGroupActive("tools", pathname, isAdmin)}>
           {(close) => itemsFor("tools", isAdmin).map((item) => <MenuLink key={item.to} item={item} onNavigate={close} />)}

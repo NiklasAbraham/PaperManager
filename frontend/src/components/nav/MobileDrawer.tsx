@@ -4,6 +4,7 @@ import { useAppSettings } from "../../contexts/SettingsContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { GROUP_LABELS, itemsFor, isItemActive, type NavGroup } from "./navConfig";
 import { confirmLogout } from "./navStyles";
+import { useFeatures } from "../../lib/features";
 
 const GROUPS: NavGroup[] = ["primary", "explore", "tools", "account"];
 
@@ -12,6 +13,7 @@ export default function MobileDrawer({ onClose }: { onClose: () => void }) {
   const { settings, update } = useAppSettings();
   const { isAdmin, username, logout } = useAuth();
   const { pathname } = useLocation();
+  const features = useFeatures();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -44,7 +46,7 @@ export default function MobileDrawer({ onClose }: { onClose: () => void }) {
         {GROUPS.map((g) => (
           <section key={g} aria-label={GROUP_LABELS[g]} className="mb-4">
             <h2 className="px-3 pb-1 text-xs font-medium text-ink-3 uppercase tracking-wide">{GROUP_LABELS[g]}</h2>
-            {itemsFor(g, isAdmin).map((item) => {
+            {itemsFor(g, isAdmin, features).map((item) => {
               const active = isItemActive(item, pathname);
               return (
                 <NavLink

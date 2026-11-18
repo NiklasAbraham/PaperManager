@@ -432,6 +432,23 @@ Reports are private to their owner; admins can read and delete all.
 
 ---
 
+## Paper feed (optional)
+
+Only with `PAPER_FEED=true`. Otherwise every route except `/feed/status` answers 404 and `/feed/status` answers `{"enabled": false}`. Ids contain `:` and sometimes `/`; URL-encode them.
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| `GET` | `/feed/status` | `{enabled, state (idle\|refreshing), last_refresh, next_refresh, candidates, embedded, mode, positives, quality {auc, positives, held_out}, error}` |
+| `GET` | `/feed` | `?days=&skip=&limit=&include_rated=&source=arxiv\|biorxiv\|medrxiv`. Ranked `items` with `score`, `neighbours`, `in_library`, `library_paper_id`, `my_label`; `mode` is `classifier`, `similarity` or `newest` |
+| `GET` / `PUT` | `/feed/config` | Your `{sources, arxiv_categories (≤ 30, pattern like cs.LG), digest_days (1–14), min_score (0–1)}` |
+| `POST` | `/feed/refresh` | Start a fetch now (admin, or the only user); 202, 409 while one runs |
+| `POST` | `/feed/{id}/rate` | `{value: 1 \| -1}` |
+| `POST` | `/feed/{id}/dismiss` | Label 0 |
+| `DELETE` | `/feed/{id}/label` | Remove your label |
+| `POST` | `/feed/{id}/add` | `{project_id?}`: ingest by URL, link to the project, record a thumbs-up |
+
+---
+
 ## System health
 
 | Method | Path | Description |

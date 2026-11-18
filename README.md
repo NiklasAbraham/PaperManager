@@ -41,6 +41,7 @@ Pull requests are welcome; merged work is credited here, in the
 | **Suggestions** | The chat proposes improvements to the app as a chip; everyone can submit ideas, vote, and admins set the status. |
 | **Health** | Admin page with the state of the backend, Neo4j, AI providers, storage, disk, ingest jobs and background sweepers, plus recent errors. |
 | **Conference explorer** | Browse NeurIPS, ICML, ICLR, CVPR, ICCV, ECCV, ACL, EMNLP, AAAI, CoRL and more by institution (rank, research-area mix, collaborators, papers) or by topic (who publishes most on it, closest papers), or search all loaded conferences at once for a paper, an author or where a topic is published. Data from the official conference sites and [Paper Copilot](https://github.com/papercopilot/paperlists), embedded on your own server. |
+| **Paper feed** | Optional (`PAPER_FEED=true`, off by default). A digest of new arXiv, bioRxiv and medRxiv preprints from the categories you choose, ranked for you by a small model trained on what you rate, bookmark and read; everything stays on your instance. |
 | **People** | Every author in the library, sorted by surname. A **CV** tab builds a researcher's profile from OpenAlex, ORCID, Wikidata and their homepage (position, education, h-index, most cited works, photo) and checks it against their papers in your library; **⧉ Dups** finds people listed under several spellings and merges them. Contributed by [Antoine Luciano](https://github.com/AntoineLuciano). |
 | **MCP server** | 42 tools for Claude Desktop and Claude Code: search, batch-check what is already in the library, read, annotate, upload, merge duplicates, query conferences. |
 | **More** | Knowledge graph with a built-in Cypher query panel (result as graph and table), cross-paper synthesis, research-gap finder, author tracking, duplicate merge manager, BibTeX export, multi-user accounts with shared projects. |
@@ -152,6 +153,7 @@ The full docs are at **[niklasabraham.github.io/PaperManager](https://niklasabra
 | [People, projects and export](docs/user-guide/knowledge-features.md) | |
 | [MCP server](docs/user-guide/mcp-server.md) | |
 | [Conference explorer](docs/user-guide/conferences.md) | |
+| [Paper feed](docs/user-guide/paper-feed.md) | |
 | [Hosting your own](docs/self_hosting.md) | |
 
 Developer context for working on the code (also used by coding agents) lives in [`.specs/`](.specs/):
@@ -161,7 +163,8 @@ Developer context for working on the code (also used by coding agents) lives in 
 [API](.specs/006_api.md), [deployment](.specs/007_deployment.md),
 [MCP server](.specs/008_mcp_server.md), [conference explorer](.specs/011_conferences.md),
 [search](.specs/012_search.md), [tokens](.specs/013_tokens.md), [reports](.specs/014_reports.md),
-[suggestions](.specs/015_suggestions.md), [health](.specs/016_health.md).
+[suggestions](.specs/015_suggestions.md), [health](.specs/016_health.md),
+[paper feed](.specs/018_paper_feed.md).
 
 ---
 
