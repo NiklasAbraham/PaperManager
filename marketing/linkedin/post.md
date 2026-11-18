@@ -5,19 +5,21 @@ Status: draft, not posted. Niklas posts it himself.
 ## Text
 
 ```
-I asked my paper library how AlphaFold 3 predicts a protein complex. It queried its own graph, found 28 papers that cite it, pulled 16 figures and showed the spike protein in 3D.
+Over the last months I have been building a tool for my own research, and I now use it every single day. I think it might help others as well, so I am sharing it.
 
-That is PaperManager, the open-source research library I build next to my thesis. New this month:
+It is PaperManager, an open-source paper library I build next to my thesis. Last week I asked it how AlphaFold 3 predicts a protein complex: it queried its own graph, found 28 papers in my library that cite it, pulled 16 figures and showed the spike protein in 3D.
+
+What it does today:
 
 Chat. Every answer shows its tool calls (the actual graph queries), a row of sources linked to the papers, figure strips and 3D structure cards for PDB entries and ligands.
 
 Reports. A question becomes a long read written from your library, every claim cited, exported as HTML or Markdown.
 
-Tokens. Every LLM call is logged with its cost per feature and model. On its first day it counted 3,156 calls for $0.66 in total.
-
 Search. Filters for year, date added, reading status, PDF, notes, rating, tag, topic and venue, all in the URL. "protein binder design", from 2024, unread, with PDF, one tag: 1,173 papers down to 5.
 
 Setup. Paste one line into Claude Code or Codex and the agent installs it: four questions, about 15 minutes, Docker. Anthropic or OpenAI key, no GPU.
+
+It is free, it runs on your own machine, and I would love to hear what you would want from it. If you work with a lot of papers, try it and tell me where it breaks.
 
 Project page and chat demo: https://niklas-abraham.de/projects/papermanager/
 Code: https://github.com/NiklasAbraham/PaperManager
@@ -25,8 +27,9 @@ Code: https://github.com/NiklasAbraham/PaperManager
 #OpenSource #Research #KnowledgeGraph #ClaudeCode #SelfHosted
 ```
 
-About 1,250 characters including links and hashtags. The first two lines (what LinkedIn shows before "see more") carry the hook: a question, what the
-library did, three real numbers.
+About 1,600 characters including links and hashtags. The opening is personal (built over months, used daily, might help
+others); the first lines before "see more" carry that promise, and the AlphaFold 3 example with its real numbers follows
+in the second paragraph.
 
 Every number is real: 28 library papers cite the AlphaFold 3 paper and it has 16 figures (read-only Cypher on the live
 library, 12 Nov 2026); 3,156 calls / $0.656 is the Tokens page of 12 Nov 2026, the ledger's first day (3,146 of the calls are the

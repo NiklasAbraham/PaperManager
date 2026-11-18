@@ -230,3 +230,6 @@ node_modules/
 
 # local test PDFs written by the upload pipeline
 backend/data/
+
+# Blender reel iteration rounds (large, local only; see marketing/reels/rounds/README.md)
+marketing/reels/rounds/
