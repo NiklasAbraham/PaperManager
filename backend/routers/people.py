@@ -15,7 +15,7 @@ from services.person_cv import build_person_cv, build_all_cvs, bulk_cv_running
 from services.person_duplicates import find_duplicate_groups, merge_people
 from services.auth import require_admin
 from models.schemas import (
-    PersonCreate, PersonUpdate, PersonOut, AuthorLink, InvolvesLink, SpecialtyLink,
+    PersonCreate, PersonUpdate, PersonOut, PersonListOut, AuthorLink, InvolvesLink, SpecialtyLink,
     NoteBody, NoteOut, TagBody, PersonEnrichOut,
 )
 from db.queries.topics import get_or_create_topic
@@ -87,7 +87,7 @@ def merge(body: PeopleMergeBody):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@people_router.get("", response_model=list[PersonOut])
+@people_router.get("", response_model=list[PersonListOut], response_model_exclude_none=True)
 def list_all(tag: str | None = Query(None), exclude_tag: str | None = Query(None)):
     driver = get_driver()
     if tag:

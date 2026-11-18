@@ -113,7 +113,7 @@ All endpoints are served from `http://localhost:8000`. Interactive API docs (Swa
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
-| `GET` | `/people` | List all people |
+| `GET` | `/people` | List all people, light rows only: `id, name, affiliation, citation_count, h_index, paper_count` (`PersonListOut`). One row per person goes to every page that picks a person, so bio, skills, cv and photo stay in `GET /people/{id}`; `tests/test_people_list.py` pins the fields and the row size |
 | `POST` | `/people` | Create person |
 | `POST` | `/people/get-or-create` | Get or create by name |
 | `GET` | `/people/{id}` | Person detail + papers + specialties |

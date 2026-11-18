@@ -87,6 +87,17 @@ class PersonUpdate(BaseModel):
     startup_roles: str | None = None
 
 
+class PersonListOut(BaseModel):
+    """One row of GET /people. Only the fields in db.queries.people.LIST_FIELDS (+ paper_count):
+    the list goes out once per person to every page that picks a person."""
+    id: str
+    name: str
+    affiliation: str | None = None
+    citation_count: int | None = None
+    h_index: int | None = None
+    paper_count: int = 0
+
+
 class PersonOut(BaseModel):
     id: str
     name: str

@@ -20,12 +20,24 @@ def surname_key(name: str | None) -> tuple[str, str]:
     return (words[-1] if words else "", folded)
 
 
-# Heavy fields kept out of list responses; the person detail returns them.
-_LIST_EXCLUDED = ("cv", "photo")
+# The only person properties a list response carries. A fixed list rather than "everything
+# except the heavy ones": the list is fetched by the People page, every paper page, the
+# onboarding and chat mention pickers, and a new property (bio, skills, cv, ...) must not
+# silently multiply a response that goes out once per person (5,000 people = 3 MB at 600 B
+# each). The person detail (GET /people/{id}) returns the rest. Pinned by
+# tests/test_people_list.py; keep in step with models.schemas.PersonListOut.
+LIST_FIELDS = ("id", "name", "affiliation", "citation_count", "h_index")
+
+_LIST_PROJECTION = "p {" + ", ".join(f".{f}" for f in LIST_FIELDS) + "}"
 
 
-def _list_row(node) -> dict:
-    return {k: v for k, v in dict(node).items() if k not in _LIST_EXCLUDED}
+def _list_rows(result) -> list[dict]:
+    rows = []
+    for r in result:
+        d = dict(r["p"])
+        d["paper_count"] = r["paper_count"]
+        rows.append(d)
+    return sorted(rows, key=lambda d: surname_key(d.get("name")))
 
 
 def create_person(driver: Driver, data: dict) -> dict:
@@ -62,53 +74,35 @@ def get_person(driver: Driver, person_id: str) -> dict | None:
 
 
 def list_people(driver: Driver, tag: str | None = None) -> list[dict]:
+    """Light rows (LIST_FIELDS + paper_count) for every person, sorted by surname."""
     with driver.session() as session:
-        if tag:
-            result = session.run(
-                """
-                MATCH (p:Person)-[:TAGGED]->(:Tag {name: $tag})
-                OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
-                RETURN p, count(DISTINCT paper) AS paper_count
-                ORDER BY p.name
-                """,
-                tag=tag,
-            )
-        else:
-            result = session.run(
-                """
-                MATCH (p:Person)
-                OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
-                RETURN p, count(DISTINCT paper) AS paper_count
-                ORDER BY p.name
-                """
-            )
-        rows = []
-        for r in result:
-            d = _list_row(r["p"])
-            d["paper_count"] = r["paper_count"]
-            rows.append(d)
-        return sorted(rows, key=lambda d: surname_key(d.get("name")))
+        match = "MATCH (p:Person)-[:TAGGED]->(:Tag {name: $tag})" if tag else "MATCH (p:Person)"
+        result = session.run(
+            f"""
+            {match}
+            OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
+            WITH p, count(DISTINCT paper) AS paper_count
+            RETURN {_LIST_PROJECTION} AS p, paper_count
+            """,
+            tag=tag,
+        )
+        return _list_rows(result)
 
 
 def list_people_without_tag(driver: Driver, tag: str) -> list[dict]:
     """Return people who do NOT have the given tag."""
     with driver.session() as session:
         result = session.run(
-            """
+            f"""
             MATCH (p:Person)
-            WHERE NOT (p)-[:TAGGED]->(:Tag {name: $tag})
+            WHERE NOT (p)-[:TAGGED]->(:Tag {{name: $tag}})
             OPTIONAL MATCH (paper:Paper)-[:AUTHORED_BY|INVOLVES]->(p)
-            RETURN p, count(DISTINCT paper) AS paper_count
-            ORDER BY p.name
+            WITH p, count(DISTINCT paper) AS paper_count
+            RETURN {_LIST_PROJECTION} AS p, paper_count
             """,
             tag=tag,
         )
-        rows = []
-        for r in result:
-            d = _list_row(r["p"])
-            d["paper_count"] = r["paper_count"]
-            rows.append(d)
-        return sorted(rows, key=lambda d: surname_key(d.get("name")))
+        return _list_rows(result)
 
 
 def delete_person(driver: Driver, person_id: str) -> bool:

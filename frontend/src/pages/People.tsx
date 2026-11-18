@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   apiFetch, setPersonTracked,
@@ -126,6 +126,8 @@ function InlineField({
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+const PEOPLE_PAGE = 200;
+
 interface PersonSummary extends Person {
   paper_count?: number;
 }
@@ -191,8 +193,18 @@ export default function People() {
   const [filter, setFilter]       = useState<PeopleFilter>("all");
   const [search, setSearch]       = useState("");
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [shown, setShown]         = useState(PEOPLE_PAGE);
 
   const [searchParams] = useSearchParams();
+
+  // The library holds thousands of people; rendering one row each made typing in the search
+  // box and switching the filter stall. Filter once per change, draw a window of PEOPLE_PAGE.
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return people;
+    return people.filter((p) => p.name.toLowerCase().includes(q) || p.affiliation?.toLowerCase().includes(q));
+  }, [people, search]);
+  useEffect(() => { setShown(PEOPLE_PAGE); }, [search, filter]);
 
   const fetchPeople = async (f: PeopleFilter = filter) => {
     let url = "/people";
@@ -372,7 +384,7 @@ export default function People() {
           </p>
         ) : (
           <ul className="divide-y divide-gray-50">
-            {people.filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.affiliation?.toLowerCase().includes(search.toLowerCase())).map((p) => (
+            {matches.slice(0, shown).map((p) => (
               <li key={p.id}>
                 <button
                   onClick={() => selectPerson(p)}
@@ -395,6 +407,16 @@ export default function People() {
                 </button>
               </li>
             ))}
+            {matches.length > shown && (
+              <li>
+                <button
+                  onClick={() => setShown((n) => n + PEOPLE_PAGE)}
+                  className="w-full px-4 py-3 text-xs text-violet-600 hover:bg-violet-50 transition-colors"
+                >
+                  Show {Math.min(PEOPLE_PAGE, matches.length - shown)} more ({matches.length - shown} not shown; search narrows the list)
+                </button>
+              </li>
+            )}
           </ul>
         )}
       </aside>
