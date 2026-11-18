@@ -2437,7 +2437,7 @@
 <tr>
 <td><code>GET</code></td>
 <td><code>/people</code></td>
-<td>List all people</td>
+<td>List all people, light rows only: <code>id, name, affiliation, citation_count, h_index, paper_count</code> (<code>PersonListOut</code>). One row per person goes to every page that picks a person, so bio, skills, cv and photo stay in <code>GET /people/{id}</code>; <code>tests/test_people_list.py</code> pins the fields and the row size</td>
 </tr>
 <tr>
 <td><code>POST</code></td>
