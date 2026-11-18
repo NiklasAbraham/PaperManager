@@ -77,6 +77,10 @@ services:
       - CONFERENCES_DEFAULT=${CONFERENCES_DEFAULT:-}
       - CONFERENCES_REFRESH_DAYS=${CONFERENCES_REFRESH_DAYS:-14}
       - CONFERENCE_EMBED_THREADS=${CONFERENCE_EMBED_THREADS:-4}
+      # Optional paper feed (docs/user-guide/paper-feed.md); off by default, data on backend_data:/data.
+      - PAPER_FEED=${PAPER_FEED:-false}
+      - PAPER_FEED_INTERVAL=${PAPER_FEED_INTERVAL:-21600}
+      - PAPER_FEED_CONTACT=${PAPER_FEED_CONTACT:-}
       - HOST_IMPORT_ROOT=${HOST_IMPORT_ROOT:-/srv/papers}
     depends_on:
       - neo4j

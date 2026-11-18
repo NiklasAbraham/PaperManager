@@ -31,6 +31,8 @@ services:
       - TRUSTED_HOSTS=localhost,127.0.0.1
       # Conference explorer datasets and the embedding model, on the persistent volume.
       - CONFERENCE_DATA_DIR=/app/data/conferences
+      # Optional paper feed (PAPER_FEED in .env, off by default): its database on the same volume.
+      - PAPER_FEED_DIR=/app/data/feed
     volumes:
       # PDFs and figure images when STORAGE_BACKEND is local (the default without Drive).
       - paper_files:/app/data

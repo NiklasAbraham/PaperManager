@@ -23,6 +23,7 @@ It is built for a single primary user with optional teammate/multi-user support.
 | Single-paper chat | Q&A over a paper's full text; also figure vision chat |
 | Cypher editor | Raw Neo4j query editor with AI assist |
 | Conference explorer | NeurIPS / ICML / ICLR / CVPR / ACL / ... by institution and by topic; data on disk, bge-small embeddings on CPU (`.specs/011_conferences.md`) |
+| Paper feed | Optional (`PAPER_FEED`, off by default): daily digest of new arXiv / bioRxiv / medRxiv papers, ranked per user by a numpy logistic regression on the library's signals (`.specs/018_paper_feed.md`) |
 | MCP server | Claude Desktop integration — search, chat, annotate from Claude |
 | Export | BibTeX, JSON |
 | Auth | JWT-based login, admin-managed users, rate limiting |
