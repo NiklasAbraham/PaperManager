@@ -50,6 +50,9 @@ def test_query_applies_visibility_and_passes_names_as_parameters():
     assert params["feed_user"] == "al'ice\"; MATCH (n) DETACH DELETE n //"
     assert "DETACH DELETE" not in q and "al'ice" not in q
     assert rows == [ROW] and single is True
+    assert params["ref_tag"] == "from-references"
+    assert "{name: $ref_tag}" in q and "IN_PROJECT" in q and "ADDED" in q and "has_text" in q
+    assert "from-references" not in q and "'" not in q.replace("''", "")      # no literal values in the text
 
 
 def test_admin_sees_everything_and_user_count_decides_single_user(monkeypatch):
@@ -71,6 +74,29 @@ def test_shared_signals_count_only_for_papers_the_user_added_on_multi_user_insta
     assert [p[0] for p in pos] == ["a"] and [n[0] for n in neg] == ["c"]
     pos, neg = ranking._entries(rows, single_user=True, labels={})
     assert [p[0] for p in pos] == ["a", "b"]
+
+
+def test_kept_signal_is_the_max_not_the_sum_and_needs_a_real_paper():
+    base = dict(ROW, rating=None, status="unread", highlights=0, bookmarked=None, has_text=True, stub=False,
+                mine=False, in_project=False)
+    rows = [
+        dict(base, id="added", mine=True),
+        dict(base, id="project", in_project=True),
+        dict(base, id="both", mine=True, in_project=True),                       # still 0.3, not 0.6
+        dict(base, id="both_read", mine=True, in_project=True, rating=3, status="read"),   # 0.5 wins
+        dict(base, id="rated5", mine=True, in_project=True, rating=5),            # 1.0 wins
+        dict(base, id="rated1", mine=True, in_project=True, rating=1),            # an explicit no stays a no
+        dict(base, id="stub", mine=True, stub=True),
+        dict(base, id="bare", mine=True, has_text=False),
+        dict(base, id="foreign"),
+    ]
+    pos, neg = ranking._entries(rows, single_user=False, labels={})
+    assert {p[0]: p[2] for p in pos} == {"added": 0.3, "project": 0.3, "both": 0.3, "both_read": 0.5, "rated5": 1.0}
+    assert [n[0] for n in neg] == ["rated1"]
+    # global signals of another user's paper do not leak, but the kept signal of mine / my project stands
+    rows = [dict(base, id="x", rating=5, in_project=True)]
+    pos, _ = ranking._entries(rows, single_user=False, labels={})
+    assert [(p[0], p[2]) for p in pos] == [("x", 0.3)]
 
 
 def test_feed_labels_always_count_and_map_to_signs():

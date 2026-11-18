@@ -57,7 +57,9 @@ SQLite, not Neo4j: candidates are ephemeral and numerous, and the Aura free tier
 - `run(id, started_at, finished_at, source, fetched, new, embedded, error)` — history for Status.
 - `fetch_state(key PK, since)` — when each source key (`arxiv:<category>`, `biorxiv`, `medrxiv`) last
   succeeded; the next fetch starts one day before it (`OVERLAP`), a new key reaches back by the longest
-  digest window. A failed key is not advanced, so it is retried whole. (Added: needed so a category chosen
+  digest window. A key is advanced only after a fetch that ended without error and was not cut short by the shared
+  per-refresh cap (a category that alone fills the whole cap is advanced, or it would never move on); anything
+  else, including a category that failed on a later page, is retried whole. (Added: needed so a category chosen
   later is back-filled and a failure loses nothing.)
 - `library_emb(paper_id PK, hash, emb)` — vectors of library papers the library search index lacks (see Model).
 
@@ -91,8 +93,11 @@ fetch small: nothing is fetched when no user has chosen a category.
 - bioRxiv / medRxiv: `https://api.biorxiv.org/details/<server>/<from>/<to>/<cursor>` (JSON,
   100 per page). Only first versions (`version == "1"`) become candidates, so a revised old paper does not
   reappear as new. There is no category filter: the whole server is fetched (capped), the ranking sorts it.
-- Every request: User-Agent `PaperManager-feed` (+ `PAPER_FEED_CONTACT` if set), timeout 30 s, three tries
-  with doubling backoff on network errors, 429 and 5xx. The existing `_get` helper hard-codes its own
+- Every request: User-Agent `PaperManager-feed` (+ `PAPER_FEED_CONTACT` if set), timeout 30 s, arXiv read timeout 90 s
+  (connect 15 s). Network errors and 5xx: three tries, waiting 5 s then 10 s. 429: the `Retry-After` header
+  when present (a wait over 5 minutes is not taken, the category is left for the next refresh), otherwise
+  30, 60 and 120 s, then give up; a rate-limited category ends the arXiv part of that refresh. One arXiv
+  request is in flight at a time process-wide, at least 3 s after the previous one ended. The existing `_get` helper hard-codes its own
   User-Agent, so `sources.py` has its own small `_http_get` (it reuses only `_ssl_verify`).
 - A failing source is logged and recorded in `run.error`; it never stops the other source or the
   backend.
@@ -104,6 +109,13 @@ read it, do not duplicate the embedding work; if it is disabled or empty, embed 
 library papers with the same embedder and cache them in the feed store); candidates are embedded
 at refresh time. Same model, same 384-dim space.
 
+Why "kept": on a real library almost nothing is rated or bookmarked (the classifier never reached 10
+positives), but the library itself says a lot about what the user wants. A paper's weight is the maximum over
+its signals, never the sum (kept and rated 5 is 1.0, kept and read with highlights is 0.5), and an explicit
+rating of 1 or 2 still makes it a negative. Kept papers count toward the 10 positives of `MIN_POSITIVES`
+whatever their weight. Reference stubs and papers without text are skipped; the signal is derived per user
+(`mine` or `in_project` with the project visibility clause), so it needs no single-user exemption. The
+held-out AUC is unchanged: from 30 positives of any weight the newest 20 % (by when they were added) are held out.
 A bookmark outranks a low rating (the user kept the paper). Rating 0 or none is "unrated". The first
 reading of the weak-positive row ("rating 3, read, highlights") was taken as an and; the table now says
 what the code does: read-and-highlighted papers count even without a rating, rating 3 needs one more sign.
@@ -116,12 +128,13 @@ are stored per user and be conservative: if a signal is global, use it only for 
 case as the existing code does). Result: rating, bookmark and reading status are properties of the Paper
 node, not of a user, so `library.visible_papers` returns a `single_user` flag (at most one `User` node) and
 a `mine` flag per paper (`(:User)-[:ADDED]->(p)` for this user). Shared signals count for every visible
-paper when `single_user`, otherwise only for `mine`. Feed labels are always per user:
+paper when `single_user`, otherwise only for `mine`; `kept` is separate (see above). Feed labels are always per user:
 
 | Signal | Label | Weight |
 |---|---|---|
 | rating >= 4, or bookmarked | positive | 1.0 |
 | status `read` with highlights, or rating 3 together with `read` or highlights | positive | 0.5 |
+| kept: a real paper (not tagged `from-references`) with an abstract or summary that the user added (`ADDED`) or that sits in a project the user can see (`IN_PROJECT`) | positive | 0.3 (`KEPT_WEIGHT`) |
 | rating <= 2 | negative | 1.0 |
 | feed thumbs-down or dismissed | negative | 1.0 |
 | feed thumbs-up | positive | 1.0 |

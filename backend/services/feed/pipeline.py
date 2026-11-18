@@ -88,13 +88,15 @@ def refresh(driver=None, embed=None, now: datetime | None = None) -> dict:
         wanted = plan(store.all_configs())
         cap = config.max_per_refresh()
 
-        def take(key: str, source: str, cands: list[Candidate], err: str | None) -> None:
+        def take(key: str, source: str, cands: list[Candidate], err: str | None, complete: bool = True) -> None:
+            """Store what came in. The key's ``since`` moves forward only after a fetch that
+            finished without error and was not cut short, so anything else is retried whole."""
             nonlocal fetched, new
             fetched += len(cands)
             new += store.upsert_candidates(cands)
             if err:
                 errors.append(err)
-            else:
+            elif complete:
                 store.set_since(key, now.isoformat(timespec="seconds"))
             if source not in names:
                 names.append(source)
@@ -103,13 +105,18 @@ def refresh(driver=None, embed=None, now: datetime | None = None) -> dict:
         for cat in wanted["arxiv"]:
             if total_arxiv >= cap:
                 break
+            room = cap - total_arxiv
             try:
-                cands, err = sources.fetch_arxiv([cat], _since(store, f"arxiv:{cat}", now, wanted["days"]),
-                                                 cap - total_arxiv)
+                cands, err = sources.fetch_arxiv([cat], _since(store, f"arxiv:{cat}", now, wanted["days"]), room)
             except Exception as exc:  # noqa: BLE001 — a source never stops the refresh
                 cands, err = [], f"arxiv {cat}: {exc}"[:300]
             total_arxiv += len(cands)
-            take(f"arxiv:{cat}", "arxiv", cands, err)
+            # Cut short by what the categories before it already used: not complete, fetch it again.
+            cut_short = room < cap and len(cands) >= room
+            take(f"arxiv:{cat}", "arxiv", cands, err, complete=not cut_short)
+            if sources.is_rate_limited(err):
+                errors.append("arxiv: rate limited, the other categories wait for the next refresh")
+                break
         for server in ("biorxiv", "medrxiv"):
             if not wanted[server]:
                 continue

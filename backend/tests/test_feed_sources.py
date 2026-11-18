@@ -192,3 +192,102 @@ def test_http_get_gives_up_with_source_error(monkeypatch, no_sleep):
     monkeypatch.setattr(sources.httpx, "get", fake_get)
     with pytest.raises(sources.SourceError):
         sources._http_get("https://example.invalid/x", retries=2)
+
+
+# ── rate limits, timeouts, one request at a time ──────────────────────────────
+
+def _scripted_get(monkeypatch, replies):
+    """Make httpx.get answer from a list of (status, headers) and record every call."""
+    seen = []
+
+    def fake_get(url, params=None, headers=None, timeout=None, **kw):
+        seen.append(timeout)
+        status, hdrs = replies[min(len(seen), len(replies)) - 1]
+        return httpx.Response(status, text="ok", headers=hdrs, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(sources.httpx, "get", fake_get)
+    return seen
+
+
+def test_429_without_retry_after_backs_off_30_60_120_then_gives_up(monkeypatch, no_sleep):
+    seen = _scripted_get(monkeypatch, [(429, {})])
+    with pytest.raises(sources.RateLimited):
+        sources._http_get("https://example.invalid/x")
+    assert no_sleep == [30.0, 60.0, 120.0] and len(seen) == 4
+
+
+def test_429_honours_retry_after_seconds_and_http_date(monkeypatch, no_sleep):
+    _scripted_get(monkeypatch, [(429, {"Retry-After": "7"}), (200, {})])
+    assert sources._http_get("https://example.invalid/x").text == "ok"
+    assert no_sleep == [7.0]
+    no_sleep.clear()
+    soon = (datetime.now(timezone.utc) + timedelta(seconds=45)).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    _scripted_get(monkeypatch, [(429, {"Retry-After": soon}), (200, {})])
+    sources._http_get("https://example.invalid/x")
+    assert 40 <= no_sleep[0] <= 46
+
+
+def test_429_asking_for_more_than_five_minutes_is_not_waited_for(monkeypatch, no_sleep):
+    seen = _scripted_get(monkeypatch, [(429, {"Retry-After": "900"})])
+    with pytest.raises(sources.RateLimited):
+        sources._http_get("https://example.invalid/x")
+    assert no_sleep == [] and len(seen) == 1
+
+
+def test_429_then_5xx_use_their_own_schedules(monkeypatch, no_sleep):
+    _scripted_get(monkeypatch, [(429, {}), (503, {}), (429, {}), (200, {})])
+    sources._http_get("https://example.invalid/x")
+    assert no_sleep == [30.0, 5.0, 60.0]
+
+
+def test_arxiv_reads_wait_90_seconds_and_bioRxiv_keeps_30(monkeypatch, no_sleep):
+    seen = _scripted_get(monkeypatch, [(200, {})])
+    sources._arxiv_get("https://example.invalid/a", {})
+    sources._http_get("https://example.invalid/b")
+    assert seen[0].read == 90.0 and seen[0].connect == 15.0
+    assert seen[1] == 30.0
+
+
+def test_a_rate_limited_category_is_reported_with_the_429_marker(no_sleep):
+    def get(url, params=None, **_):
+        raise sources.RateLimited("HTTP 429 (rate limited)")
+
+    got, err = sources.fetch_arxiv(["cs.LG"], NOW - timedelta(days=1), max_results=100, get=get)
+    assert got == [] and sources.is_rate_limited(err) and not sources.is_rate_limited(None)
+
+
+def test_only_one_arxiv_request_is_in_flight_at_a_time(no_sleep):
+    import threading
+    import time
+
+    active, peak = [0], [0]
+    lock = threading.Lock()
+
+    def get(url, params=None, **_):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.02)
+        with lock:
+            active[0] -= 1
+        return Resp(text=atom_page([entry(1, NOW)]))
+
+    threads = [threading.Thread(target=sources.fetch_arxiv, args=(["cs.LG"], NOW - timedelta(days=1), 100),
+                                kwargs={"get": get}) for _ in range(4)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert peak[0] == 1
+
+
+def test_a_page_that_fails_after_a_full_first_page_returns_the_partial_result_with_an_error(no_sleep):
+    es = [entry(i, NOW - timedelta(minutes=i)) for i in range(100)]
+    calls = []
+
+    def get(url, params=None, **_):
+        calls.append(params["start"])
+        if params["start"] == 100:
+            raise sources.SourceError("ReadTimeout")
+        return Resp(text=atom_page(es))
+
+    got, err = sources.fetch_arxiv(["cs.LG"], NOW - timedelta(days=1), max_results=1000, get=get)
+    assert len(got) == 100 and "ReadTimeout" in err and calls == [0, 100]

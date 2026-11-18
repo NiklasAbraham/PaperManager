@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 MIN_POSITIVES = 10          # below this: rank by similarity instead of a classifier
 EVAL_MIN_POSITIVES = 30     # from here on a held-out AUC is reported
 HOLD_OUT = 0.2
+KEPT_WEIGHT = 0.3            # a paper the user added or put in a project, without any rating
 RANDOM_NEGATIVES_MAX = 5000
 RANDOM_NEGATIVE_SHARE = 1.0  # S: the random negatives together weigh S x the positives
 DEFAULT_C = 1.0
@@ -26,12 +27,14 @@ MODEL_MAX_AGE = 24 * 3600
 # ── signals of the library ────────────────────────────────────────────────────
 
 
-def library_label(rating, bookmarked, status, highlights) -> tuple[int, float] | None:
+def library_label(rating, bookmarked, status, highlights, kept: bool = False) -> tuple[int, float] | None:
     """(label, weight) a library paper gives, or None when it says nothing.
 
     rating >= 4 or bookmarked: positive 1.0. rating <= 2: negative 1.0. A paper that was read
     and has highlights, or has rating 3 together with one of those, is a weaker positive, 0.5.
-    A bookmark outranks a low rating: the user kept it.
+    A bookmark outranks a low rating: the user kept it. ``kept`` (the user added the paper or
+    put it in a project) is the weakest positive, ``KEPT_WEIGHT``; the weight of a paper is the
+    maximum over its signals, never the sum, and an explicit low rating still wins.
     """
     try:
         r = int(rating) if rating is not None else 0
@@ -45,7 +48,7 @@ def library_label(rating, bookmarked, status, highlights) -> tuple[int, float] |
     marked = (highlights or 0) > 0
     if (read and marked) or (r == 3 and (read or marked)):
         return 1, 0.5
-    return None
+    return (1, KEPT_WEIGHT) if kept else None
 
 
 # ── training set ──────────────────────────────────────────────────────────────

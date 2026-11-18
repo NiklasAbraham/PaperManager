@@ -30,10 +30,12 @@ class Lib:
         self.single_user = True
 
     def add(self, pid: str, topic: int, *, title: str | None = None, doi=None, rating=None, bookmarked=False,
-            status="unread", highlights=0, mine=False, created="2026-01-01T00:00:00") -> None:
+            status="unread", highlights=0, mine=False, created="2026-01-01T00:00:00",
+            in_project=False, stub=False, has_text=True) -> None:
         self.rows.append({"id": pid, "title": title or f"Library paper {pid} topic-{topic}", "doi": doi,
                           "rating": rating, "bookmarked": bookmarked, "status": status, "highlights": highlights,
-                          "created_at": created, "mine": mine})
+                          "created_at": created, "mine": mine,
+                          "in_project": in_project, "stub": stub, "has_text": has_text})
         self.vecs[pid] = topic_vec(topic, pid)
 
 
@@ -184,6 +186,35 @@ async def test_enough_positives_use_the_classifier(client, st, lib):
     assert all(0 <= i["score"] <= 1 for i in r["items"])
     s = (await client.get("/feed/status")).json()
     assert s["mode"] == "classifier" and s["positives"] == 12
+
+
+async def test_kept_papers_alone_reach_the_classifier(client, st, lib):
+    lib.single_user = False                                   # several users: no rating counts
+    for i in range(6):
+        lib.add(f"a{i}", 3, mine=True)                        # added by me, never rated
+    for i in range(5):
+        lib.add(f"j{i}", 3, in_project=True)                  # in a project I can see
+    on = [put(st, i, 3) for i in range(5)]
+    for i in range(10):
+        put(st, 50 + i, i % 3 + 4)
+    await choose(client)
+    r = (await client.get("/feed")).json()
+    assert r["mode"] == "classifier" and r["positives"] == 11
+    assert {i["id"] for i in r["items"][:5]} == set(on)
+
+
+async def test_stubs_textless_and_foreign_papers_are_not_kept(client, st, lib):
+    lib.single_user = False
+    for i in range(4):
+        lib.add(f"ok{i}", 3, mine=True)
+    for i in range(8):
+        lib.add(f"stub{i}", 3, mine=True, stub=True)          # reference stubs
+        lib.add(f"bare{i}", 3, mine=True, has_text=False)     # nothing to embed meaningfully
+        lib.add(f"other{i}", 3)                               # somebody else's, in no project of mine
+    put(st, 1, 3)
+    await choose(client)
+    r = (await client.get("/feed")).json()
+    assert r["mode"] == "similarity" and r["positives"] == 4
 
 
 async def test_quality_auc_is_reported_from_thirty_positives(client, st, lib):

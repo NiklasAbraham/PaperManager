@@ -237,3 +237,59 @@ def test_vectors_merge_index_and_cache(st, monkeypatch):
     ids, mat = library.vectors(st, {"p3"})
     assert ids == ["p3"] and mat.shape == (1, 384)
     assert library.vectors(st, set())[1].shape == (0, 384)
+
+
+# ── a category that did not finish stays retryable ────────────────────────────
+
+def test_partially_fetched_category_is_not_marked_complete_and_is_fetched_again(st, calls, monkeypatch):
+    st.set_config("alice", config.FeedConfig(arxiv_categories=["cs.LG"], digest_days=3))
+    seen = []
+
+    def partial(cats, since, cap=None, get=None):
+        seen.append(since)
+        return [arx(1), arx(2)], "arxiv cs.LG: ReadTimeout"
+
+    monkeypatch.setattr(sources, "fetch_arxiv", partial)
+    out = run(st)
+    assert out["fetched"] == 2 and "ReadTimeout" in out["error"]
+    assert st.get_since("arxiv:cs.LG") is None
+    run(st, now=NOW + timedelta(hours=6))
+    assert seen == [NOW - timedelta(days=3), NOW + timedelta(hours=6) - timedelta(days=3)]   # reaches back as before
+    assert st.counts()["candidates"] == 2                                                     # nothing duplicated
+
+
+def test_rate_limited_category_stops_the_arxiv_run_and_nothing_is_marked_complete(st, calls, monkeypatch):
+    st.set_config("alice", config.FeedConfig(arxiv_categories=["cs.CV", "cs.LG"]))
+    asked = []
+
+    def limited(cats, since, cap=None, get=None):
+        asked.append(cats[0])
+        return [], f"arxiv {cats[0]}: HTTP 429 (rate limited)"
+
+    monkeypatch.setattr(sources, "fetch_arxiv", limited)
+    out = run(st)
+    assert asked == ["cs.CV"] and "rate limited" in out["error"]
+    assert st.get_since("arxiv:cs.CV") is None and st.get_since("arxiv:cs.LG") is None
+
+
+def test_category_cut_short_by_the_shared_cap_is_retried_but_one_that_fits_is_done(st, calls, monkeypatch):
+    monkeypatch.setenv("PAPER_FEED_MAX_PER_REFRESH", "100")
+    st.set_config("alice", config.FeedConfig(arxiv_categories=["cs.CV", "cs.LG"]))
+
+    def capped(cats, since, cap=None, get=None):
+        n = 60 if cats == ["cs.CV"] else cap              # cs.LG would fill whatever room is left
+        base = 0 if cats == ["cs.CV"] else 1000
+        return [arx(base + i) for i in range(n)], None
+
+    monkeypatch.setattr(sources, "fetch_arxiv", capped)
+    run(st)
+    assert st.get_since("arxiv:cs.CV") is not None        # 60 of 100: finished
+    assert st.get_since("arxiv:cs.LG") is None            # only 40 of room: may have more, retry next time
+
+
+def test_a_category_that_alone_fills_the_cap_is_still_marked_done(st, calls, monkeypatch):
+    monkeypatch.setenv("PAPER_FEED_MAX_PER_REFRESH", "100")
+    st.set_config("alice", config.FeedConfig(arxiv_categories=["cs.LG"]))
+    monkeypatch.setattr(sources, "fetch_arxiv", lambda cats, since, cap=None, get=None: ([arx(i) for i in range(cap)], None))
+    run(st)
+    assert st.get_since("arxiv:cs.LG") is not None        # the documented cap: otherwise it would never advance

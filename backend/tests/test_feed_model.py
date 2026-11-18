@@ -58,6 +58,16 @@ def test_quality_auc_needs_thirty_positives_and_uses_the_most_recent_as_held_out
     assert m.quality["auc"] > 0.95
 
 
+def test_held_out_auc_still_works_when_most_positives_are_weak():
+    ts = training_set(n_pos=60)
+    ts.pos_weight = np.full(60, model.KEPT_WEIGHT)
+    ts.pos_weight[:5] = 1.0
+    m = model.fit_model(ts)
+    assert m.quality["held_out"] == 12 and m.quality["auc"] > 0.95      # the 12 newest are held out
+    assert model.library_label(None, None, None, 0, kept=True) == (1, model.KEPT_WEIGHT)
+    assert model.library_label(None, None, None, 0) is None
+
+
 def test_fit_is_fast_enough_for_a_request():
     import time
 

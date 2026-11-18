@@ -11,7 +11,8 @@ import logging
 
 import numpy as np
 
-from db.queries.visibility import paper_visibility_clause
+from db.queries.visibility import paper_visibility_clause, project_visibility_clause
+from services.library_lookup import REF_TAG
 from services.feed.store import DIM, FeedStore
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,10 @@ WHERE {vis}
 RETURN p.id AS id, p.title AS title, p.doi AS doi, p.rating AS rating,
        p.bookmarked AS bookmarked, p.reading_status AS status, p.created_at AS created_at,
        size([(p)-[:HAS_ANNOTATION]->(a:Annotation) | a]) AS highlights,
-       EXISTS {{ MATCH (u:User)-[:ADDED]->(p) WHERE toLower(u.name) = toLower($feed_user) }} AS mine
+       EXISTS {{ MATCH (u:User)-[:ADDED]->(p) WHERE toLower(u.name) = toLower($feed_user) }} AS mine,
+       EXISTS {{ MATCH (p)-[:IN_PROJECT]->(pr:Project) WHERE {pvis} }} AS in_project,
+       EXISTS {{ MATCH (p)-[:TAGGED]->(:Tag {{name: $ref_tag}}) }} AS stub,
+       (trim(coalesce(p.abstract, '')) <> '' OR trim(coalesce(p.summary, '')) <> '') AS has_text
 """
 
 
@@ -30,10 +34,14 @@ def visible_papers(driver, user: str) -> tuple[list[dict], bool]:
     """Every paper ``user`` may see, with the signals the feed uses, and whether the instance
     has a single user. Rating, bookmark and reading status are stored once per paper, not per
     user, so on an instance with several users they only count for papers that user added
-    (``mine``); with one user they count for every paper."""
+    (``mine``); with one user they count for every paper. ``kept`` needs no such care: it is
+    derived per user from ``mine`` (added by this user) and ``in_project`` (a project this user
+    may see), and only for real papers (``stub`` false) with an abstract or summary (``has_text``)."""
     vis, params = paper_visibility_clause("p")
+    pvis, pparams = project_visibility_clause("pr")
     with driver.session() as s:
-        rows = [dict(r) for r in s.run(_ROWS_QUERY.format(vis=vis), feed_user=user, **params)]
+        rows = [dict(r) for r in s.run(_ROWS_QUERY.format(vis=vis, pvis=pvis), feed_user=user,
+                                        ref_tag=REF_TAG, **{**params, **pparams})]
         n_users = s.run("MATCH (u:User) RETURN count(u) AS n").single()["n"]
     return rows, n_users <= 1
 

@@ -69,21 +69,24 @@ service; this is a small local version of the same idea.
 
 1. Every new paper's title and abstract is turned into a list of numbers (an *embedding*) that places
    papers on similar topics close together.
-2. Your library teaches the feed what you like. A paper you rated 4 or 5 stars, or bookmarked, counts as a
-   clear "yes". A paper you rated 1 or 2 stars counts as a "no". A paper you read and highlighted counts as
-   a weaker "yes". Your thumbs in the feed count too.
+2. Your library teaches the feed what you like, and you do not have to rate anything for that. A real paper
+   you added yourself, or one that sits in one of your projects, counts as a mild "yes". Ratings and
+   bookmarks sharpen it: a paper you rated 4 or 5 stars, or bookmarked, is a clear "yes"; one you read and
+   highlighted is a stronger "yes" than one that is merely kept; one you rated 1 or 2 stars is a "no". A paper
+   counts once, by its strongest sign. Reference entries that only stand for a citation do not count. Your
+   thumbs in the feed count too.
 3. From these "yes" and "no" papers, plus a random sample of the feed's other papers as a stand-in for
    "everything else", the server trains a small model (a logistic regression) that scores how likely you
    are to want a new paper.
 4. The list is sorted by that score.
 
-**Few signals at first.** With fewer than 10 papers you liked there is not enough to train a model. The
+**Few signals at first.** With fewer than 10 papers you kept or liked there is not enough to train a model. The
 feed then sorts by how close each paper is to the nearest paper you liked, and with none at all it shows the
 newest first. The strip tells you which of the three modes is active.
 
 **Several people on one server.** Ratings, bookmarks and reading status are stored once per paper, not per
-person. On an instance with several users they therefore only teach the feed about papers *you added*, and
-your own thumbs in the feed always count. On an instance with a single user all of them count.
+person. On an instance with several users they therefore only teach the feed about papers *you added*. What
+you added and what sits in projects you can see always counts as your own library, and so do your thumbs in the feed. On an instance with a single user all of them count.
 
 **How good is it?** From 30 liked papers on, the strip shows a *held-out AUC*: the feed sets aside your newest
 likes, trains without them, and checks how often it ranks one of them above a random paper. 0.5 is a coin
@@ -103,6 +106,9 @@ paper up the same way pasting its link on the Library page does.)
 - *The page says the feed is switched off.* `PAPER_FEED=true` is missing on the server.
 - *Nothing shows.* Choose at least one category, then **Refresh now**. The first fetch takes a few minutes,
   because arXiv allows one request every three seconds.
+- *arXiv answered "too many requests" or timed out.* The feed waits as long as arXiv asks (30 to 120 s when it
+  does not say), keeps to one request at a time and tries again. A category that did not finish is fetched again
+  from the start at the next refresh; nothing is lost.
 - *A problem is listed under the strip.* One source failed on the last refresh (for example arXiv was
   unreachable). The other source still ran, and the next refresh tries again.
 - *The ranking looks random.* Rate a few papers. Ten likes switch the model on.

@@ -30,7 +30,7 @@ _NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas
 
 _sleep = time.sleep          # replaced in tests
 _clock = time.monotonic
-_gap_lock = threading.Lock()
+_in_flight = threading.Lock()    # one arXiv request at a time, process-wide
 _last_arxiv_request = 0.0
 
 
@@ -43,37 +43,86 @@ def _ssl_verify():
     return verify()
 
 
-def _http_get(url: str, params: dict | None = None, *, timeout: float = 30.0, retries: int = 3,
-              backoff: float = 5.0) -> httpx.Response:
-    """GET with retries (network errors, 429 and 5xx) and exponential backoff. Raises
-    ``SourceError`` when every attempt failed."""
+class RateLimited(SourceError):
+    """The server kept answering 429 (or asked for a wait longer than we are willing to give)."""
+
+
+# Waits before the next try: network errors and 5xx are usually brief, a 429 needs real patience.
+RETRY_5XX = (5.0, 10.0)
+RETRY_429 = (30.0, 60.0, 120.0)
+MAX_RETRY_AFTER = 300.0
+ARXIV_TIMEOUT = httpx.Timeout(90.0, connect=15.0)    # arXiv's API can take a minute to answer
+
+
+def _retry_after(value: str | None) -> float | None:
+    """Seconds from a Retry-After header (a number or an HTTP date), None when absent or unreadable."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        from email.utils import parsedate_to_datetime
+        when = parsedate_to_datetime(value)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+def _http_get(url: str, params: dict | None = None, *, timeout: float | httpx.Timeout = 30.0,
+              retries: int = 3, backoff: float = 5.0, rate_delays: tuple[float, ...] = RETRY_429) -> httpx.Response:
+    """GET with retries. Network errors and 5xx: up to ``retries`` tries, waiting ``backoff`` and
+    doubling. 429: waits for the Retry-After header when there is one, otherwise ``rate_delays``
+    (30, 60, 120 s), then gives up. Raises ``SourceError`` (``RateLimited`` for 429)."""
     delay = backoff
-    last: Exception | None = None
-    for attempt in range(retries):
+    failures = rate_hits = 0
+    while True:
         try:
             r = httpx.get(url, params=params, headers={"User-Agent": config.user_agent()},
                           timeout=timeout, verify=_ssl_verify(), follow_redirects=True)
-            if r.status_code in (429, 500, 502, 503, 504):
+            if r.status_code == 429:
+                raise RateLimited("HTTP 429", _retry_after(r.headers.get("Retry-After")))
+            if r.status_code in (500, 502, 503, 504):
                 raise SourceError(f"HTTP {r.status_code}")
             r.raise_for_status()
             return r
+        except RateLimited as exc:
+            asked = exc.args[1] if len(exc.args) > 1 else None
+            if rate_hits >= len(rate_delays) or (asked is not None and asked > MAX_RETRY_AFTER):
+                raise RateLimited("HTTP 429 (rate limited)") from None
+            wait = rate_delays[rate_hits] if asked is None else asked
+            rate_hits += 1
+            log.warning("Feed request rate limited (%d/%d), waiting %.0f s", rate_hits, len(rate_delays), wait)
+            _sleep(wait)
         except (httpx.HTTPError, SourceError) as exc:
-            last = exc
-            if attempt < retries - 1:
-                log.warning("Feed request failed (attempt %d/%d): %s", attempt + 1, retries, exc)
-                _sleep(delay)
-                delay *= 2
-    raise SourceError(f"{type(last).__name__}: {last}" if last else "request failed")
+            failures += 1
+            if failures >= retries:
+                raise SourceError(f"{type(exc).__name__}: {exc}") from exc
+            log.warning("Feed request failed (attempt %d/%d): %s", failures, retries, exc)
+            _sleep(delay)
+            delay *= 2
+
+
+def _arxiv_get(url: str, params: dict | None = None) -> httpx.Response:
+    return _http_get(url, params, timeout=ARXIV_TIMEOUT)
 
 
 def _wait_for_arxiv() -> None:
-    """Block until three seconds have passed since the previous arXiv request."""
+    """Block until three seconds have passed since the previous arXiv request ended."""
+    wait = ARXIV_MIN_GAP - (_clock() - _last_arxiv_request)
+    if wait > 0:
+        _sleep(wait)
+
+
+def _mark_arxiv_request() -> None:
     global _last_arxiv_request
-    with _gap_lock:
-        wait = ARXIV_MIN_GAP - (_clock() - _last_arxiv_request)
-        if wait > 0:
-            _sleep(wait)
-        _last_arxiv_request = _clock()
+    _last_arxiv_request = _clock()
+
+
+def is_rate_limited(error: str | None) -> bool:
+    return bool(error) and "HTTP 429" in error
 
 
 def _squash(text: str | None) -> str:
@@ -116,16 +165,20 @@ def fetch_arxiv(categories: list[str], since: datetime, max_results: int | None 
     """Papers of the given categories submitted at or after ``since`` (UTC), newest first
     per category, at most ``max_results`` in total (``PAPER_FEED_MAX_PER_REFRESH``)."""
     cap = max_results or config.max_per_refresh()
-    get = get or _http_get
+    get = get or _arxiv_get
     seen: dict[str, Candidate] = {}
     errors: list[str] = []
     for cat in categories:
         start = 0
         while len(seen) < cap:
-            _wait_for_arxiv()
             try:
-                r = get(ARXIV_API, {"search_query": f"cat:{cat}", "start": start, "max_results": PAGE,
-                                    "sortBy": "submittedDate", "sortOrder": "descending"})
+                with _in_flight:
+                    _wait_for_arxiv()
+                    try:
+                        r = get(ARXIV_API, {"search_query": f"cat:{cat}", "start": start, "max_results": PAGE,
+                                            "sortBy": "submittedDate", "sortOrder": "descending"})
+                    finally:
+                        _mark_arxiv_request()
                 page = parse_arxiv(r.content)
             except (SourceError, ET.ParseError) as exc:
                 errors.append(f"arxiv {cat}: {exc}")

@@ -49,9 +49,13 @@ def _entries(rows: list[dict], single_user: bool, labels: dict[str, tuple[int, s
     """(positives, negatives) as lists of (key, kind, weight, added_at). ``kind`` is 'lib' or 'feed'."""
     pos, neg = [], []
     for r in rows:
-        if not (single_user or r.get("mine")):
-            continue
-        lab = model.library_label(r.get("rating"), r.get("bookmarked"), r.get("status"), r.get("highlights"))
+        # Rating, bookmark and reading status are global: they speak for this user only on a
+        # single-user instance or for papers the user added. "Kept" is derived per user.
+        shared = single_user or r.get("mine")
+        kept = bool(not r.get("stub") and r.get("has_text") and (r.get("mine") or r.get("in_project")))
+        lab = model.library_label(
+            r.get("rating") if shared else None, r.get("bookmarked") if shared else None,
+            r.get("status") if shared else None, r.get("highlights") if shared else None, kept=kept)
         if lab is None:
             continue
         (pos if lab[0] > 0 else neg).append((r["id"], "lib", lab[1], str(r.get("created_at") or "")))
