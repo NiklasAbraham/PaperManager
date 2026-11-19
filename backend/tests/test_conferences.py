@@ -192,7 +192,7 @@ def test_topic_semantic_and_keyword(tmp_path, monkeypatch):
     ds = store.load("corl2025")
     from services.conferences import embedder
 
-    monkeypatch.setattr(embedder, "embed_query", lambda text: np.eye(3, 384, dtype=np.float32)[1])
+    monkeypatch.setattr(embedder, "conference_embed_query", lambda text: np.eye(3, 384, dtype=np.float32)[1])
     res = store.topic(ds, "legged robots", k=10)
     assert res["mode"] == "semantic" and res["papers"][0]["id"] == "p2"
     assert {x["name"] for x in res["academia"]} == {"MIT", "Stanford University"}
@@ -295,7 +295,7 @@ def three_confs(tmp_path, monkeypatch):
     _write_conf(tmp_path, "iclr2026", [_paper("c1", "Protein folding", ["Zed"], [[]], "abs")], [], [_e(0)])
     from services.conferences import embedder
 
-    monkeypatch.setattr(embedder, "embed_query", lambda text: _e(0))
+    monkeypatch.setattr(embedder, "conference_embed_query", lambda text: _e(0))
     return queued
 
 
@@ -306,7 +306,7 @@ def test_title_embedding_needed_and_backfilled(three_confs, tmp_path, monkeypatc
     assert not store.needs_title_embedding([{"t": "x", "a": "", "kw": []}])
     assert store.load("neurips2026").temb is store.load("neurips2026").emb      # titles only: same vectors
     assert store.load("iclr2026").temb is None
-    monkeypatch.setattr(embedder, "embed", lambda texts, max_length=256: np.stack([_e(1)] * len(texts)))
+    monkeypatch.setattr(embedder, "conference_embed", lambda texts, max_length=256: np.stack([_e(1)] * len(texts)))
     assert store.build_title_embeddings("iclr2026") is True
     assert store.load("iclr2026").temb is not None
     assert store.build_title_embeddings("iclr2026") is False                      # already there
@@ -415,7 +415,7 @@ def test_search_ignores_case(three_confs, monkeypatch):
         seen.append(text)
         return _e(0)
 
-    monkeypatch.setattr(embedder, "embed_query", embed)
+    monkeypatch.setattr(embedder, "conference_embed_query", embed)
 
     def strip(res):
         """Drop the echoed query and the timing, at every level."""

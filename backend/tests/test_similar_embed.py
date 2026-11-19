@@ -30,7 +30,7 @@ def local(monkeypatch):
         calls.append({"texts": list(texts), **kw})
         return np.ones((len(texts), e.DIM), np.float32) / np.sqrt(e.DIM)
 
-    monkeypatch.setattr(e, "_model", None)
+    monkeypatch.setattr(e, "ready", lambda role="library": False)
     monkeypatch.setattr(e, "embed", fake_embed)
     monkeypatch.setenv("PM_EMBED_URL", "http://127.0.0.1:1/conferences/embed")
     return calls
@@ -97,7 +97,7 @@ def test_a_backend_that_cannot_answer_falls_back_to_the_local_model(local, monke
 def test_a_loaded_model_is_never_bypassed(local, monkeypatch):
     import httpx
 
-    monkeypatch.setattr(e, "_model", object())
+    monkeypatch.setattr(e, "ready", lambda role="library": True)
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("no remote call expected"))
     e.embed_search_text(LONG)
     assert len(local) == 1

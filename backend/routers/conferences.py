@@ -139,6 +139,9 @@ class EmbedBody(BaseModel):
     # document prefix, the index's token limit. False (the default): as given, a query that
     # the caller has prefixed already.
     document: bool = False
+    # "library" (default) embeds with EMBED_MODEL; "conference" with the explorer's model
+    # (CONFERENCE_EMBED_MODEL first), for the MCP server's conference tools.
+    role: str = "library"
 
 
 @router.post("/embed")
@@ -153,11 +156,14 @@ def embed_text(body: EmbedBody):
     ``def``: it runs in the threadpool, and the tokenizer lock serialises it with a build."""
     from services.conferences import embedder
 
-    if not embedder.ready():
+    conference = body.role == embedder.ROLE_CONFERENCE
+    if not (embedder.conference_ready() if conference else embedder.ready()):
         raise HTTPException(status_code=503, detail="embedding model not loaded yet")
-    vec = embedder.embed([body.text[:4000] or " "],
-                         max_length=embedder.DOC_MAX_LENGTH if body.document else 512)[0]
-    return {"model": embedder.MODEL, "dim": int(vec.shape[0]), "vector": [round(float(x), 7) for x in vec]}
+    embed = embedder.conference_embed if conference else embedder.embed
+    vec = embed([body.text[:4000] or " "], max_length=embedder.DOC_MAX_LENGTH if body.document else 512)[0]
+    role = embedder.ROLE_CONFERENCE if conference else embedder.ROLE_LIBRARY
+    return {"model": embedder.spec(role).model,
+            "dim": int(vec.shape[0]), "vector": [round(float(x), 7) for x in vec]}
 
 
 @router.get("/{key}/status")

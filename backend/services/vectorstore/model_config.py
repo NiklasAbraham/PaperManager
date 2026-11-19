@@ -13,6 +13,13 @@ Environment (all optional; the defaults are the long-standing bge-small setup):
     EMBED_QUERY_PREFIX   text put in front of a short query
     EMBED_DOC_PREFIX     text put in front of every embedded document
 
+    CONFERENCE_EMBED_MODEL   the conference explorer's model. When set it is read *first* by the
+                             explorer (``current_conference()``) and EMBED_MODEL is used only if it
+                             is unset, so the library can move to another model while the
+                             explorer's saved vectors stay valid. If it names a model other than
+                             EMBED_MODEL, dimension, pooling and prefixes come from ``KNOWN`` or
+                             from CONFERENCE_EMBED_DIM / _POOLING / _QUERY_PREFIX / _DOC_PREFIX.
+
 An empty variable counts as unset (compose files pass empty strings through).
 """
 from __future__ import annotations
@@ -40,6 +47,8 @@ KNOWN: dict[str, tuple[int, str, str, str]] = {
     "sentence-transformers/all-MiniLM-L6-v2": (384, "mean", "", ""),
     "sentence-transformers/all-mpnet-base-v2": (768, "mean", "", ""),
     "allenai/specter2_base": (768, "cls", "", ""),
+    # ModernBERT-base fine-tuned for scientific text (MIT); loads without trust_remote_code.
+    "J0nasW/sciembed-full": (768, "mean", "", ""),
 }
 
 
@@ -75,29 +84,47 @@ def _env(name: str) -> str:
     return os.environ.get(name, "").strip()
 
 
-def current() -> ModelSpec:
-    """The configured model, read from the environment on every call (cheap)."""
-    model = _env("EMBED_MODEL") or _env("CONFERENCE_EMBED_MODEL") or DEFAULT_MODEL
+def _spec_for(model: str, prefix: str) -> ModelSpec:
+    """The spec of ``model`` with its settings read from ``<prefix>DIM``, ``<prefix>POOLING``,
+    ``<prefix>QUERY_PREFIX`` and ``<prefix>DOC_PREFIX`` (``EMBED_`` for the main model)."""
     known = KNOWN.get(model)
-    raw_dim = _env("EMBED_DIM")
+    raw_dim = _env(prefix + "DIM")
     try:
         dim = int(raw_dim) if raw_dim else (known[0] if known else 0)
     except ValueError as exc:
-        raise ModelConfigError(f"EMBED_DIM must be an integer, got {raw_dim!r}") from exc
+        raise ModelConfigError(f"{prefix}DIM must be an integer, got {raw_dim!r}") from exc
     if dim <= 0:
-        raise ModelConfigError(f"EMBED_DIM is required for the embedding model {model!r} (not in the known list)")
-    pooling = (_env("EMBED_POOLING") or (known[1] if known else "mean")).lower()
+        raise ModelConfigError(f"{prefix}DIM is required for the embedding model {model!r} (not in the known list)")
+    pooling = (_env(prefix + "POOLING") or (known[1] if known else "mean")).lower()
     if pooling not in ("cls", "mean"):
-        raise ModelConfigError(f"EMBED_POOLING must be 'cls' or 'mean', got {pooling!r}")
+        raise ModelConfigError(f"{prefix}POOLING must be 'cls' or 'mean', got {pooling!r}")
     return ModelSpec(
         model=model, dim=dim, pooling=pooling,
-        query_prefix=os.environ.get("EMBED_QUERY_PREFIX") or (known[2] if known else ""),
-        doc_prefix=os.environ.get("EMBED_DOC_PREFIX") or (known[3] if known else ""),
+        query_prefix=os.environ.get(prefix + "QUERY_PREFIX") or (known[2] if known else ""),
+        doc_prefix=os.environ.get(prefix + "DOC_PREFIX") or (known[3] if known else ""),
     )
+
+
+def current() -> ModelSpec:
+    """The configured model, read from the environment on every call (cheap)."""
+    model = _env("EMBED_MODEL") or _env("CONFERENCE_EMBED_MODEL") or DEFAULT_MODEL
+    return _spec_for(model, "EMBED_")
+
+
+def current_conference() -> ModelSpec:
+    """The conference explorer's model: ``CONFERENCE_EMBED_MODEL`` first, ``EMBED_MODEL`` only if it
+    is unset, else the default. With neither set (or both naming one model) it equals ``current()``."""
+    main = current()
+    model = _env("CONFERENCE_EMBED_MODEL") or main.model
+    return main if model == main.model else _spec_for(model, "CONFERENCE_EMBED_")
 
 
 def dim() -> int:
     return current().dim
+
+
+def conference_dim() -> int:
+    return current_conference().dim
 
 
 def legacy_model() -> str:

@@ -255,7 +255,7 @@ def warm() -> None:
         if any(ds.emb is not None for ds in ix.dss):
             from services.conferences import embedder
 
-            embedder.embed_query("warm up")
+            embedder.conference_embed_query("warm up")
     except Exception as exc:  # noqa: BLE001
         log.warning("conference search warm-up failed: %s", exc)
 
@@ -349,7 +349,7 @@ def _embed(text: str) -> np.ndarray | None:
     try:
         # bge-small's tokenizer lowercases anyway; doing it here keeps case irrelevant
         # whatever the model.
-        return embedder.embed_query(text.lower())
+        return embedder.conference_embed_query(text.lower())
     except Exception as exc:  # noqa: BLE001
         log.warning("conference search: query embedding failed (%s)", exc)
         return None

@@ -138,7 +138,7 @@ class _Resp:
 def embedder(monkeypatch):
     from services.conferences import embedder as e
 
-    monkeypatch.setattr(e, "_model", None)
+    monkeypatch.setattr(e, "ready", lambda role="library": False)
     monkeypatch.setenv("PM_EMBED_URL", "http://127.0.0.1:1/conferences/embed")
     local = []
     monkeypatch.setattr(e, "embed", lambda texts, **kw: local.append(texts) or np.ones((len(texts), e.DIM), np.float32))
@@ -221,11 +221,11 @@ async def test_embed_route(monkeypatch):
     from main import app
     from services.conferences import embedder as e
 
-    monkeypatch.setattr(e, "_model", None)
+    monkeypatch.setattr(e, "ready", lambda role="library": False)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post("/conferences/embed", json={"text": "x"})
         assert r.status_code == 503
-        monkeypatch.setattr(e, "_model", object())
+        monkeypatch.setattr(e, "ready", lambda role="library": True)
         monkeypatch.setattr(e, "embed", lambda texts, **kw: np.full((len(texts), e.DIM), 0.25, np.float32))
         r = await c.post("/conferences/embed", json={"text": "Represent this: x"})
     assert r.status_code == 200

@@ -225,13 +225,13 @@ def build(key: str) -> None:
 
     prog(0, len(papers))
     try:
-        emb = embedder.embed([_embed_text(p) for p in papers], progress=prog)
-        protos = area_mod.prototypes(lambda xs: embedder.embed(xs, max_length=64))
+        emb = embedder.conference_embed([_embed_text(p) for p in papers], progress=prog)
+        protos = area_mod.prototypes(lambda xs: embedder.conference_embed(xs, max_length=64))
         temb = None
         if needs_title_embedding(papers):
             _set_status(key, "embedding", progress=1.0, message=f"Embedding {len(papers)} titles",
                         papers=len(papers))
-            temb = embedder.embed([p["t"] for p in papers], max_length=64)
+            temb = embedder.conference_embed([p["t"] for p in papers], max_length=64)
     except Exception as exc:  # noqa: BLE001
         log.exception("conference %s: embedding failed", key)
         _set_status(key, "partial", message=f"Institutions ready; topic search unavailable ({exc})",
@@ -302,7 +302,7 @@ def build_title_embeddings(key: str) -> bool:
     from services.conferences import embedder
 
     t0 = time.time()
-    temb = embedder.embed([p["t"] for p in ds.papers], max_length=64)
+    temb = embedder.conference_embed([p["t"] for p in ds.papers], max_length=64)
     tmp = path.with_name("emb_title.tmp.npy")
     np.save(tmp, temb.astype(np.float16))
     tmp.replace(path)
@@ -480,8 +480,8 @@ def load(key: str) -> Dataset | None:
     emb = None
     if raw.get("areas_ready") and emb_path.exists():
         emb = np.load(emb_path).astype(np.float32)
-        # Vectors of another embedding model (EMBED_MODEL changed) cannot meet today's queries.
-        if len(emb) != len(raw["papers"]) or emb.ndim != 2 or emb.shape[1] != model_config.dim():
+        # Vectors of another embedding model (the conference model changed) cannot meet today's queries.
+        if len(emb) != len(raw["papers"]) or emb.ndim != 2 or emb.shape[1] != model_config.conference_dim():
             emb = None
     temb = None
     if emb is not None and tpath.exists():
@@ -489,7 +489,7 @@ def load(key: str) -> Dataset | None:
             temb = np.load(tpath).astype(np.float32)
         except (OSError, ValueError):
             temb = None
-        if temb is not None and (len(temb) != len(raw["papers"]) or temb.shape[1:] != (model_config.dim(),)):
+        if temb is not None and (len(temb) != len(raw["papers"]) or temb.shape[1:] != (model_config.conference_dim(),)):
             temb = None
     ds = Dataset(raw, emb, temb)
     with _cache_lock:
@@ -675,7 +675,7 @@ def topic(ds: Dataset, text: str, k: int = 100, library: dict | None = None, sec
         from services.conferences import embedder
 
         try:
-            q = embedder.embed_query(text)
+            q = embedder.conference_embed_query(text)
             sims = ds.emb @ q
         except Exception as exc:  # noqa: BLE001
             log.warning("conference %s: query embedding failed (%s); keyword fallback", ds.key, exc)
