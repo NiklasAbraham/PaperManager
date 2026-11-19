@@ -117,6 +117,7 @@ This means every capability is available both via HTTP (for the browser) and via
 | `system_health.py`, `heartbeat.py` | Health checks with per-check caches; heartbeats from background threads |
 | `library_search/` | Ranked library search (`query.py`, `engine.py`, `ranking.py`) and its result cache (`cache.py`) |
 | `cypher_result.py` | Turns a Cypher result into table rows plus graph nodes and links (`POST /graph/query`) |
+| `vectorstore/` | Vector store for library semantic search and the paper feed: namespaces with a manifest (model, dimension), atomic rebuild when the embedding model changes, numpy backend by default, optional LanceDB |
 | `conferences/` | Conference explorer: catalog, source fetchers, institution normalisation, area taxonomy, bge-small embedder, on-disk store and build worker |
 
 ### db/queries/

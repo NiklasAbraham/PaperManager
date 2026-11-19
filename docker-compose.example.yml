@@ -81,6 +81,10 @@ services:
       - PAPER_FEED=${PAPER_FEED:-false}
       - PAPER_FEED_INTERVAL=${PAPER_FEED_INTERVAL:-21600}
       - PAPER_FEED_CONTACT=${PAPER_FEED_CONTACT:-}
+      # Vector store and embedding model (.specs/019_vector_store.md); data on backend_data:/data.
+      - VECTOR_STORE=${VECTOR_STORE:-exact}
+      - EMBED_MODEL=${EMBED_MODEL:-}
+      - EMBED_DIM=${EMBED_DIM:-}
       - HOST_IMPORT_ROOT=${HOST_IMPORT_ROOT:-/srv/papers}
     depends_on:
       - neo4j

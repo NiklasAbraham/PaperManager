@@ -50,7 +50,8 @@ SQLite, not Neo4j: candidates are ephemeral and numerous, and the Aura free tier
 
 - `candidate(id TEXT PK, source, ext_id, title, authors, abstract, published, url, doi, categories,
   fetched_at, emb BLOB)` — `id` = `arxiv:<id>` / `biorxiv:<doi>` / `medrxiv:<doi>` (medRxiv keeps its own prefix); unique on (source, ext_id). Ids may contain `/`.
-  `emb` is 384 float32 (unit vector).
+  `emb` is the old place of the 384 float32 unit vector: since the vector store (`.specs/019_vector_store.md`) the
+  vectors live in its `feed` namespace; existing blobs are migrated once and left in place, new ones are not written.
 - `label(user, candidate_id, value INTEGER, created_at)` — value 1 (up) / -1 (down) / 0 (dismissed).
   Primary key (user, candidate_id).
 - `config(user PK, json)` — per-user FeedConfig.
@@ -61,7 +62,8 @@ SQLite, not Neo4j: candidates are ephemeral and numerous, and the Aura free tier
   per-refresh cap (a category that alone fills the whole cap is advanced, or it would never move on); anything
   else, including a category that failed on a later page, is retried whole. (Added: needed so a category chosen
   later is back-filled and a failure loses nothing.)
-- `library_emb(paper_id PK, hash, emb)` — vectors of library papers the library search index lacks (see Model).
+- `library_emb(paper_id PK, hash, emb)` — old place of the vectors of library papers the library search index
+  lacks (see Model); now the vector store's `feed_library` namespace, migrated the same way.
 
 Candidates older than `PAPER_FEED_RETENTION_DAYS` (default 30) are deleted unless a user rated
 them. Papers added to the library are linked by `library_paper_id` at read time, not stored.

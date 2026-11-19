@@ -164,7 +164,7 @@ Developer context for working on the code (also used by coding agents) lives in 
 [MCP server](.specs/008_mcp_server.md), [conference explorer](.specs/011_conferences.md),
 [search](.specs/012_search.md), [tokens](.specs/013_tokens.md), [reports](.specs/014_reports.md),
 [suggestions](.specs/015_suggestions.md), [health](.specs/016_health.md),
-[paper feed](.specs/018_paper_feed.md).
+[paper feed](.specs/018_paper_feed.md), [vector store](.specs/019_vector_store.md).
 
 ---
 

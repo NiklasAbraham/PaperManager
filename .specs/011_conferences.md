@@ -10,7 +10,7 @@ backend/services/conferences/
   sources.py       fetch(edition) -> rows in one shape (miniconf feed or Paper Copilot list)
   institutions.py  split_and_normalise(raw) -> [(canonical name, "A"|"I")], ALIASES table
   areas.py         AREAS taxonomy (24), prototypes(embed_fn), assign(emb, protos)
-  embedder.py      bge-small-en-v1.5 via transformers on CPU; embed(texts), embed_query(text)
+  embedder.py      embedding model via transformers on CPU (default bge-small-en-v1.5, set by EMBED_MODEL, see 019_vector_store.md); embed(texts), embed_query(text)
   store.py         build(key), worker queue, start_auto_build(), load(key) -> Dataset, queries
   search.py        one index over all loaded datasets: search_papers, search_authors, topic
 backend/routers/conferences.py      /conferences/* HTTP API

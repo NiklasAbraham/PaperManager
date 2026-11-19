@@ -87,6 +87,7 @@ backend/
 │   ├── usage/               # Token ledger: SDK hooks, SQLite store, price table
 │   ├── reports/             # Report pipeline, retrieval, rendering, job runner
 │   ├── library_search/      # Ranked search engine, query parser, ranking, result cache
+│   ├── vectorstore/         # Embedding vectors: namespaces, manifest, exact + optional LanceDB backend
 │   ├── cypher_result.py     # Cypher result -> table rows + graph nodes/links
 │   ├── suggestions.py       # Chat suggestion filter and recording
 │   ├── system_health.py     # Health checks (cached per check)
@@ -152,7 +153,7 @@ Runs on startup. Creates:
 - **Uniqueness constraints** on: `Paper.id`, `Person.id`, `Topic.id`, `Topic.name`, `Tag.id`, `Tag.name`, `Note.id`, `Project.id`, `Figure.id`, `Annotation.id`, `Blog.id`, `BlogPost.id`, `User.id`, `User.name`, `Claim.id`, `Table.id`, `Conversation.id`, `Message.id`, `Venue.id`, `Report.id`, `Suggestion.id`
 - **Fulltext indexes**: `paper_search` (title, abstract, summary), `note_search` (content), `annotation_search` (highlighted_text, note), `claim_search` (text), `entity_name_search` (Person/Topic/Tag/Project name), `paper_text_search` (venue, raw_text) with the `standard-folding` analyzer (rebuilt at startup if their analyzer or fields differ; see `.specs/012_search.md`), and `message_search` (content)
 - **Range indexes** on `Paper.created_at`, `Paper.year` and `Paper.updated_at` (`paper_created_at`, `paper_year`, `paper_updated_at`), for the date, year and sort filters of the Library
-- **Vector index**: `paper_embeddings` on `Paper.embedding` (768-dim cosine, nomic-embed-text)
+- **Vector index**: `paper_embeddings` on `Paper.embedding` (768-dim cosine, nomic-embed-text); not used by library search, which keeps its vectors in the vector store (`services/vectorstore/`, `.specs/019_vector_store.md`)
 
 ---
 
@@ -180,6 +181,7 @@ Runs on startup. Creates:
 | `suggestions.py` | `SuggestionFilter` strips `<suggestion>` from the chat stream and records it, merging duplicates |
 | `system_health.py` | Parallel health checks with per-check cache TTLs; `heartbeat.py` records sweeper beats |
 | `library_search/cache.py` | 60 s in-process cache of ranked results per user, cleared by any non-GET request |
+| `vectorstore/` | Vector store behind library semantic search and the paper feed (see `.specs/019_vector_store.md`): one namespace per index, each with a manifest naming its embedding model and dimension, so vectors of two models are never mixed; a new model is built next to the old one and swapped in atomically; default backend is numpy on a memory-mapped file plus SQLite, LanceDB is optional (`VECTOR_STORE=lance`); `model_config.py` is the one place for `EMBED_MODEL` |
 | `conferences/` | Conference explorer (see `.specs/011_conferences.md`): `catalog.py` conference-years and sources, `sources.py` miniconf + Paper Copilot fetchers, `institutions.py` name normalisation and academia / industry, `areas.py` the 24-area taxonomy and zero-shot assignment, `embedder.py` bge-small-en-v1.5 on CPU, `store.py` build worker, on-disk datasets under `/data/conferences`, queries |
 
 ---

@@ -173,12 +173,16 @@ no indexOf) and returns only 1,400 characters around it.
 
 ## Semantic and hybrid (`semantic.py`)
 
-- Model: the conference explorer's BAAI/bge-small-en-v1.5 (`services/conferences/embedder.py`,
-  384-dim unit vectors, CPU, query instruction prefix for short queries).
+- Model: by default the conference explorer's BAAI/bge-small-en-v1.5 (`services/conferences/embedder.py`,
+  384-dim unit vectors, CPU, query instruction prefix for short queries); configurable with `EMBED_MODEL`.
 - Text per paper: title + abstract (else the cleaned summary), first 1,500 characters.
-- Store: `<LIBRARY_SEARCH_DIR or /data/library_search>/emb.npy` (float32, N × 384) and
-  `meta.json` (`model`, `ids`, `hashes` = sha1 of each embedded text). Written atomically
-  (temp file + rename), every 2,048 new vectors during a build.
+- Store: the `library` namespace of the vector store (`services/vectorstore`, `.specs/019_vector_store.md`):
+  one vector per paper with `hash` (sha1 of the embedded text) in its metadata, every batch committed
+  atomically. The old `<LIBRARY_SEARCH_DIR or /data/library_search>/emb.npy` + `meta.json` are migrated once
+  without re-embedding and are still rewritten after a sync that changed something (the topic map reads
+  them; `VECTOR_STORE_LEGACY_EXPORT=0` stops it). The model and dimension come from `EMBED_MODEL`
+  (`services/vectorstore/model_config.py`); a store built with another model is stale: it is rebuilt in the
+  background and the search answers lexically until the new one is swapped in.
 - A daemon thread started in the FastAPI lifespan loads the file, loads the model, then syncs
   every `LIBRARY_SEMANTIC_INTERVAL` s (600): new papers and papers whose text hash changed are
   embedded, deleted ones dropped. First build on production: 8,698 papers in 214 s on four CPU
