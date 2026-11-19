@@ -492,6 +492,7 @@ POST /search/similar
 | `POST` | `/backfill/topics` | Bulk AI topic assignment |
 | `POST` | `/backfill/summary` | Bulk AI summarisation |
 | `POST` | `/backfill/figures` | Bulk figure extraction |
+| `POST` | `/backfill/abstracts` | Fill missing abstracts by DOI (dry run unless `dry_run: false`); admin only. See [Abstract backfill](../user-guide/abstract-backfill.md) |
 
 ---
 

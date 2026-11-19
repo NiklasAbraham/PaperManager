@@ -25,6 +25,7 @@ It is built for a single primary user with optional teammate/multi-user support.
 | Conference explorer | NeurIPS / ICML / ICLR / CVPR / ACL / ... by institution and by topic; data on disk, bge-small embeddings on CPU (`.specs/011_conferences.md`) |
 | Paper feed | Optional (`PAPER_FEED`, off by default): daily digest of new arXiv / bioRxiv / medRxiv papers, ranked per user by a numpy logistic regression on the library's signals (`.specs/018_paper_feed.md`) |
 | Similar papers | Write or paste an abstract (also one for a paper that does not exist yet) and get the nearest papers of the library and the feed with cosine scores; page `/similar`, `POST /search/similar`, MCP tools `find_similar_papers` and `papers_like` (`.specs/020_similar_search.md`) |
+| Abstract backfill | Admin tool and CLI that fill missing abstracts of papers that have a DOI from OpenAlex, Semantic Scholar, arXiv and Crossref, with a title check, dry run by default and an undo (`.specs/021_abstract_backfill.md`) |
 | MCP server | Claude Desktop integration — search, chat, annotate from Claude |
 | Export | BibTeX, JSON |
 | Auth | JWT-based login, admin-managed users, rate limiting |

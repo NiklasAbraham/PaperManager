@@ -109,6 +109,7 @@ nav:
     - Suggestions: user-guide/suggestions.md
     - Health: user-guide/health.md
     - Switching the embedding model: user-guide/switching-the-embedding-model.md
+    - Fill missing abstracts: user-guide/abstract-backfill.md
   - Technical reference:
     - Architecture: technical/architecture.md
     - Backend: technical/backend.md
