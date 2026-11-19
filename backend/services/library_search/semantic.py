@@ -1,13 +1,18 @@
 """Embedding index of the library for semantic and hybrid search.
 
 Every Paper's title plus abstract (or, failing that, its AI summary) is embedded with the
-conference explorer's BAAI/bge-small-en-v1.5 model (services.conferences.embedder, 384-dim
-unit vectors, CPU) into ``<dir>/emb.npy`` with the paper ids and a hash of each embedded
-text in ``<dir>/meta.json``. ``<dir>`` is ``LIBRARY_SEARCH_DIR`` or ``/data/library_search``.
+configured embedding model (services.vectorstore.model_config, services.conferences.embedder;
+by default BAAI/bge-small-en-v1.5, 384-dim unit vectors, CPU) into the ``library`` namespace of
+the vector store (services.vectorstore), each vector with a hash of its text. Index files from
+before the vector store (``<dir>/emb.npy`` + ``meta.json``, ``<dir>`` = ``LIBRARY_SEARCH_DIR`` or
+``/data/library_search``) are migrated once without re-embedding, and are still rewritten after
+each sync that changed something (``VECTOR_STORE_LEGACY_EXPORT=0`` stops that) because the topic
+map reads them. A store built with another model than the configured one is *stale*: it is
+rebuilt in the background and search answers lexically until it is done.
 
-A daemon thread started at backend startup loads the file, then syncs every
+A daemon thread started at backend startup opens the store, then syncs every
 ``LIBRARY_SEMANTIC_INTERVAL`` seconds (default 600): papers that are new or whose text
-changed are embedded, deleted papers are dropped, the file is rewritten atomically. Nothing
+changed are embedded, deleted papers are dropped; every batch is committed atomically. Nothing
 here runs in a request except ``query()``, which never loads the model: until the builder
 thread has loaded it, semantic search reports ``state`` and returns no hits, and the search
 falls back to lexical.
@@ -25,26 +30,27 @@ from pathlib import Path
 
 import numpy as np
 
+from services import vectorstore
+from services.vectorstore import migrate, model_config
+from services.vectorstore.base import now_iso
+
 log = logging.getLogger(__name__)
 
-DIM = 384
 _TEXT_MAX = 1500
 _CHUNK = 256
-_SAVE_EVERY = 2048
 # A semantic hit must reach MIN_SIM and lie within REL_SIM of the best hit; at most MAX_HITS.
 MIN_SIM = float(os.environ.get("LIBRARY_SEMANTIC_MIN_SIM", "0.62"))
 REL_SIM = float(os.environ.get("LIBRARY_SEMANTIC_REL_SIM", "0.12"))
 MAX_HITS = 100
 
-_lock = threading.RLock()       # guards the arrays below
+_lock = threading.RLock()       # guards _state
 _sync_lock = threading.Lock()   # one sync at a time
-_ids: list[str] = []
-_hashes: list[str] = []
-_emb = np.zeros((0, DIM), dtype=np.float32)
 _state: dict = {"state": "idle", "done": 0, "todo": 0, "papers": 0, "error": None,
                 "last_sync": None, "last_build_seconds": None}
 _thread: threading.Thread | None = None
 _dir: Path | None = None
+_follow_store = None            # set in a process without the sync thread (MCP): reads what the backend writes
+_warned_open = False
 
 
 def enabled() -> bool:
@@ -69,11 +75,6 @@ def data_dir() -> Path:
     raise RuntimeError("No writable directory for the library search index")
 
 
-def _model_name() -> str:
-    from services.conferences.embedder import MODEL
-    return MODEL
-
-
 def paper_text(title: str | None, abstract: str | None, summary: str | None) -> str:
     """The text a paper is embedded by: its title, then the abstract or the summary."""
     from services.library_search.query import clean
@@ -89,7 +90,8 @@ def text_hash(text: str) -> str:
 def status() -> dict:
     with _lock:
         out = dict(_state)
-        out["indexed"] = len(_ids)
+    st = _peek() if enabled() else None
+    out["indexed"] = st.count() if st is not None and not st.is_stale() else 0
     out["enabled"] = enabled()
     try:
         from services.conferences.embedder import ready
@@ -99,34 +101,59 @@ def status() -> dict:
     return out
 
 
-# ── disk ──────────────────────────────────────────────────────────────────────
+# ── the vector store ──────────────────────────────────────────────────────────
+
+def _peek():
+    """The library namespace if it has been built, else None. Never creates anything and never
+    raises: a request must not fail because the store is unavailable."""
+    global _warned_open
+    fs = _follow_store
+    if fs is not None and not fs.closed:
+        return fs
+    try:
+        return vectorstore.get_store("library", create=False)
+    except Exception as exc:  # noqa: BLE001
+        if not _warned_open:
+            _warned_open = True
+            log.warning("Library vector store unavailable: %s", exc)
+        return None
+
+
+def snapshot() -> tuple[list[str], np.ndarray]:
+    """Every indexed paper id with its vector (a copy); empty while the store is missing or stale.
+    For the paper feed, which compares candidates with the whole library."""
+    st = _peek()
+    if st is None or st.is_stale():
+        return [], np.zeros((0, model_config.dim()), dtype=np.float32)
+    return st.all_vectors()
+
 
 def _load() -> None:
-    global _ids, _hashes, _emb
-    d = data_dir()
-    meta_p, emb_p = d / "meta.json", d / "emb.npy"
-    if not meta_p.exists() or not emb_p.exists():
-        return
+    """Open the library namespace, building it from the old emb.npy/meta.json the first time
+    (no re-embedding). Runs in the sync thread."""
     try:
-        meta = json.loads(meta_p.read_text())
-        emb = np.load(emb_p)
-        if meta.get("model") != _model_name() or emb.shape != (len(meta["ids"]), DIM):
-            log.info("Library embedding file is for another model or damaged; rebuilding")
-            return
-        with _lock:
-            _ids, _hashes, _emb = list(meta["ids"]), list(meta["hashes"]), emb.astype(np.float32)
-        log.info("Library embeddings loaded: %d papers", len(_ids))
+        migrate.migrate_library(data_dir(), model_config.current())
+        st = vectorstore.get_store("library")
+        if st.is_stale():
+            log.info("Library vectors were built with another embedding model; rebuilding")
+        else:
+            log.info("Library embeddings loaded: %d papers", st.count())
     except Exception as exc:  # noqa: BLE001
-        log.warning("Could not read the library embeddings (%s); rebuilding", exc)
+        log.warning("Could not open the library vector store (%s)", exc)
 
 
-def _save() -> None:
+def _export_legacy(st, spec) -> None:
+    """Rewrite emb.npy + meta.json from the store (atomic), for readers of the old files such as
+    the topic map. ``VECTOR_STORE_LEGACY_EXPORT=0`` turns it off."""
+    if os.environ.get("VECTOR_STORE_LEGACY_EXPORT", "1").strip().lower() in ("0", "false", "no", "off"):
+        return
     d = data_dir()
-    with _lock:
-        ids, hashes, emb = list(_ids), list(_hashes), _emb.copy()
+    ids, emb = st.all_vectors()
+    meta = st.metadata(ids)
     tmp_emb, tmp_meta = d / "emb.tmp.npy", d / "meta.tmp.json"
     np.save(tmp_emb, emb)
-    tmp_meta.write_text(json.dumps({"model": _model_name(), "dim": DIM, "ids": ids, "hashes": hashes,
+    tmp_meta.write_text(json.dumps({"model": spec.model, "dim": spec.dim, "ids": ids,
+                                    "hashes": [meta.get(i, {}).get("hash", "") for i in ids],
                                     "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
     os.replace(tmp_emb, d / "emb.npy")
     os.replace(tmp_meta, d / "meta.json")
@@ -141,10 +168,21 @@ def _fetch_texts(driver) -> dict[str, str]:
             "p.summary AS summary")}
 
 
+def _embed_into(target, todo: list[str], texts: dict[str, str], want: dict[str, str], embed) -> None:
+    """Embed ``todo`` in chunks and upsert each chunk (a store or a rebuild) as it is done."""
+    stamp = now_iso()
+    for s in range(0, len(todo), _CHUNK):
+        chunk = todo[s:s + _CHUNK]
+        vecs = embed([texts[pid] for pid in chunk])
+        target.upsert(chunk, vecs, [{"kind": "paper", "source": "library", "hash": want[pid], "added_at": stamp}
+                                    for pid in chunk])
+        with _lock:
+            _state["done"] = s + len(chunk)
+
+
 def sync(driver=None) -> dict:
     """Bring the index in line with the library: embed new and changed papers, drop
     deleted ones. Returns counts. Safe to call from any thread; concurrent calls skip."""
-    global _ids, _hashes, _emb
     if not _sync_lock.acquire(blocking=False):
         return {"skipped": True}
     try:
@@ -154,35 +192,41 @@ def sync(driver=None) -> dict:
             from db.connection import get_driver
             driver = get_driver()
         t0 = time.perf_counter()
+        spec = model_config.current()
+        st = vectorstore.get_store("library")
+        if not st.is_stale(spec) and st.backend_mismatch():
+            st.convert_backend()          # VECTOR_STORE changed: copy into the configured backend
         texts = _fetch_texts(driver)
         want = {pid: text_hash(t) for pid, t in texts.items()}
-        with _lock:
-            keep = [i for i, (pid, h) in enumerate(zip(_ids, _hashes)) if want.get(pid) == h]
-            removed = len(_ids) - len(keep)
-            if removed:
-                _ids = [_ids[i] for i in keep]
-                _hashes = [_hashes[i] for i in keep]
-                _emb = _emb[keep]
-            have = set(_ids)
-        todo = [pid for pid in texts if pid not in have]
-        with _lock:
-            _state.update(state="building" if todo else "ready", done=0, todo=len(todo),
-                          papers=len(texts), error=None)
-        unsaved = removed
-        for s in range(0, len(todo), _CHUNK):
-            chunk = todo[s:s + _CHUNK]
-            vecs = embed([texts[pid] for pid in chunk])
+        if st.is_stale(spec):
+            # Another embedding model than the one the store was built with: fill a new
+            # generation next to the old one and swap it in when complete (no mixed spaces).
+            log.info("Library embeddings: rebuilding for %s (%d dims)", spec.model, spec.dim)
+            todo, removed = list(texts), 0
             with _lock:
-                _ids = _ids + chunk
-                _hashes = _hashes + [want[pid] for pid in chunk]
-                _emb = np.vstack([_emb, vecs]) if len(_emb) else vecs
-                _state["done"] = s + len(chunk)
-            unsaved += len(chunk)
-            if unsaved >= _SAVE_EVERY:
-                _save()
-                unsaved = 0
-        if unsaved or not (data_dir() / "emb.npy").exists():
-            _save()
+                _state.update(state="building" if todo else "ready", done=0, todo=len(todo),
+                              papers=len(texts), error=None)
+            rb = st.begin_rebuild(spec)
+            try:
+                _embed_into(rb, todo, texts, want, embed)
+                rb.commit()
+            except BaseException:
+                rb.abort()
+                raise
+        else:
+            have = st.metadata()
+            gone = [pid for pid in have if pid not in want]
+            changed = {pid for pid, m in have.items() if pid in want and m.get("hash") != want[pid]}
+            removed = len(gone) + len(changed)
+            if gone:
+                st.delete(gone)
+            todo = [pid for pid in texts if pid not in have or pid in changed]
+            with _lock:
+                _state.update(state="building" if todo else "ready", done=0, todo=len(todo),
+                              papers=len(texts), error=None)
+            _embed_into(st, todo, texts, want, embed)
+        if todo or removed or not (data_dir() / "emb.npy").exists():
+            _export_legacy(st, spec)
         took = round(time.perf_counter() - t0, 1)
         with _lock:
             _state.update(state="ready", last_sync=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
@@ -218,22 +262,29 @@ def _loop(interval: float) -> None:
 
 
 def ensure_loaded() -> bool:
-    """For processes without the sync thread (the MCP server): read the index file and, unless
-    PM_EMBED_URL lets the backend embed the queries, load the model. Blocks for a few seconds
-    once in that case; never call it in a web request."""
+    """For processes without the sync thread (the MCP server): open the index the backend
+    writes (read-only, following its changes) and, unless PM_EMBED_URL lets the backend embed
+    the queries, load the model. Blocks for a few seconds once in that case; never call it in a
+    web request."""
+    global _follow_store
     if not enabled():
         return False
-    with _lock:
-        have = bool(_ids)
-    if not have:
-        _load()
+    st = _follow_store if _follow_store is not None and not _follow_store.closed else None
+    if st is None:
+        try:
+            st = vectorstore.get_store("library", create=False, follow=True)
+            if st is None:  # the backend has not migrated the old files yet: do it here, once
+                migrate.migrate_library(data_dir(), model_config.current())
+                st = vectorstore.get_store("library", create=False, follow=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Library index not opened: %s", exc)
+        _follow_store = st
     from services.conferences.embedder import embed, ready, remote_url
     # With PM_EMBED_URL the backend embeds the queries (query() falls back to a local
     # load if it cannot), so the model is not loaded here up front.
     if not ready() and not remote_url():
         embed(["warm up"])
-    with _lock:
-        return bool(_ids)
+    return bool(st is not None and not st.is_stale() and st.count())
 
 
 def start_background() -> None:
@@ -257,16 +308,15 @@ def query(q: str, k: int = 200) -> list[tuple[str, float]]:
     # server) may: embed_query asks the backend first and loads the model only if that fails.
     if not enabled() or not (ready() or remote_url()):
         return []
-    with _lock:
-        ids, emb = _ids, _emb
-    if not ids or not q.strip():
+    st = _peek()
+    if st is None or st.is_stale() or not st.count() or not q.strip():
         return []
     v = embed_query(q)
-    sims = emb @ v
-    k = min(k, len(ids))
-    top = np.argpartition(-sims, k - 1)[:k]
-    top = top[np.argsort(-sims[top])]
-    return [(ids[i], float(sims[i])) for i in top]
+    try:
+        hits = st.search(v, k)
+    except vectorstore.StaleStoreError:   # swapped for a rebuild between the check and the search
+        return []
+    return [(h.id, h.score) for h in hits]
 
 
 def cut(cands: list, min_sim: float | None = None, rel_sim: float | None = None) -> list:

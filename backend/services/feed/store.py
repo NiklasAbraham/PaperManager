@@ -3,6 +3,11 @@
 Candidates are numerous and short-lived, so they do not belong in the graph database.
 One connection is shared by all threads and every statement runs under a lock. Only
 parameterised statements are used.
+
+The candidates' embedding vectors (and the cache of library vectors) live in the vector store
+(``services.vectorstore``, namespaces ``feed`` and ``feed_library``), not in this database. The
+``emb`` and ``library_emb`` columns of older databases are read once to fill the store and are
+left as they are; nothing writes them any more.
 """
 from __future__ import annotations
 
@@ -15,9 +20,9 @@ from pathlib import Path
 
 import numpy as np
 
+from services import vectorstore
 from services.feed import config
-
-DIM = 384
+from services.vectorstore import migrate, model_config
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS candidate (
@@ -67,13 +72,6 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _vec(blob: bytes | None) -> np.ndarray | None:
-    if blob is None:
-        return None
-    v = np.frombuffer(blob, dtype=np.float32)
-    return v if v.shape == (DIM,) else None
-
-
 @dataclass
 class Candidate:
     id: str
@@ -100,14 +98,21 @@ def _row_to_candidate(r: sqlite3.Row) -> Candidate:
         id=r["id"], source=r["source"], ext_id=r["ext_id"], title=r["title"],
         published=r["published"], authors=json.loads(r["authors"]), abstract=r["abstract"],
         url=r["url"], doi=r["doi"], categories=json.loads(r["categories"]),
-        fetched_at=r["fetched_at"], emb=_vec(r["emb"]),
+        fetched_at=r["fetched_at"],
     )
+
+
+def _vector_meta(source: str, published: str, fetched_at: str) -> dict:
+    return {"kind": "candidate", "source": source, "published": published, "added_at": fetched_at}
 
 
 class FeedStore:
     def __init__(self, path: Path):
         self.path = path
         self._lock = threading.RLock()
+        self._vlock = threading.Lock()
+        self._feed_vectors = None
+        self._library_vectors = None
         self._db = sqlite3.connect(str(path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         with self._lock:
@@ -152,64 +157,142 @@ class FeedStore:
             out.update(r["id"] for r in self._run(f"SELECT id FROM candidate WHERE id IN ({marks})", tuple(chunk)))
         return out
 
+    # ── vectors (vector store namespaces ``feed`` and ``feed_library``) ──────
+
+    def vectors(self):
+        """The ``feed`` namespace, filled once from the old ``candidate.emb`` blobs."""
+        with self._vlock:
+            if self._feed_vectors is None:
+                migrate.migrate_feed_candidates(self._db, self._lock)
+                self._feed_vectors = vectorstore.get_store("feed")
+                if self._feed_vectors.backend_mismatch() and not self._feed_vectors.is_stale():
+                    self._feed_vectors.convert_backend()
+            return self._feed_vectors
+
+    def library_vectors(self):
+        """The ``feed_library`` namespace, filled once from the old ``library_emb`` blobs."""
+        with self._vlock:
+            if self._library_vectors is None:
+                migrate.migrate_feed_library(self._db, self._lock)
+                self._library_vectors = vectorstore.get_store("feed_library")
+            return self._library_vectors
+
+    def vectors_stale(self) -> bool:
+        return self.vectors().is_stale()
+
+    def library_vectors_stale(self) -> bool:
+        return self.library_vectors().is_stale()
+
     def without_embedding(self, limit: int = 100000) -> list[Candidate]:
-        rows = self._run("SELECT * FROM candidate WHERE emb IS NULL ORDER BY published DESC LIMIT ?", (limit,))
-        return [_row_to_candidate(r) for r in rows]
+        """Candidates with no usable vector (all of them while the store is stale), newest first."""
+        vs = self.vectors()
+        have = set() if vs.is_stale() else set(vs.ids())
+        rows = self._run("SELECT * FROM candidate ORDER BY published DESC")
+        return [_row_to_candidate(r) for r in rows if r["id"] not in have][:limit]
 
     def set_embeddings(self, vectors: dict[str, np.ndarray]) -> None:
-        with self._lock:
-            for cid, v in vectors.items():
-                self._db.execute("UPDATE candidate SET emb = ? WHERE id = ?",
-                                 (np.asarray(v, dtype=np.float32).tobytes(), cid))
-            self._db.commit()
-
-    def get(self, cid: str) -> Candidate | None:
-        rows = self._run("SELECT * FROM candidate WHERE id = ?", (cid,))
-        return _row_to_candidate(rows[0]) if rows else None
-
-    def get_embeddings(self, ids: list[str]) -> dict[str, np.ndarray]:
-        out: dict[str, np.ndarray] = {}
+        """Store vectors of known candidates (ids that are not candidates are ignored)."""
+        ids = list(vectors)
+        found: dict[str, tuple] = {}
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
             marks = ",".join("?" * len(chunk))
-            for r in self._run(f"SELECT id, emb FROM candidate WHERE emb IS NOT NULL AND id IN ({marks})",
+            for r in self._run(f"SELECT id, source, published, fetched_at FROM candidate WHERE id IN ({marks})",
                                tuple(chunk)):
-                v = _vec(r["emb"])
-                if v is not None:
-                    out[r["id"]] = v
-        return out
+                found[r["id"]] = (r["source"], r["published"], r["fetched_at"])
+        keep = [i for i in ids if i in found]
+        if keep:
+            self.vectors().upsert(keep, np.vstack([np.asarray(vectors[i], dtype=np.float32) for i in keep]),
+                                  [_vector_meta(*found[i]) for i in keep])
+
+    def rebuild_embeddings(self, embed, text_of, chunk: int = 64) -> int:
+        """Embed every candidate again into a new generation of the ``feed`` namespace and swap it
+        in when done (used when the configured embedding model changed). Returns how many."""
+        vs = self.vectors()
+        rows = self._run("SELECT * FROM candidate ORDER BY published DESC")
+        rb = vs.begin_rebuild(model_config.current())
+        try:
+            for i in range(0, len(rows), chunk):
+                cands = [_row_to_candidate(r) for r in rows[i:i + chunk]]
+                rb.upsert([c.id for c in cands], embed([text_of(c) for c in cands]),
+                          [_vector_meta(c.source, c.published, c.fetched_at) for c in cands])
+            rb.commit()
+        except BaseException:
+            rb.abort()
+            raise
+        return len(rows)
+
+    def get(self, cid: str) -> Candidate | None:
+        rows = self._run("SELECT * FROM candidate WHERE id = ?", (cid,))
+        if not rows:
+            return None
+        c = _row_to_candidate(rows[0])
+        vs = self.vectors()
+        if not vs.is_stale():
+            got = vs.get([cid])
+            c.emb = got[cid][0] if cid in got else None
+        return c
+
+    def get_embeddings(self, ids: list[str]) -> dict[str, np.ndarray]:
+        vs = self.vectors()
+        if vs.is_stale() or not ids:
+            return {}
+        return {i: v for i, (v, _) in vs.get(ids).items()}
 
     def embedded_since(self, published_from: str) -> list[Candidate]:
         """Embedded candidates published on or after the ISO date, newest first."""
-        rows = self._run("SELECT * FROM candidate WHERE emb IS NOT NULL AND published >= ? "
-                         "ORDER BY published DESC", (published_from,))
-        return [_row_to_candidate(r) for r in rows]
+        vs = self.vectors()
+        if vs.is_stale():
+            return []
+        rows = self._run("SELECT * FROM candidate WHERE published >= ? ORDER BY published DESC", (published_from,))
+        got = vs.get([r["id"] for r in rows])
+        out = []
+        for r in rows:
+            if r["id"] in got:
+                c = _row_to_candidate(r)
+                c.emb = got[r["id"]][0]
+                out.append(c)
+        return out
 
     def sample_embeddings(self, exclude: set[str], n: int, seed: int = 0) -> np.ndarray:
         """A reproducible random sample (at most ``n``) of embedded candidates not in ``exclude``,
-        as an (m, 384) matrix."""
-        rows = self._run("SELECT id, emb FROM candidate WHERE emb IS NOT NULL ORDER BY id")
-        vecs = [v for r in rows if r["id"] not in exclude and (v := _vec(r["emb"])) is not None]
-        if not vecs:
-            return np.zeros((0, DIM), dtype=np.float32)
-        if len(vecs) > n:
-            idx = np.random.default_rng(seed).choice(len(vecs), size=n, replace=False)
-            vecs = [vecs[i] for i in sorted(idx)]
-        return np.vstack(vecs).astype(np.float32)
+        as an (m, dim) matrix."""
+        vs = self.vectors()
+        dim = model_config.dim()
+        if vs.is_stale():
+            return np.zeros((0, dim), dtype=np.float32)
+        have = set(vs.ids())
+        ids = [r["id"] for r in self._run("SELECT id FROM candidate ORDER BY id")
+               if r["id"] in have and r["id"] not in exclude]
+        if not ids:
+            return np.zeros((0, dim), dtype=np.float32)
+        if len(ids) > n:
+            idx = np.random.default_rng(seed).choice(len(ids), size=n, replace=False)
+            ids = [ids[i] for i in sorted(idx)]
+        got = vs.get(ids)
+        return np.vstack([got[i][0] for i in ids if i in got]).astype(np.float32)
 
     def counts(self) -> dict:
-        r = self._run("SELECT COUNT(*) AS n, COUNT(emb) AS e FROM candidate")[0]
-        return {"candidates": r["n"], "embedded": r["e"]}
+        ids = [r["id"] for r in self._run("SELECT id FROM candidate")]
+        vs = self.vectors()
+        embedded = 0 if vs.is_stale() or not ids else len(set(ids) & set(vs.ids()))
+        return {"candidates": len(ids), "embedded": embedded}
 
     def purge(self, retention_days: int) -> int:
         """Delete candidates fetched before the retention window unless somebody rated them."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat(timespec="seconds")
         with self._lock:
+            gone = [r["id"] for r in self._db.execute(
+                "SELECT id FROM candidate WHERE fetched_at < ? AND id NOT IN (SELECT candidate_id FROM label)",
+                (cutoff,)).fetchall()]
             cur = self._db.execute(
                 "DELETE FROM candidate WHERE fetched_at < ? AND id NOT IN (SELECT candidate_id FROM label)",
                 (cutoff,))
             self._db.commit()
-            return cur.rowcount
+        vs = self.vectors()
+        if gone and not vs.is_stale():
+            vs.delete(gone)
+        return cur.rowcount
 
     # ── labels ───────────────────────────────────────────────────────────────
 
@@ -270,33 +353,43 @@ class FeedStore:
     # ── library embeddings (only for papers the semantic search index lacks) ──
 
     def library_hashes(self) -> dict[str, str]:
-        return {r["paper_id"]: r["hash"] for r in self._run("SELECT paper_id, hash FROM library_emb")}
+        vs = self.library_vectors()
+        return {pid: m.get("hash", "") for pid, m in vs.metadata().items()}
 
     def set_library_embeddings(self, rows: dict[str, tuple[str, np.ndarray]]) -> None:
-        with self._lock:
-            for pid, (h, v) in rows.items():
-                self._db.execute(
-                    "INSERT INTO library_emb (paper_id, hash, emb) VALUES (?,?,?) "
-                    "ON CONFLICT(paper_id) DO UPDATE SET hash = excluded.hash, emb = excluded.emb",
-                    (pid, h, np.asarray(v, dtype=np.float32).tobytes()))
-            self._db.commit()
+        if rows:
+            ids = list(rows)
+            self.library_vectors().upsert(
+                ids, np.vstack([np.asarray(rows[i][1], dtype=np.float32) for i in ids]),
+                [{"kind": "library", "source": "feed_cache", "hash": rows[i][0]} for i in ids])
 
     def delete_library_embeddings(self, ids: list[str]) -> None:
-        with self._lock:
-            for i in range(0, len(ids), 500):
-                chunk = ids[i:i + 500]
-                self._db.execute(f"DELETE FROM library_emb WHERE paper_id IN ({','.join('?' * len(chunk))})",
-                                 tuple(chunk))
-            self._db.commit()
+        if ids:
+            self.library_vectors().delete(ids)
+
+    def rebuild_library_embeddings(self, embed, rows: dict[str, tuple[str, str]], chunk: int = 128) -> int:
+        """Replace the whole cache by embeddings of ``rows`` (``{paper_id: (hash, text)}``) made with
+        the configured model, swapped in when done."""
+        rb = self.library_vectors().begin_rebuild(model_config.current())
+        ids = list(rows)
+        try:
+            for i in range(0, len(ids), chunk):
+                part = ids[i:i + chunk]
+                rb.upsert(part, embed([rows[p][1] for p in part]),
+                          [{"kind": "library", "source": "feed_cache", "hash": rows[p][0]} for p in part])
+            rb.commit()
+        except BaseException:
+            rb.abort()
+            raise
+        return len(ids)
 
     def library_embeddings(self) -> tuple[list[str], np.ndarray]:
-        ids, vecs = [], []
-        for r in self._run("SELECT paper_id, emb FROM library_emb ORDER BY paper_id"):
-            v = _vec(r["emb"])
-            if v is not None:
-                ids.append(r["paper_id"])
-                vecs.append(v)
-        return ids, (np.vstack(vecs) if vecs else np.zeros((0, DIM), dtype=np.float32))
+        vs = self.library_vectors()
+        if vs.is_stale():
+            return [], np.zeros((0, model_config.dim()), dtype=np.float32)
+        ids, mat = vs.all_vectors()
+        order = sorted(range(len(ids)), key=lambda i: ids[i])
+        return [ids[i] for i in order], (mat[order] if order else mat)
 
 
 # ── the shared instance ───────────────────────────────────────────────────────

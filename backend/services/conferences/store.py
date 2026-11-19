@@ -36,6 +36,7 @@ import numpy as np
 
 from services.conferences import areas as area_mod
 from services.conferences import catalog, institutions, sources
+from services.vectorstore import model_config
 
 log = logging.getLogger(__name__)
 
@@ -479,7 +480,8 @@ def load(key: str) -> Dataset | None:
     emb = None
     if raw.get("areas_ready") and emb_path.exists():
         emb = np.load(emb_path).astype(np.float32)
-        if len(emb) != len(raw["papers"]):
+        # Vectors of another embedding model (EMBED_MODEL changed) cannot meet today's queries.
+        if len(emb) != len(raw["papers"]) or emb.ndim != 2 or emb.shape[1] != model_config.dim():
             emb = None
     temb = None
     if emb is not None and tpath.exists():
@@ -487,7 +489,7 @@ def load(key: str) -> Dataset | None:
             temb = np.load(tpath).astype(np.float32)
         except (OSError, ValueError):
             temb = None
-        if temb is not None and len(temb) != len(raw["papers"]):
+        if temb is not None and (len(temb) != len(raw["papers"]) or temb.shape[1:] != (model_config.dim(),)):
             temb = None
     ds = Dataset(raw, emb, temb)
     with _cache_lock:

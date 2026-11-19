@@ -13,7 +13,8 @@ import numpy as np
 
 from db.queries.visibility import paper_visibility_clause, project_visibility_clause
 from services.library_lookup import REF_TAG
-from services.feed.store import DIM, FeedStore
+from services.feed.store import FeedStore
+from services.vectorstore import model_config
 
 log = logging.getLogger(__name__)
 
@@ -47,15 +48,14 @@ def visible_papers(driver, user: str) -> tuple[list[dict], bool]:
 
 
 def semantic_snapshot() -> tuple[list[str], np.ndarray]:
-    """Ids and vectors held by the library search index right now (empty when it is off or still building)."""
+    """Ids and vectors held by the library search index right now (empty when it is off, stale or still building)."""
     try:
         from services.library_search import semantic
         if not semantic.enabled():
-            return [], np.zeros((0, DIM), dtype=np.float32)
-        with semantic._lock:
-            return list(semantic._ids), semantic._emb
+            return [], np.zeros((0, model_config.dim()), dtype=np.float32)
+        return semantic.snapshot()
     except Exception:  # noqa: BLE001
-        return [], np.zeros((0, DIM), dtype=np.float32)
+        return [], np.zeros((0, model_config.dim()), dtype=np.float32)
 
 
 def vectors(store: FeedStore, wanted: set[str] | None = None) -> tuple[list[str], np.ndarray]:
@@ -67,10 +67,10 @@ def vectors(store: FeedStore, wanted: set[str] | None = None) -> tuple[list[str]
     keep_own = [i for i, pid in enumerate(own_ids) if pid not in have]
     all_ids = list(ids) + [own_ids[i] for i in keep_own]
     parts = ([emb] if len(ids) else []) + ([own[keep_own]] if keep_own else [])
-    mat = np.vstack(parts) if parts else np.zeros((0, DIM), dtype=np.float32)
+    mat = np.vstack(parts) if parts else np.zeros((0, model_config.dim()), dtype=np.float32)
     if wanted is not None:
         idx = [i for i, pid in enumerate(all_ids) if pid in wanted]
-        return [all_ids[i] for i in idx], mat[idx] if idx else np.zeros((0, DIM), dtype=np.float32)
+        return [all_ids[i] for i in idx], mat[idx] if idx else np.zeros((0, model_config.dim()), dtype=np.float32)
     return all_ids, mat
 
 
@@ -83,6 +83,10 @@ def sync_missing_embeddings(driver, store: FeedStore, embed) -> int:
         texts = {r["id"]: semantic.paper_text(r["title"], r["abstract"], r["summary"]) for r in s.run(
             "MATCH (p:Paper) RETURN p.id AS id, p.title AS title, p.abstract AS abstract, p.summary AS summary")}
     indexed = set(semantic_snapshot()[0])
+    if store.library_vectors_stale():
+        # The cache holds vectors of another embedding model: build it again, then swap it in.
+        return store.rebuild_library_embeddings(
+            embed, {pid: (semantic.text_hash(t), t) for pid, t in texts.items() if pid not in indexed})
     cached = store.library_hashes()
     stale = [pid for pid in cached if pid not in texts or pid in indexed]
     if stale:

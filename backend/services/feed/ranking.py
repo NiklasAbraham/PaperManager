@@ -15,7 +15,8 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 from services.feed import config, library, model
-from services.feed.store import DIM, FeedStore
+from services.feed.store import FeedStore
+from services.vectorstore import model_config
 
 log = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ def digest(driver, store: FeedStore, user: str, *, days: int | None = None, skip
         + sum(1 for k, kind, *_ in pos if kind == "feed")
     m = _model_for(store, user, pos, neg, lib_vec, sig) if n_pos_vec >= model.MIN_POSITIVES and pool else None
 
-    X = np.vstack([c.emb for c in pool]) if pool else np.zeros((0, DIM), dtype=np.float32)
+    X = np.vstack([c.emb for c in pool]) if pool else np.zeros((0, model_config.dim()), dtype=np.float32)
     if m is not None:
         mode, scores = "classifier", m.score(X)
     elif n_pos_vec >= model.MIN_POSITIVES and not pool:

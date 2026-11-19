@@ -60,7 +60,11 @@ def _candidate_text(c: Candidate) -> str:
 
 
 def embed_pending(store: FeedStore, embed) -> int:
-    """Embed stored candidates that have no vector yet. Returns how many were embedded."""
+    """Embed stored candidates that have no vector yet. Returns how many were embedded. When the
+    configured embedding model is not the one the stored vectors came from, every candidate is
+    embedded again into a new generation that replaces the old one in one step."""
+    if store.vectors_stale():
+        return store.rebuild_embeddings(embed, _candidate_text, _EMBED_CHUNK)
     todo = store.without_embedding()
     done = 0
     for i in range(0, len(todo), _EMBED_CHUNK):

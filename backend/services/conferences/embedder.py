@@ -1,9 +1,11 @@
-"""BAAI/bge-small-en-v1.5 on CPU: 384-dim unit vectors for papers and queries.
+"""The embedding model on CPU: unit vectors for papers and queries (default BAAI/bge-small-en-v1.5, 384-dim).
 
 Runs through ``transformers`` + ``torch``, which the backend already has for Docling, so
 the explorer needs no new dependency and no API key. The model (~130 MB) is downloaded
-once into ``<data dir>/models``. Short queries get bge's retrieval instruction, as the
-model card recommends; documents and long queries (a pasted abstract) do not.
+once into ``<data dir>/models``. Model, dimension, pooling and prefixes come from
+``services.vectorstore.model_config`` (``EMBED_MODEL`` and friends). Short queries get the
+model's retrieval instruction (bge: "Represent this sentence ..."), as the model card
+recommends; documents and long queries (a pasted abstract) do not.
 """
 from __future__ import annotations
 
@@ -13,11 +15,16 @@ import threading
 
 import numpy as np
 
+from services.vectorstore import model_config
+
 log = logging.getLogger(__name__)
 
-MODEL = os.environ.get("CONFERENCE_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
-DIM = 384
-_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+_SPEC = model_config.current()
+MODEL = _SPEC.model
+DIM = _SPEC.dim
+_POOLING = _SPEC.pooling
+_QUERY_PREFIX = _SPEC.query_prefix
+_DOC_PREFIX = _SPEC.doc_prefix
 
 _lock = threading.Lock()
 # Fast (Rust) tokenizers refuse concurrent use from two threads ("Already borrowed");
@@ -57,14 +64,17 @@ def ready() -> bool:
     return _model is not None
 
 
-def embed(texts: list[str], max_length: int = 256, batch: int = 64, progress=None) -> np.ndarray:
-    """Unit-length CLS embeddings, shape (len(texts), 384), float32.
+def embed(texts: list[str], max_length: int = 256, batch: int = 64, progress=None, doc: bool = True) -> np.ndarray:
+    """Unit-length embeddings (CLS or mean pooled, per the model), shape (len(texts), DIM), float32.
+    ``doc=False`` skips the document prefix (queries carry their own).
 
     Texts are processed shortest first so a batch pads to similar lengths, which on
     CPU is several times faster than the original order."""
     import torch
 
     tok, model = _load()
+    if doc and _DOC_PREFIX:
+        texts = [_DOC_PREFIX + t for t in texts]
     out = np.zeros((len(texts), DIM), dtype=np.float32)
     order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
     done = 0
@@ -74,9 +84,15 @@ def embed(texts: list[str], max_length: int = 256, batch: int = 64, progress=Non
             with _tok_lock:
                 enc = tok([texts[i] or " " for i in idx], padding=True, truncation=True,
                           max_length=max_length, return_tensors="pt")
-            cls = model(**enc).last_hidden_state[:, 0]
-            cls = torch.nn.functional.normalize(cls, dim=-1)
-            out[idx] = cls.numpy()
+            hidden = model(**enc).last_hidden_state
+            if _POOLING == "mean":
+                mask = enc["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+                pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+            else:
+                pooled = hidden[:, 0]
+            if pooled.shape[1] != DIM:
+                raise RuntimeError(f"{MODEL} produces {pooled.shape[1]}-dim vectors but EMBED_DIM is {DIM}")
+            out[idx] = torch.nn.functional.normalize(pooled, dim=-1).numpy()
             done += len(idx)
             if progress:
                 progress(done, len(texts))
@@ -84,9 +100,9 @@ def embed(texts: list[str], max_length: int = 256, batch: int = 64, progress=Non
 
 
 def query_text(text: str) -> str:
-    """The text a query is embedded as: short queries get bge's retrieval instruction."""
+    """The text a query is embedded as: short queries get the model's retrieval instruction."""
     text = text.strip()
-    return _QUERY_PREFIX + text if len(text.split()) <= 24 else text
+    return _QUERY_PREFIX + text if _QUERY_PREFIX and len(text.split()) <= 24 else text
 
 
 def remote_url() -> str:
@@ -130,4 +146,6 @@ def embed_query(text: str) -> np.ndarray:
         v = _remote_query(q)
         if v is not None:
             return v
+    if _DOC_PREFIX:   # the query's own prefix is already in ``q``; a document prefix must not be added
+        return embed([q], max_length=512, doc=False)[0]
     return embed([q], max_length=512)[0]

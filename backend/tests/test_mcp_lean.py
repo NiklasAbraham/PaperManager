@@ -194,8 +194,10 @@ def test_no_remote_without_env(embedder, monkeypatch):
 def test_semantic_query_runs_with_remote_and_no_local_model(embedder, monkeypatch):
     from services.library_search import semantic
 
-    monkeypatch.setattr(semantic, "_ids", ["a", "b"])
-    monkeypatch.setattr(semantic, "_emb", np.array([[1.0] + [0.0] * 383, [0.0, 1.0] + [0.0] * 382], np.float32))
+    from services import vectorstore
+
+    vectorstore.get_store("library").upsert(
+        ["a", "b"], np.array([[1.0] + [0.0] * 383, [0.0, 1.0] + [0.0] * 382], np.float32))
     monkeypatch.setattr(embedder, "embed_query", lambda q: np.array([0.0, 1.0] + [0.0] * 382, np.float32))
     assert semantic.query("x", k=2)[0][0] == "b"
     monkeypatch.delenv("PM_EMBED_URL")
@@ -205,8 +207,10 @@ def test_semantic_query_runs_with_remote_and_no_local_model(embedder, monkeypatc
 def test_ensure_loaded_does_not_load_the_model_with_remote(embedder, monkeypatch):
     from services.library_search import semantic
 
-    monkeypatch.setattr(semantic, "_ids", ["a"])
-    semantic.ensure_loaded()
+    from services import vectorstore
+
+    vectorstore.get_store("library").upsert(["a"], np.array([[1.0] + [0.0] * 383], np.float32))
+    assert semantic.ensure_loaded() is True
     assert embedder._local_calls == []
 
 

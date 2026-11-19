@@ -393,13 +393,18 @@ def test_semantic_query_ranks_by_cosine(monkeypatch):
     import services.conferences.embedder as emb
     monkeypatch.setattr(semantic, "enabled", lambda: True)
     monkeypatch.setattr(emb, "ready", lambda: True)
-    v = np.zeros(semantic.DIM, dtype=np.float32)
+    from services import vectorstore
+    from services.vectorstore import model_config
+
+    dim = model_config.dim()
+    v = np.zeros(dim, dtype=np.float32)
     v[0] = 1.0
     monkeypatch.setattr(emb, "embed_query", lambda q: v)
-    e = np.zeros((3, semantic.DIM), dtype=np.float32)
-    e[0, 0], e[1, 0], e[2, 1] = 0.5, 0.9, 1.0
-    monkeypatch.setattr(semantic, "_ids", ["a", "b", "c"])
-    monkeypatch.setattr(semantic, "_emb", e)
+    e = np.zeros((3, dim), dtype=np.float32)
+    e[0, 0], e[0, 1] = 0.6, 0.8
+    e[1, 0], e[1, 1] = 0.9, float(np.sqrt(1 - 0.81))
+    e[2, 1] = 1.0
+    vectorstore.get_store("library").upsert(["a", "b", "c"], e)
     assert [pid for pid, _ in semantic.query("x", k=2)] == ["b", "a"]
 
 
