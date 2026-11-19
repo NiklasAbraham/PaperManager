@@ -143,3 +143,20 @@ def test_similarity_scores():
     s = model.similarity_scores(pos, X)
     assert s[:2].min() > s[2:].max()
     assert model.similarity_scores(np.zeros((0, 384), np.float32), X).tolist() == [0.0] * 4
+
+
+def test_training_works_with_any_embedding_dimension_and_no_explicit_negatives():
+    """A 768-dim model with no explicit negatives: the empty negative block must not carry another dimension."""
+    rng = np.random.default_rng(0)
+
+    def unit(n, shift):
+        v = rng.normal(size=(n, 768)).astype(np.float32)
+        v[:, 0] += shift
+        return v / np.linalg.norm(v, axis=1, keepdims=True)
+
+    pos, rand = unit(30, 4.0), unit(200, 0.0)
+    ts = model.TrainingSet(pos=pos, pos_weight=np.ones(30), pos_time=[f"2026-01-{i % 28 + 1:02d}" for i in range(30)],
+                           neg=model.stack([], dim=768), neg_weight=np.zeros(0), random_neg=rand)
+    X, y, w = model.design_matrix(ts)
+    assert X.shape == (230, 768) and y.sum() == 30
+    assert model.stack([]).shape[1] > 0

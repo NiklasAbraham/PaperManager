@@ -1,6 +1,6 @@
 """The relevance model: an L2-regularised logistic regression in numpy.
 
-Inputs are the unit embeddings of the shared bge-small model (384 dimensions, nothing
+Inputs are the unit embeddings of the shared embedding model (any dimension, nothing
 standardised), a bias is added. Training data: the user's positives and negatives, plus a
 random sample of stored candidates as extra negatives (Scholar Inbox, Flicke et al. 2025).
 """
@@ -55,12 +55,12 @@ def library_label(rating, bookmarked, status, highlights, kept: bool = False) ->
 
 @dataclass
 class TrainingSet:
-    pos: np.ndarray                      # (p, 384)
+    pos: np.ndarray                      # (p, dim)
     pos_weight: np.ndarray               # (p,)
     pos_time: list[str]                  # when each positive was added (for the hold-out)
-    neg: np.ndarray                      # explicit negatives (n, 384)
+    neg: np.ndarray                      # explicit negatives (n, dim)
     neg_weight: np.ndarray
-    random_neg: np.ndarray               # random candidates (m, 384)
+    random_neg: np.ndarray               # random candidates (m, dim)
     signature: tuple = ()
 
     @property
@@ -68,14 +68,20 @@ class TrainingSet:
         return len(self.pos) + len(self.neg) + len(self.random_neg)
 
 
-def stack(rows: list[np.ndarray], dim: int = 384) -> np.ndarray:
-    return np.vstack(rows).astype(np.float32) if rows else np.zeros((0, dim), dtype=np.float32)
+def stack(rows: list[np.ndarray], dim: int | None = None) -> np.ndarray:
+    """Rows as one float32 matrix; an empty list gives (0, dim), dim defaulting to the configured model's."""
+    if rows:
+        return np.vstack(rows).astype(np.float32)
+    if dim is None:
+        from services.vectorstore import model_config
+        dim = model_config.dim()
+    return np.zeros((0, dim), dtype=np.float32)
 
 
 def design_matrix(ts: TrainingSet) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """X, y (0/1) and sample weights. Random negatives share S x the total positive weight."""
     pos_w = ts.pos_weight
-    X = np.vstack([ts.pos, ts.neg, ts.random_neg])
+    X = np.vstack([a for a in (ts.pos, ts.neg, ts.random_neg) if len(a)])
     y = np.concatenate([np.ones(len(ts.pos)), np.zeros(len(ts.neg) + len(ts.random_neg))])
     rand_w = np.full(len(ts.random_neg), RANDOM_NEGATIVE_SHARE * float(pos_w.sum()) / max(1, len(ts.random_neg)))
     w = np.concatenate([pos_w, ts.neg_weight, rand_w])
