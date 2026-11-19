@@ -102,7 +102,7 @@ def embed(texts: list[str], max_length: int = 256, batch: int = 64, progress=Non
 def query_text(text: str) -> str:
     """The text a query is embedded as: short queries get the model's retrieval instruction."""
     text = text.strip()
-    return _QUERY_PREFIX + text if _QUERY_PREFIX and len(text.split()) <= 24 else text
+    return _QUERY_PREFIX + text if _QUERY_PREFIX and is_short_query(text) else text
 
 
 def remote_url() -> str:
@@ -111,9 +111,10 @@ def remote_url() -> str:
     return os.environ.get("PM_EMBED_URL", "").strip()
 
 
-def _remote_query(q: str) -> np.ndarray | None:
-    """The backend's embedding of ``q``, or None if it cannot give one (an older backend
-    without the route, not started, model still loading, timeout, other model)."""
+def _remote_embed(payload: dict) -> np.ndarray | None:
+    """The backend's embedding for ``payload`` (``{"text": ..., "document": ...}``), or None if
+    it cannot give one (an older backend without the route, not started, model still loading,
+    timeout, other model)."""
     url = remote_url()
     if not url:
         return None
@@ -122,7 +123,7 @@ def _remote_query(q: str) -> np.ndarray | None:
 
         from services.pdf_import import api_headers
 
-        r = httpx.post(url, json={"text": q}, headers=api_headers(), timeout=2.0)
+        r = httpx.post(url, json=payload, headers=api_headers(), timeout=2.0)
         if r.status_code != 200:
             log.info("Remote query embedding unavailable (HTTP %s); loading the model here", r.status_code)
             return None
@@ -137,6 +138,11 @@ def _remote_query(q: str) -> np.ndarray | None:
         return None
 
 
+def _remote_query(q: str) -> np.ndarray | None:
+    """The backend's embedding of the (already prefixed) query ``q``, or None."""
+    return _remote_embed({"text": q})
+
+
 def embed_query(text: str) -> np.ndarray:
     """Unit vector of a query. A process that has not loaded the model and has
     ``PM_EMBED_URL`` (the MCP server) asks the backend first; if that fails it loads the
@@ -149,3 +155,37 @@ def embed_query(text: str) -> np.ndarray:
     if _DOC_PREFIX:   # the query's own prefix is already in ``q``; a document prefix must not be added
         return embed([q], max_length=512, doc=False)[0]
     return embed([q], max_length=512)[0]
+
+
+# Texts of this many words or fewer are embedded as queries (with the model's retrieval
+# instruction); longer ones, such as a pasted abstract, are embedded like a stored document.
+QUERY_MAX_WORDS = 24
+# The index embeds title + abstract cut at this many tokens (``embed``'s default); a pasted
+# abstract is cut the same way so that it lands in the same place as the papers it resembles.
+DOC_MAX_LENGTH = 256
+
+
+def is_short_query(text: str) -> bool:
+    return len(text.split()) <= QUERY_MAX_WORDS
+
+
+def embed_document(text: str) -> np.ndarray:
+    """Unit vector of ``text`` embedded the way stored papers are: the model's document prefix (if
+    any), no retrieval instruction, the same token limit as the index. A process without the model
+    that has ``PM_EMBED_URL`` asks the backend first (``{"document": true}``) and loads the model
+    itself only if that fails."""
+    text = text.strip()
+    if _model is None:
+        v = _remote_embed({"text": text, "document": True})
+        if v is not None:
+            return v
+    return embed([text], max_length=DOC_MAX_LENGTH, doc=True)[0]
+
+
+def embed_search_text(text: str) -> tuple[np.ndarray, str]:
+    """(vector, mode) of a text typed into a "find similar" search. ``mode`` is ``"query"`` for a
+    short phrase (keywords; the retrieval instruction is added) and ``"document"`` for an
+    abstract-sized text (embedded like a stored paper)."""
+    if is_short_query(text):
+        return embed_query(text), "query"
+    return embed_document(text), "document"

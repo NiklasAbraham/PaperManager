@@ -135,6 +135,10 @@ def search_topic_all_conferences(body: SearchTopicBody):
 
 class EmbedBody(BaseModel):
     text: str
+    # True: ``text`` is a document (an abstract), embedded like a stored paper: the model's
+    # document prefix, the index's token limit. False (the default): as given, a query that
+    # the caller has prefixed already.
+    document: bool = False
 
 
 @router.post("/embed")
@@ -151,7 +155,8 @@ def embed_text(body: EmbedBody):
 
     if not embedder.ready():
         raise HTTPException(status_code=503, detail="embedding model not loaded yet")
-    vec = embedder.embed([body.text[:4000] or " "], max_length=512)[0]
+    vec = embedder.embed([body.text[:4000] or " "],
+                         max_length=embedder.DOC_MAX_LENGTH if body.document else 512)[0]
     return {"model": embedder.MODEL, "dim": int(vec.shape[0]), "vector": [round(float(x), 7) for x in vec]}
 
 
