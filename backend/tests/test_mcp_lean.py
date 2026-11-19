@@ -62,8 +62,9 @@ def test_tool_definitions_are_tidy_and_within_budget():
         for pname, prop in (t.inputSchema.get("properties") or {}).items():
             assert "title" not in prop, f"{t.name}.{pname}"
         total += len(t.description) + len(json.dumps(t.inputSchema, separators=(",", ":")))
-    # 22,980 characters before the trim (Nov 2026); every chat loads all of them.
-    assert total < 18500, total
+    # 22,980 characters before the trim (Nov 2026); every chat loads all of them. 17,940 before the
+    # two similarity tools (find_similar_papers, papers_like: about 1,100), hence the new ceiling.
+    assert total < 19500, total
 
 
 def test_parameter_named_title_survives():

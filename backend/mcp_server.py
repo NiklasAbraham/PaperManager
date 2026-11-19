@@ -29,7 +29,7 @@ os.environ.setdefault("PM_EMBED_URL", f"http://127.0.0.1:{os.environ.get('BACKEN
 from mcp.server.fastmcp import FastMCP
 from config import settings
 from services.auth import set_request_user
-from tools import paper_tools, note_tools, tag_tools, person_tools, project_tools, ai_tools, library_tools, upload_tools, maintenance_tools, conference_tools
+from tools import paper_tools, note_tools, tag_tools, person_tools, project_tools, ai_tools, library_tools, upload_tools, maintenance_tools, conference_tools, similarity_tools
 
 set_request_user(settings.default_user_name)
 
@@ -50,6 +50,7 @@ library_tools.register(mcp)
 upload_tools.register(mcp)
 maintenance_tools.register(mcp)
 conference_tools.register(mcp)
+similarity_tools.register(mcp)
 
 # Compact descriptions and schemas (every chat loads them), PAPERMANAGER_MCP_EXCLUDE.
 from tools._compact import tidy  # noqa: E402

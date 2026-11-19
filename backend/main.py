@@ -60,6 +60,7 @@ from routers.reports import router as reports_router
 from routers.suggestions import router as suggestions_router
 from routers.system_health import router as system_health_router
 from routers.feed import router as feed_router
+from routers.similar import router as similar_router
 
 
 @asynccontextmanager
@@ -265,6 +266,7 @@ app.include_router(reports_router)
 app.include_router(suggestions_router)
 app.include_router(system_health_router)
 app.include_router(feed_router)
+app.include_router(similar_router)
 
 
 @app.get("/litellm/models", response_model=list[str])
