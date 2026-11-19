@@ -357,7 +357,7 @@ The Discover page was folded into **Find papers** in the frontend (`/discover` r
 | `GET` | `/conferences/catalog` | Every known conference-year with its build state, the area taxonomy, the default set |
 | `GET` | `/conferences/search/query` | Across all loaded conferences (`?q=&kind=all\|paper\|author&series=&field=&year_min=&year_max=&limit=`): `papers` (`title` matches with `title_match`, `semantic` by meaning, `title_total`, `highlight`, `corrected`), `authors` (cards with papers per conference, institutions, `identities`; `highlight`, `corrected`), `suggested` tab, `ms`. Case-insensitive |
 | `POST` | `/conferences/search/topic` | `{query, k=300, series?, field?, year_min?, year_max?, papers?}`: the k closest papers pooled over all loaded conferences (title vectors); `conferences` with `count` and `per_1k`, `trend` per series, pooled `academia` / `industry`, `areas`, `papers`, `threshold`, `skipped` |
-| `POST` | `/conferences/embed` | `{"text"}` → `{"model", "dim", "vector"}`: the bge-small embedding of a text as given (the caller adds the query instruction), for MCP processes that do not load the model; 503 until it is loaded |
+| `POST` | `/conferences/embed` | `{"text"}` → `{"model", "dim", "vector"}`: the bge-small embedding of a text as given (the caller adds the query instruction), for MCP processes that do not load the model; 503 until it is loaded. `{"text", "document": true}` embeds the text the way a stored paper is embedded (document prefix, 256 tokens) |
 | `GET` | `/conferences/{key}/status` | Build state: `none`, `queued`, `fetching`, `normalising`, `embedding`, `ready`, `partial`, `unavailable`, `error` (+ `progress`) |
 | `POST` | `/conferences/{key}/build` | Queue a download + index (also refreshes a loaded one) |
 | `GET` | `/conferences/{key}/overview` | Counts, area mix, top universities and companies (409 while not loaded) |
@@ -446,6 +446,28 @@ Only with `PAPER_FEED=true`. Otherwise every route except `/feed/status` answers
 | `POST` | `/feed/{id}/dismiss` | Label 0 |
 | `DELETE` | `/feed/{id}/label` | Remove your label |
 | `POST` | `/feed/{id}/add` | `{project_id?}`: ingest by URL, link to the project, record a thumbs-up |
+
+---
+
+## Similar papers
+
+Nearest papers to a text or to a library paper, by embedding similarity. Login required. Library hits respect your project visibility; feed hits (only with `PAPER_FEED=true`) carry only your own `my_label`.
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| `POST` | `/search/similar` | Body `{text (20-20000 characters), k (1-50, default 10), scope (library\|feed\|both, default both), since? (YYYY-MM-DD), min_score? (-1 to 1, default 0), include_stubs? (default false)}`. 422 for a bad body, 404 for `scope=feed` while the feed is off (`both` then means the library). 200 `{available, reason, scope, mode (document\|query), total, hits, skipped, warnings?}`; `available: false` with a `reason` while the index is missing, still building or being rebuilt for a new embedding model. A hit: `{source (library\|feed), id, title, authors, year, url, score, snippet, abstract, in_library, library_paper_id, my_label, ...}` |
+| `GET` | `/search/similar/{paper_id}` | The same for a library paper (`?k=&scope=&since=&min_score=&include_stubs=`), the paper itself left out; `mode` is `paper`; 404 if the paper does not exist or you may not see it |
+
+```http
+POST /search/similar
+{"text": "Sparse attention for long documents. We study ...", "k": 2, "scope": "library"}
+
+200 {"available": true, "reason": null, "scope": "library", "mode": "document", "k": 2, "total": 2,
+     "hits": [{"source": "library", "id": "p1", "title": "...", "authors": ["..."], "year": 2024,
+               "url": "https://<your-host>/paper/p1", "score": 0.8312, "snippet": "...",
+               "abstract": "...", "in_library": true, "library_paper_id": "p1", "my_label": null}, ...],
+     "skipped": {}}
+```
 
 ---
 

@@ -168,7 +168,9 @@ result.hits        # [SimilarHit(namespace, id, score, metadata)], best first
 result.skipped     # {"feed": "stale"} for namespaces that are missing, empty or stale
 ```
 
-`find_similar` / `find_similar_text` are service functions only; no HTTP route or UI uses them yet.
+`find_similar` / `find_similar_text` are the plain building block (no user, no visibility). The visibility-aware
+search behind `POST /search/similar`, the page `/similar` and the MCP tools is `services/similar_search.py`
+(`.specs/020_similar_search.md`).
 
 ## Tests
 

@@ -102,6 +102,7 @@ nav:
     - People, projects and export: user-guide/knowledge-features.md
     - Conference explorer: user-guide/conferences.md
     - Paper feed: user-guide/paper-feed.md
+    - Similar papers: user-guide/similar-search.md
     - MCP server (Claude): user-guide/mcp-server.md
   - Account and admin:
     - Tokens: user-guide/tokens.md
