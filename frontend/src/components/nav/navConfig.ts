@@ -47,6 +47,7 @@ export const NAV_ITEMS: NavItem[] = [
   { group: "explore", label: "Reports", to: "/reports", description: "Generated reports on your library" },
   { group: "explore", label: "Suggestions", to: "/suggestions", description: "Ideas for the app: vote and track status" },
   { group: "explore", label: "Paper feed", to: "/feed", feature: "feed", description: "New preprints, ranked for you" },
+  { group: "explore", label: "Similar papers", to: "/similar", description: "Does a paper like this abstract already exist?" },
 
   // Tools menu
   { group: "tools", label: "Bulk import", to: "/bulk-import", description: "Import a list of papers from JSON",
