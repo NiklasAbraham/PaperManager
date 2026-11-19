@@ -108,6 +108,7 @@ nav:
     - Tokens: user-guide/tokens.md
     - Suggestions: user-guide/suggestions.md
     - Health: user-guide/health.md
+    - Switching the embedding model: user-guide/switching-the-embedding-model.md
   - Technical reference:
     - Architecture: technical/architecture.md
     - Backend: technical/backend.md

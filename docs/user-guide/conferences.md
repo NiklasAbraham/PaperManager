@@ -255,6 +255,7 @@ All optional; set them in `.env` and pass them to the backend in `docker-compose
 | `CONFERENCES_REFRESH_DAYS` | `14` | Reload this year's default conferences when older than this |
 | `CONFERENCE_DATA_DIR` | `/data/conferences` | Where datasets and the model live (the backend's volume) |
 | `CONFERENCE_EMBED_THREADS` | `4` | CPU threads for embedding |
+| `CONFERENCE_EMBED_MODEL` | empty | The explorer's embedding model. Read first; `EMBED_MODEL` is used only when this is empty. Set it to the model the explorer's datasets were built with before you move the library to another one ([how](switching-the-embedding-model.md)) |
 | `CONFERENCE_CACHE_MAX` | `32` | Conferences held in memory at once (20–40 MB each); searching all conferences needs every loaded one in memory |
 
 Each conference takes 5–30 MB on disk (papers, institutions, float16 embeddings); the model

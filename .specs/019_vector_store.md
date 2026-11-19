@@ -23,9 +23,12 @@ services/vectorstore/
   similar.py        find_similar(): one query over several namespaces (library + feed)
 ```
 
+Bulk switch tooling (prepared generations, adoption, rollback) is in `backend/scripts/vectors_*.py` and
+`embed_bulk.py`; see "Bulk re-embedding elsewhere, adoption, rollback" below.
+
 Namespaces in use: `library` (library_search/semantic.py), `feed` (candidate vectors) and `feed_library`
 (the feed's cache of library vectors the search index lacks). The conference explorer keeps its own
-float16 files; it only reads the model name and dimension from `model_config`.
+float16 files; it only reads the model name and dimension from `model_config` (`current_conference()`).
 
 ## Interface (`VectorStore`)
 
@@ -68,11 +71,12 @@ changes. A stale store refuses `upsert`, `delete`, `search`, `get` and `all_vect
 (`upsert(...)`, then `commit()`; `abort()` or leaving a `with` block uncommitted throws it away). `commit()`
 writes the new manifest, then flips `CURRENT`, then swaps the in-memory pointer. A search that started
 before the swap finishes on the old generation; every search sees exactly one generation, never both. The
-old generation's files are removed 60 s later (`RETIRE_GRACE_SECONDS`) and by the next writer start. Writes
+old generation's files are removed 60 s later (`RETIRE_GRACE_SECONDS`) and by the next writer start, except when the
+swap changed the model and `VECTOR_STORE_KEEP_GENERATIONS` keeps it for a rollback (below). Writes
 to the live generation while a rebuild runs are not carried over; the owner serialises (the semantic sync
 lock; a stale store refuses writes anyway).
 
-Owners and what they do when stale:
+Owners and what they do when stale (before the rebuild, each first tries `adopt_matching`, see Bulk re-embedding):
 
 * semantic index (`library`): `sync()` rebuilds from the Neo4j texts in the background thread; until the
   swap `query()` returns nothing and the search falls back to lexical, as while the first build runs;
@@ -125,13 +129,62 @@ semantic sync and the feed) copies it into the configured one without re-embeddi
 | `VECTOR_STORE_LANCE_INDEX_MIN` | `50000` | rows above which the lance backend builds an ANN index |
 | `EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | embedding model (the old `CONFERENCE_EMBED_MODEL` still works) |
 | `EMBED_DIM`, `EMBED_POOLING`, `EMBED_QUERY_PREFIX`, `EMBED_DOC_PREFIX` | from the model | needed only for a model that is not in `model_config.KNOWN`, or to override |
+| `CONFERENCE_EMBED_MODEL` | empty | the conference explorer's model, read *first* by `model_config.current_conference()`; `EMBED_MODEL` only if it is empty. Another model than `EMBED_MODEL` takes `CONFERENCE_EMBED_DIM`, `_POOLING`, `_QUERY_PREFIX`, `_DOC_PREFIX` when not in `KNOWN` |
+| `VECTOR_STORE_KEEP_GENERATIONS` | `2` | generations kept per namespace after a swap that changes the model, the live one included (`1`: none), see Bulk re-embedding |
 
 `model_config.KNOWN` lists dimension, pooling and prefixes for a few bge, e5, MiniLM, MPNet and SPECTER2
 models; anything else needs `EMBED_DIM`. Empty variables count as unset. The embedder
-(`services/conferences/embedder.py`) takes model, dimension, pooling and prefixes from `model_config`, so one
-setting changes library search, feed and the conference explorer's query model together. The explorer's own
-saved vectors are not versioned: after changing `EMBED_MODEL` its datasets must be rebuilt, and until then
-`store.load` leaves their vectors out (keyword search only) instead of failing on a dimension mismatch.
+(`services/conferences/embedder.py`) takes model, dimension, pooling and prefixes from `model_config`. It has two
+roles: *library* (`embed`, `embed_query`, `embed_document`, `ready`; `EMBED_MODEL`: library search, feed, similar
+papers) and *conference* (`conference_embed`, `conference_embed_query`, `conference_ready`;
+`CONFERENCE_EMBED_MODEL` first, `EMBED_MODEL` if empty). Loaded models are cached per model id (`_models`), so two
+roles naming one model share it. With neither variable set both roles are the default model, as before. The
+explorer's own saved vectors are not versioned: when its model changes its datasets must be rebuilt, and until
+then `store.load` leaves their vectors out (keyword search only) instead of failing on a dimension mismatch; set
+`CONFERENCE_EMBED_MODEL` to the old model to keep them while the library moves on. `POST /conferences/embed` takes
+`role` (`library` default, `conference`) so the MCP server asks for the right model.
+
+## Bulk re-embedding elsewhere, adoption, rollback
+
+Switching `EMBED_MODEL` with nothing prepared starts the background CPU rebuild described above. For a big library
+the bulk is embedded on any machine with a GPU instead; user guide: `docs/user-guide/switching-the-embedding-model.md`.
+
+```
+scripts/vectors_export.py   backend env: spec.json + <namespace>.jsonl {id, text, hash, meta} for library, feed, feed_library
+scripts/embed_bulk.py       GPU machine, torch + transformers + numpy only: <namespace>.npy + .ids.json + .done.json
+scripts/vectors_import.py   backend env: checks, CPU sanity sample, writes a PREPARED generation per namespace
+scripts/vectors_rollback.py backend stopped: swap back to the kept generation, print the env to restore
+```
+
+* **Texts**: the export reads through `semantic._fetch_texts` (every `Paper`, no per-user visibility: an operator
+  tool, like the sync thread), `feed.pipeline._candidate_text` and `FeedStore.all_candidates()`. `feed_library` is
+  what the feed would cache itself: library papers the search index will not hold (none while `LIBRARY_SEMANTIC` is
+  on). The export directory is refused inside a git repository or the backend directory and created `0700`.
+* **`embed_bulk.embed_texts` reproduces `embedder.embed`**: document prefix, then `" "` for an empty text, padding +
+  truncation at `max_length` (256), CLS or mean pooling over the attention mask, L2 normalisation, float32 out; it adds
+  longest-first batching, halving on CUDA OOM, float16 on CUDA (pooling in float32; a NaN run is repeated in fp32).
+  `test_bulk_embed_embed.py` asserts equal output (< 1e-5) on a tiny random ModernBERT. Keep the two in step.
+* **Prepared generations**: `store.begin_prepare(spec)` fills a directory `p######` (not `g######`, so no GC and no
+  name race with the writer) and `commit()` writes its manifest plus a `PREPARED` marker. It needs no writer lock and
+  works in `follow=True`, so `vectors_import.py` runs next to the live backend; the live generation, `CURRENT` and
+  readers are untouched. One prepared generation per namespace: committing another replaces it. `store.prepared()`,
+  `store.discard_prepared()`.
+* **Adoption** (`store.adopt_matching(spec=None)`): when the live generation is missing, stale or empty and a finished
+  generation with the configured space key exists, make it live (a prepared one is renamed to the next `g######` and
+  its manifest rewritten; then `CURRENT` flips like a rebuild commit). Prepared generations are tried before kept ones.
+  Called on start by `semantic._load` and `sync` (which then also rewrites the legacy `emb.npy`/`meta.json`) and by
+  `FeedStore.vectors()` / `library_vectors()` (which drops vectors of candidates purged since the export). Never in
+  follow mode; if another process holds the writer lock it logs and returns None; any other failure falls back to
+  the rebuild. After adoption the normal sync compares text hashes (the import stores the export's) and embeds only
+  new or changed papers.
+* **Kept generations**: a swap that changes the space key (adoption, rollback, a CPU rebuild for another model) marks
+  the generation it replaces `RETAINED` (marker file) when `VECTOR_STORE_KEEP_GENERATIONS` > 1; `_gc` and `_reap`
+  skip marked directories and `_prune_retained` drops the oldest beyond `keep - 1`. Compaction and backend conversion
+  keep nothing. `store.retained()`, `store.rollback()` (writer lock; activates the newest kept generation and keeps the
+  current one in its place, so it undoes itself). Setting the old model again adopts the kept generation without the
+  script.
+* Tests: `test_bulk_embed_export.py`, `_embed.py` (also the ModernBERT load and the `KNOWN` entry), `_import.py`,
+  `_adopt.py` (store, library sync, feed, rollback script), `_conference.py` (the role split).
 
 ## Migration (zero downtime, no re-embedding)
 
