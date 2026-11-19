@@ -12,6 +12,7 @@ left as they are; nothing writes them any more.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -23,6 +24,8 @@ import numpy as np
 from services import vectorstore
 from services.feed import config
 from services.vectorstore import migrate, model_config
+
+log = logging.getLogger(__name__)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS candidate (
@@ -115,6 +118,16 @@ def candidates_by_ids(run, ids: list[str]) -> dict[str, Candidate]:
     return out
 
 
+def _adopt(vs) -> bool:
+    """Use a generation made elsewhere for the configured model (``scripts/vectors_import.py``, or a
+    kept one after setting the old model again) instead of embedding everything again."""
+    try:
+        return vs.adopt_matching(model_config.current()) is not None
+    except Exception as exc:  # noqa: BLE001 — the refresh rebuilds as before
+        log.warning("Feed vectors %s: could not adopt a finished generation (%s)", vs.namespace, exc)
+        return False
+
+
 def _vector_meta(source: str, published: str, fetched_at: str) -> dict:
     return {"kind": "candidate", "source": source, "published": published, "added_at": fetched_at}
 
@@ -162,6 +175,10 @@ class FeedStore:
             self._db.commit()
         return new
 
+    def all_candidates(self) -> list[Candidate]:
+        """Every stored candidate (without vectors), newest first."""
+        return [_row_to_candidate(r) for r in self._run("SELECT * FROM candidate ORDER BY published DESC")]
+
     def known_ids(self, ids: list[str]) -> set[str]:
         out: set[str] = set()
         for i in range(0, len(ids), 500):
@@ -178,6 +195,10 @@ class FeedStore:
             if self._feed_vectors is None:
                 migrate.migrate_feed_candidates(self._db, self._lock)
                 self._feed_vectors = vectorstore.get_store("feed")
+                if _adopt(self._feed_vectors):
+                    # candidates purged since the vectors were made have no row any more
+                    known = {r["id"] for r in self._run("SELECT id FROM candidate")}
+                    self._feed_vectors.delete([i for i in self._feed_vectors.ids() if i not in known])
                 if self._feed_vectors.backend_mismatch() and not self._feed_vectors.is_stale():
                     self._feed_vectors.convert_backend()
             return self._feed_vectors
@@ -188,6 +209,7 @@ class FeedStore:
             if self._library_vectors is None:
                 migrate.migrate_feed_library(self._db, self._lock)
                 self._library_vectors = vectorstore.get_store("feed_library")
+                _adopt(self._library_vectors)
             return self._library_vectors
 
     def vectors_stale(self) -> bool:

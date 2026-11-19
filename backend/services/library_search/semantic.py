@@ -51,6 +51,7 @@ _thread: threading.Thread | None = None
 _dir: Path | None = None
 _follow_store = None            # set in a process without the sync thread (MCP): reads what the backend writes
 _warned_open = False
+_adopted = False                # a finished generation was made live: emb.npy + meta.json are for the old model
 
 
 def enabled() -> bool:
@@ -133,12 +134,29 @@ def snapshot() -> tuple[list[str], np.ndarray]:
     return st.all_vectors()
 
 
+def _adopt(st) -> bool:
+    """Use a generation made elsewhere for the configured model (``scripts/vectors_import.py``, or a
+    kept one after setting the old model again) instead of a CPU rebuild. See ``adopt_matching``."""
+    global _adopted
+    try:
+        kind = st.adopt_matching(model_config.current())
+    except Exception as exc:  # noqa: BLE001 — never stop the sync: it rebuilds as before
+        log.warning("Library vectors: could not adopt a finished generation (%s)", exc)
+        return False
+    if kind:
+        log.info("Library embeddings: adopted a %s generation (%d papers); only changed papers are embedded now",
+                 kind, st.count())
+        _adopted = True
+    return bool(kind)
+
+
 def _load() -> None:
     """Open the library namespace, building it from the old emb.npy/meta.json the first time
     (no re-embedding). Runs in the sync thread."""
     try:
         migrate.migrate_library(data_dir(), model_config.current())
         st = vectorstore.get_store("library")
+        _adopt(st)
         if st.is_stale():
             log.info("Library vectors were built with another embedding model; rebuilding")
         else:
@@ -199,6 +217,7 @@ def sync(driver=None) -> dict:
         t0 = time.perf_counter()
         spec = model_config.current()
         st = vectorstore.get_store("library")
+        _adopt(st)
         if not st.is_stale(spec) and st.backend_mismatch():
             st.convert_backend()          # VECTOR_STORE changed: copy into the configured backend
         texts = _fetch_texts(driver)
@@ -230,8 +249,10 @@ def sync(driver=None) -> dict:
                 _state.update(state="building" if todo else "ready", done=0, todo=len(todo),
                               papers=len(texts), error=None)
             _embed_into(st, todo, texts, want, embed)
-        if todo or removed or not (data_dir() / "emb.npy").exists():
+        global _adopted
+        if todo or removed or _adopted or not (data_dir() / "emb.npy").exists():
             _export_legacy(st, spec)
+            _adopted = False
         took = round(time.perf_counter() - t0, 1)
         with _lock:
             _state.update(state="ready", last_sync=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))

@@ -46,6 +46,25 @@ RETIRE_GRACE_SECONDS = 60.0
 # and they outnumber half of the live ones.
 COMPACT_MIN_DEAD = 1000
 COMPACT_RATIO = 0.5
+# Generations kept for a rollback. When a swap changes the embedding space (another model), the
+# generation it replaces keeps its files, marked ``RETAINED``; VECTOR_STORE_KEEP_GENERATIONS counts
+# the live one, so the default 2 keeps the live generation and one before it, 1 keeps none (the old
+# one goes after RETIRE_GRACE_SECONDS, as it always did). A swap inside one space (compaction,
+# backend conversion) never keeps the old files.
+KEEP_ENV = "VECTOR_STORE_KEEP_GENERATIONS"
+DEFAULT_KEEP = 2
+RETAINED = "RETAINED"      # marker file in a kept, no longer live generation
+PREPARED = "PREPARED"      # marker file in a finished generation that was never live (``p######``)
+STALE_PREPARE_SECONDS = 24 * 3600.0
+
+
+def keep_generations() -> int:
+    """VECTOR_STORE_KEEP_GENERATIONS (default 2, at least 1; an unreadable value counts as unset)."""
+    raw = os.environ.get(KEEP_ENV, "").strip()
+    try:
+        return max(1, int(raw)) if raw else DEFAULT_KEEP
+    except ValueError:
+        return DEFAULT_KEEP
 
 
 class VectorStoreError(RuntimeError):
@@ -458,6 +477,16 @@ class _Rebuild(Rebuild):
             shutil.rmtree(self._gen.path, ignore_errors=True)
 
 
+class _Prepared(_Rebuild):
+    """A generation filled next to the live one that stays aside (``GenerationalStore.begin_prepare``)."""
+
+    def commit(self) -> None:
+        if self._done:
+            raise VectorStoreError("rebuild already finished")
+        self._store._commit_prepared(self)
+        self._done = True
+
+
 class GenerationalStore(VectorStore):
     """Namespace directory, ``CURRENT`` pointer, manifest, writer lock, rebuild/swap, compaction.
 
@@ -613,8 +642,9 @@ class GenerationalStore(VectorStore):
         """Remove generation directories nothing points to (left by a crash or an old swap)."""
         keep = self._read_current()
         for p in self.dir.glob("g[0-9]*"):
-            if p.name != keep and p.is_dir():
+            if p.name != keep and p.is_dir() and not (p / RETAINED).exists():
                 shutil.rmtree(p, ignore_errors=True)
+        self._prune_retained()
 
     def _retire(self, gen: Gen) -> None:
         with self._lock:
@@ -630,7 +660,7 @@ class GenerationalStore(VectorStore):
             try:
                 gen.close()
             finally:
-                if not self._follow:
+                if not self._follow and not (gen.path / RETAINED).exists():
                     shutil.rmtree(gen.path, ignore_errors=True)
 
     def _new_generation(self, spec: ModelSpec, backend: str) -> tuple[Gen, str]:
@@ -656,6 +686,15 @@ class GenerationalStore(VectorStore):
                             text_format=spec.text_format, generation=name, created_at=created, updated_at=created,
                             count=gen.count())
         _atomic_write(self._manifest_path(gen.path), json.dumps(manifest.to_dict(), indent=1))
+        self._flip(gen, name, manifest)
+
+    def _flip(self, gen: Gen, name: str, manifest: Manifest) -> None:
+        """Make ``gen`` (its manifest written) the live generation: keep the old one when the space
+        changes, flip ``CURRENT``, swap the in-memory pointer, retire the old generation."""
+        old, old_m = self._gen, self._manifest
+        if old is not None and old_m is not None and old.path.name != name and keep_generations() > 1 \
+                and old_m.spec().space_key() != manifest.spec().space_key():
+            self._write_marker(old.path, RETAINED)
         _atomic_write(self.dir / "CURRENT", name + "\n")
         _fsync_dir(self.dir)
         with self._lock:
@@ -665,6 +704,186 @@ class GenerationalStore(VectorStore):
         if old is not None:
             self._retire(old)
         self._reap()
+        self._prune_retained()
+
+    # ── kept, prepared and adopted generations ──────────────────────────────
+
+    @staticmethod
+    def _write_marker(gen_dir: Path, name: str) -> None:
+        try:
+            _atomic_write(gen_dir / name, json.dumps({"at": now_iso(), "epoch": time.time()}), durable=False)
+        except OSError as exc:
+            log.warning("Vector store: cannot mark %s as %s: %s", gen_dir, name, exc)
+
+    @staticmethod
+    def _marker_epoch(gen_dir: Path, name: str) -> float:
+        try:
+            return float(json.loads((gen_dir / name).read_text(encoding="utf-8")).get("epoch", 0.0))
+        except (OSError, ValueError):
+            return 0.0
+
+    def _marked(self, marker: str) -> list[Path]:
+        """Generation directories carrying ``marker``, newest first (RETAINED: ``g``, PREPARED: ``p``)."""
+        pattern = "p[0-9]*" if marker == PREPARED else "g[0-9]*"
+        found = [p for p in self.dir.glob(pattern) if p.is_dir() and (p / marker).exists()]
+        return sorted(found, key=lambda p: (self._marker_epoch(p, marker), p.name), reverse=True)
+
+    def _prune_retained(self) -> None:
+        """Drop the oldest kept generations beyond ``keep_generations() - 1`` (the live one counts)."""
+        if self._follow:
+            return
+        current = self._read_current()
+        kept = [p for p in self._marked(RETAINED) if p.name != current]
+        with self._lock:
+            open_paths = {g.path for g, _ in self._retired}
+        for p in kept[max(0, keep_generations() - 1):]:
+            if p in open_paths:                  # still open for readers: _reap removes it without the marker
+                (p / RETAINED).unlink(missing_ok=True)
+            else:
+                shutil.rmtree(p, ignore_errors=True)
+
+    def retained(self) -> list[Manifest]:
+        """Manifests of the kept (rollback) generations, newest first."""
+        return self._manifests(self._marked(RETAINED))
+
+    def prepared(self) -> list[Manifest]:
+        """Manifests of the generations prepared with ``begin_prepare``, newest first."""
+        return self._manifests(self._marked(PREPARED))
+
+    def _manifests(self, dirs: list[Path]) -> list[Manifest]:
+        out = []
+        for d in dirs:
+            try:
+                out.append(self._read_manifest(d))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return out
+
+    def begin_prepare(self, spec: ModelSpec | None = None, backend: str | None = None) -> Rebuild:
+        """Fill a generation for ``spec`` that is *not* made live: ``commit()`` only stores it (named
+        ``p######``, marked ``PREPARED``). The live generation, its writer and its readers are not
+        touched, and no writer lock is needed, so this works in a process next to the running backend
+        (also with ``follow=True``). A later start of the backend with this ``spec`` configured adopts
+        it (``adopt_matching``) instead of re-embedding. One prepared generation is kept per namespace:
+        committing another replaces it."""
+        spec = spec or self._expected_spec()
+        self.dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        for p in self.dir.glob("p[0-9]*"):      # a crashed preparation, long dead
+            if p.is_dir() and not (p / PREPARED).exists() and now - p.stat().st_mtime > STALE_PREPARE_SECONDS:
+                shutil.rmtree(p, ignore_errors=True)
+        cls = _gen_class(backend or self.backend)
+        n = max([int(p.name[1:]) for p in self.dir.glob("p[0-9]*") if p.name[1:].isdigit()] + [0]) + 1
+        while True:
+            name = f"p{n:06d}"
+            try:
+                gen = cls.create(self.dir / name, spec.dim)
+                break
+            except FileExistsError:
+                n += 1
+        return _Prepared(self, gen, spec, name)
+
+    def _commit_prepared(self, pr: "_Prepared") -> None:
+        gen = pr._gen
+        gen.flush()
+        created = now_iso()
+        spec = pr._spec
+        manifest = Manifest(namespace=self.namespace, backend=gen.backend, model=spec.model, dim=spec.dim,
+                            pooling=spec.pooling, query_prefix=spec.query_prefix, doc_prefix=spec.doc_prefix,
+                            text_format=spec.text_format, generation=pr.name, created_at=created,
+                            updated_at=created, count=gen.count())
+        _atomic_write(self._manifest_path(gen.path), json.dumps(manifest.to_dict(), indent=1))
+        gen.close()
+        self._write_marker(gen.path, PREPARED)
+        for other in self._marked(PREPARED):
+            if other != gen.path:
+                shutil.rmtree(other, ignore_errors=True)
+
+    def discard_prepared(self) -> int:
+        """Delete every prepared generation (an import that should not be used). Returns how many."""
+        dirs = self._marked(PREPARED)
+        for d in dirs:
+            shutil.rmtree(d, ignore_errors=True)
+        return len(dirs)
+
+    def adopt_matching(self, spec: ModelSpec | None = None) -> str | None:
+        """Make a finished generation of the configured space (``spec``) live instead of rebuilding:
+        a prepared one first, else a kept one (a rollback by setting the old model again). Done only
+        when the live generation is missing, stale or empty; never in follow mode. The generation
+        it replaces is kept as the rollback target when the space differs. Returns ``"prepared"``,
+        ``"retained"`` or None (nothing adopted)."""
+        if self._follow or self._closed:
+            return None
+        spec = spec or self._expected_spec()
+        key = spec.space_key()
+        with self._wlock:
+            m = self.manifest()
+            if m is not None and m.spec().space_key() == key and self.count() > 0:
+                return None
+            if not self._adoptable(key):
+                return None
+            try:
+                self._acquire_writer()          # may drop kept generations beyond the limit: list afterwards
+            except StoreLockedError as exc:
+                log.warning("Vector store %s: not adopting a finished generation: %s", self.namespace, exc)
+                return None
+            for kind, d in self._adoptable(key):
+                name = self._activate(d, kind == "prepared")
+                log.info("Vector store %s: adopted the %s generation for %s (%d vectors, now %s)",
+                         self.namespace, kind, spec.model, self.count(), name)
+                return kind
+        return None
+
+    def _adoptable(self, key: tuple) -> list[tuple[str, Path]]:
+        """Finished generations of the space ``key`` that are not live: prepared ones, then kept ones."""
+        current = self._read_current()
+        out = []
+        for kind, marker in (("prepared", PREPARED), ("retained", RETAINED)):
+            for d in self._marked(marker):
+                if d.name == current:
+                    continue
+                try:
+                    if self._read_manifest(d).spec().space_key() == key:
+                        out.append((kind, d))
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+        return out
+
+    def rollback(self) -> Manifest | None:
+        """Make the newest kept generation live again (the one a model switch replaced) and keep
+        the current one in its place, so a rollback can be undone by another. Returns the manifest
+        of the generation now live, or None when nothing is kept. The writer lock is needed: stop
+        the backend first."""
+        with self._wlock:
+            self._acquire_writer()
+            current = self._read_current()
+            for d in self._marked(RETAINED):
+                if d.name == current:
+                    continue
+                try:
+                    self._read_manifest(d)
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+                self._activate(d, False)
+                return self.manifest()
+        return None
+
+    def _activate(self, gen_dir: Path, rename: bool) -> str:
+        """Make the finished generation in ``gen_dir`` live. A prepared one (``rename``) first gets a
+        regular name (``g######``) and its manifest is rewritten with it. Writer lock held."""
+        if rename:
+            new_dir = self.dir / self._next_name()
+            os.rename(gen_dir, new_dir)
+            m = self._read_manifest(new_dir)
+            m = Manifest(**{**m.to_dict(), "generation": new_dir.name, "updated_at": now_iso()})
+            _atomic_write(self._manifest_path(new_dir), json.dumps(m.to_dict(), indent=1))
+            gen_dir = new_dir
+        manifest = self._read_manifest(gen_dir)
+        gen = _gen_class(manifest.backend).open(gen_dir, manifest.dim, read_only=False)
+        (gen_dir / PREPARED).unlink(missing_ok=True)
+        (gen_dir / RETAINED).unlink(missing_ok=True)
+        self._flip(gen, gen_dir.name, manifest)
+        return gen_dir.name
 
     def _touch_manifest(self, gen: Gen) -> None:
         m = self._manifest
