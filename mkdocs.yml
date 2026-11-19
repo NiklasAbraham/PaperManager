@@ -108,6 +108,7 @@ nav:
     - Tokens: user-guide/tokens.md
     - Suggestions: user-guide/suggestions.md
     - Health: user-guide/health.md
+    - Fill missing abstracts: user-guide/abstract-backfill.md
   - Technical reference:
     - Architecture: technical/architecture.md
     - Backend: technical/backend.md

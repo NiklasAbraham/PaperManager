@@ -81,6 +81,8 @@ services:
       - PAPER_FEED=${PAPER_FEED:-false}
       - PAPER_FEED_INTERVAL=${PAPER_FEED_INTERVAL:-21600}
       - PAPER_FEED_CONTACT=${PAPER_FEED_CONTACT:-}
+      # Contact for the abstract backfill's User-Agent (docs/user-guide/abstract-backfill.md).
+      - ABSTRACT_BACKFILL_CONTACT=${ABSTRACT_BACKFILL_CONTACT:-}
       # Vector store and embedding model (.specs/019_vector_store.md); data on backend_data:/data.
       - VECTOR_STORE=${VECTOR_STORE:-exact}
       - EMBED_MODEL=${EMBED_MODEL:-}
