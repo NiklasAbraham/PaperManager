@@ -102,6 +102,19 @@ def _row_to_candidate(r: sqlite3.Row) -> Candidate:
     )
 
 
+def candidates_by_ids(run, ids: list[str]) -> dict[str, Candidate]:
+    """Candidates (without vectors) by id. ``run(sql, args)`` returns ``sqlite3.Row`` rows; the
+    ids are bound as parameters, 500 at a time."""
+    out: dict[str, Candidate] = {}
+    ids = list(dict.fromkeys(ids))
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for r in run(f"SELECT * FROM candidate WHERE id IN ({marks})", tuple(chunk)):
+            out[r["id"]] = _row_to_candidate(r)
+    return out
+
+
 def _vector_meta(source: str, published: str, fetched_at: str) -> dict:
     return {"kind": "candidate", "source": source, "published": published, "added_at": fetched_at}
 
@@ -232,6 +245,10 @@ class FeedStore:
             got = vs.get([cid])
             c.emb = got[cid][0] if cid in got else None
         return c
+
+    def by_ids(self, ids: list[str]) -> dict[str, Candidate]:
+        """Candidates by id, without their vectors."""
+        return candidates_by_ids(self._run, ids)
 
     def get_embeddings(self, ids: list[str]) -> dict[str, np.ndarray]:
         vs = self.vectors()

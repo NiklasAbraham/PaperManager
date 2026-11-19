@@ -119,6 +119,11 @@ def _peek():
         return None
 
 
+def peek():
+    """The library namespace as this process reads it (the follower in the MCP server), or None."""
+    return _peek()
+
+
 def snapshot() -> tuple[list[str], np.ndarray]:
     """Every indexed paper id with its vector (a copy); empty while the store is missing or stale.
     For the paper feed, which compares candidates with the whole library."""

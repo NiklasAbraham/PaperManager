@@ -99,3 +99,20 @@ def sync_missing_embeddings(driver, store: FeedStore, embed) -> int:
         store.set_library_embeddings({pid: (semantic.text_hash(texts[pid]), vecs[j])
                                       for j, pid in enumerate(chunk)})
     return len(todo)
+
+
+def match_candidate(index, c) -> str | None:
+    """The id of the library paper (in ``index``, built by ``library_lookup.build_index`` from the
+    papers the user may see) that candidate ``c`` is, or None: arXiv id or DOI first, then title."""
+    from services.library_lookup import match_item
+
+    ids: list[str] = []
+    arxiv_doi = f"arXiv:{c.ext_id}" if c.source == "arxiv" else c.doi
+    for doi in (arxiv_doi, c.doi):
+        if doi:
+            _, ids = match_item(doi, "", index)
+            if ids:
+                break
+    if not ids:
+        _, ids = match_item("", c.title, index)
+    return ids[0] if ids else None

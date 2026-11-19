@@ -142,7 +142,7 @@ def _wanted(c, cfg: config.FeedConfig, source: str | None) -> bool:
 
 def digest(driver, store: FeedStore, user: str, *, days: int | None = None, skip: int = 0, limit: int = 30,
            include_rated: bool = False, source: str | None = None, now: datetime | None = None) -> dict:
-    from services.library_lookup import build_index, match_item
+    from services.library_lookup import build_index
 
     cfg = store.get_config(user) or config.FeedConfig()
     days = days or cfg.digest_days
@@ -185,16 +185,7 @@ def digest(driver, store: FeedStore, user: str, *, days: int | None = None, skip
         score = None if scores is None else float(scores[i])
         if score is not None and cfg.min_score > 0 and score < cfg.min_score:
             continue
-        ids = []
-        arxiv_doi = f"arXiv:{c.ext_id}" if c.source == "arxiv" else c.doi
-        for doi in (arxiv_doi, c.doi):
-            if doi:
-                _, ids = match_item(doi, "", index)
-                if ids:
-                    break
-        if not ids:
-            _, ids = match_item("", c.title, index)
-        items.append((c, score, ids[0] if ids else None, i))
+        items.append((c, score, library.match_candidate(index, c), i))
 
     if scores is None:
         items.sort(key=lambda t: t[0].published, reverse=True)
