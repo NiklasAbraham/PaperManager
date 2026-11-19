@@ -1,6 +1,8 @@
 """Batch backfill operations — apply AI enrichment to existing papers."""
 import logging
-from fastapi import APIRouter, Depends
+import threading
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from db.connection import get_driver
 from db.queries.papers import list_papers
 from db.queries.topics import link_paper_topic
@@ -192,3 +194,42 @@ def backfill_embeddings():
             errors += 1
 
     return {"processed": processed, "skipped": skipped, "errors": errors}
+
+
+# Largest batch one request may process: the route is synchronous like the others here, and a
+# gateway gives up on a long request. Use scripts/backfill_abstracts.py for the whole library.
+ABSTRACTS_ROUTE_DEFAULT_LIMIT = 100
+ABSTRACTS_ROUTE_MAX_LIMIT = 500
+_abstracts_lock = threading.Lock()
+
+
+class AbstractBackfillRequest(BaseModel):
+    dry_run: bool = True
+    limit: int | None = Field(None, ge=1, le=ABSTRACTS_ROUTE_MAX_LIMIT)
+    include_stubs: bool = False
+    sources: list[str] | None = None
+    title_search: bool = False
+
+
+@router.post("/abstracts")
+def backfill_abstracts(body: AbstractBackfillRequest | None = None):
+    """Fill missing abstracts from OpenAlex, Semantic Scholar, arXiv and Crossref.
+
+    Dry run unless ``dry_run`` is false. Returns counts, per-source statistics, error messages
+    and at most 50 sample paper ids (no titles); the full per-paper report is the CLI's."""
+    from services import abstract_backfill
+
+    body = body or AbstractBackfillRequest()
+    try:
+        abstract_backfill.normalise_sources(body.sources)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not _abstracts_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="An abstract backfill is already running")
+    try:
+        report = abstract_backfill.run_backfill(
+            get_driver(), dry_run=body.dry_run, limit=body.limit or ABSTRACTS_ROUTE_DEFAULT_LIMIT,
+            include_stubs=body.include_stubs, sources=body.sources, title_search=body.title_search)
+    finally:
+        _abstracts_lock.release()
+    return abstract_backfill.summarize_for_api(report)
