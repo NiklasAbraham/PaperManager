@@ -72,6 +72,17 @@ def _neo4j_schema():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_vector_store(tmp_path_factory, monkeypatch):
+    """Every test gets its own, empty vector store directory (services/vectorstore)."""
+    from services import vectorstore
+
+    monkeypatch.setenv("VECTOR_STORE_DIR", str(tmp_path_factory.mktemp("vectors")))
+    vectorstore.reset()
+    yield
+    vectorstore.reset()
+
+
+@pytest.fixture(autouse=True)
 def _no_external_network(request, monkeypatch):
     """Fail any test (except @integration ones) that tries to reach a host other than the
     test Neo4j. The lookup is refused as if offline, so code that swallows network errors
