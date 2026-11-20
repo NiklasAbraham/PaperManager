@@ -131,7 +131,7 @@ describe("Feed", () => {
     vi.mocked(feed.listFeed).mockResolvedValue(digest([item()], { quality: { auc: 0.874, positives: 42, held_out: 8 } }));
     renderPage();
     const strip = await screen.findByLabelText("Feed status");
-    await waitFor(() => expect(strip).toHaveTextContent("Ranked by a model trained on 42 papers you liked"));
+    await waitFor(() => expect(strip).toHaveTextContent("Ranked by a model trained on 42 papers from your library"));
     expect(strip).toHaveTextContent("240 papers stored");
     expect(strip).toHaveTextContent("Held-out AUC 0.87");
     expect(strip).toHaveTextContent("A rough guide, not a promise");
