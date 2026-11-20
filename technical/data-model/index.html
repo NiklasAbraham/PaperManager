@@ -834,6 +834,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/paper-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Paper feed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/similar-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Similar papers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -959,6 +1005,52 @@
   
   <span class="md-ellipsis">
     Health
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/switching-the-embedding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Switching the embedding model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/abstract-backfill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Fill missing abstracts
     
   </span>
   
@@ -1456,6 +1548,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#stores-outside-neo4j" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stores outside Neo4j
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#metadata_source-values" class="md-nav__link">
     <span class="md-ellipsis">
       metadata_source Values
@@ -1495,6 +1596,29 @@
   
   <span class="md-ellipsis">
     AI pipelines
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../embedding-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Embedding benchmark
     
   </span>
   
@@ -1937,6 +2061,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#stores-outside-neo4j" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stores outside Neo4j
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#metadata_source-values" class="md-nav__link">
     <span class="md-ellipsis">
       metadata_source Values
@@ -2014,6 +2147,16 @@
 <td>Original abstract</td>
 </tr>
 <tr>
+<td><code>abstract_source</code></td>
+<td>string</td>
+<td>Set only by the <a href="../../user-guide/abstract-backfill/">abstract backfill</a>: <code>openalex</code>, <code>semanticscholar</code>, <code>arxiv</code> or <code>crossref</code>; removed again by its undo</td>
+</tr>
+<tr>
+<td><code>abstract_fetched_at</code></td>
+<td>string</td>
+<td>ISO UTC time of that backfill write (<code>updated_at</code> is not touched)</td>
+</tr>
+<tr>
 <td><code>summary</code></td>
 <td>string</td>
 <td>AI-generated summary (Claude Opus)</td>
@@ -2071,7 +2214,7 @@
 <tr>
 <td><code>embedding</code></td>
 <td>float[]</td>
-<td>Ollama embedding vector (768-dim, nomic-embed-text)</td>
+<td>Legacy 768-dim vector from the LiteLLM embeddings API (<code>LITELLM_EMBED_MODEL</code>, empty by default: not written). Library search, the feed and similar papers use the vector store instead</td>
 </tr>
 <tr>
 <td><code>created_at</code></td>
@@ -3374,10 +3517,44 @@
 <td>Vector (cosine)</td>
 <td>Paper</td>
 <td><code>embedding</code></td>
-<td>Semantic similarity (768-dim, nomic-embed-text)</td>
+<td>Knowledge chat's semantic tool (768-dim, legacy <code>Paper.embedding</code>)</td>
 </tr>
 </tbody>
 </table>
+<hr />
+<h2 id="stores-outside-neo4j">Stores outside Neo4j<a class="headerlink" href="#stores-outside-neo4j" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Where</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Vector store</td>
+<td><code>VECTOR_STORE_DIR</code> (default <code>/data/vectors</code>), one folder per namespace: <code>library</code>, <code>feed</code>, <code>feed_library</code></td>
+<td>Embedding vectors of paper titles and abstracts. A namespace holds generations (<code>g000001</code>, ... and, while a model switch is prepared, <code>p000001</code>) and a <code>CURRENT</code> file naming the live one; each generation has a <code>manifest.json</code> with the model, dimension and pooling it was built with. <code>.specs/019_vector_store.md</code></td>
+</tr>
+<tr>
+<td>Library search files</td>
+<td><code>LIBRARY_SEARCH_DIR</code> (default <code>/data/library_search</code>)</td>
+<td><code>emb.npy</code> + <code>meta.json</code>, still rewritten after a sync for the topic map</td>
+</tr>
+<tr>
+<td>Paper feed</td>
+<td><code>PAPER_FEED_DIR</code> (default <code>/data/feed</code>), only with <code>PAPER_FEED=true</code></td>
+<td><code>feed.sqlite</code>: fetched preprints (candidates), thumbs, per-user settings and refresh runs. <code>.specs/018_paper_feed.md</code></td>
+</tr>
+<tr>
+<td>Conference datasets</td>
+<td><code>CONFERENCE_DATA_DIR</code> (default <code>/data/conferences</code>)</td>
+<td>Per-conference files and the Hugging Face model cache</td>
+</tr>
+</tbody>
+</table>
+<p>All four must sit on a persistent volume; the self-hosting compose file does that.</p>
 <hr />
 <h2 id="metadata_source-values"><code>metadata_source</code> Values<a class="headerlink" href="#metadata_source-values" title="Permanent link">&para;</a></h2>
 <p>Records which metadata extraction layer was used for each paper:</p>

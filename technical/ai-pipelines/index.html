@@ -18,7 +18,7 @@
         <link rel="prev" href="../data-model/">
       
       
-        <link rel="next" href="../ingestion-workflow/">
+        <link rel="next" href="../embedding-benchmark/">
       
       
       <link rel="icon" href="../../img/favicon.svg">
@@ -834,6 +834,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/paper-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Paper feed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/similar-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Similar papers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -959,6 +1005,52 @@
   
   <span class="md-ellipsis">
     Health
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/switching-the-embedding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Switching the embedding model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/abstract-backfill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Fill missing abstracts
     
   </span>
   
@@ -1236,9 +1328,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#paper-embedding" class="md-nav__link">
+  <a href="#embeddings-and-the-vector-store" class="md-nav__link">
     <span class="md-ellipsis">
-      Paper Embedding
+      Embeddings and the vector store
     </span>
   </a>
   
@@ -1365,6 +1457,29 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../embedding-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Embedding benchmark
+    
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -1559,9 +1674,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#paper-embedding" class="md-nav__link">
+  <a href="#embeddings-and-the-vector-store" class="md-nav__link">
     <span class="md-ellipsis">
-      Paper Embedding
+      Embeddings and the vector store
     </span>
   </a>
   
@@ -1732,9 +1847,14 @@
 <td>Metadata extraction (layer 2), tag suggestion, chapter detection, figure captions (default), affiliation extraction, Cypher assist, merge scan</td>
 </tr>
 <tr>
-<td><code>nomic-embed-text</code></td>
-<td>Ollama (local)</td>
-<td>Paper embedding vectors for semantic similarity search</td>
+<td><code>BAAI/bge-small-en-v1.5</code> (default of <code>EMBED_MODEL</code>)</td>
+<td>local, CPU (<code>transformers</code>)</td>
+<td>Embedding vectors of titles and abstracts for library semantic search, the paper feed, similar papers and the conference explorer</td>
+</tr>
+<tr>
+<td><code>LITELLM_EMBED_MODEL</code> (empty = off)</td>
+<td>LiteLLM proxy</td>
+<td>Legacy <code>Paper.embedding</code> vector used by the knowledge chat's semantic tool</td>
 </tr>
 </tbody>
 </table>
@@ -1861,12 +1981,29 @@
     Claims --&gt; DB["Create Claim nodes\nHAS_CLAIM relationships"]</code></pre>
 <p>Claim types include <code>"finding"</code>, <code>"method"</code>, <code>"limitation"</code>, <code>"contribution"</code>.</p>
 <hr />
-<h2 id="paper-embedding">Paper Embedding<a class="headerlink" href="#paper-embedding" title="Permanent link">&para;</a></h2>
-<p>Triggered during upload (if enabled in settings) or via backfill.</p>
+<h2 id="embeddings-and-the-vector-store">Embeddings and the vector store<a class="headerlink" href="#embeddings-and-the-vector-store" title="Permanent link">&para;</a></h2>
+<p>No language-model call is made. A local embedder (<code>transformers</code> on the CPU, <code>services/conferences/embedder.py</code>) turns
+the title and abstract of every paper (or its summary when there is no abstract) into a unit vector. The model is
+<code>EMBED_MODEL</code>, by default <code>BAAI/bge-small-en-v1.5</code> (384 numbers per paper); <code>services/vectorstore/model_config.py</code>
+holds the dimension, pooling and prefixes of the models it knows and takes <code>EMBED_DIM</code> and friends for others.</p>
 <pre class="mermaid"><code>flowchart LR
-    A["title + abstract"] --&gt; O["Ollama nomic-embed-text"]
-    O --&gt; V["768-dim embedding vector"]
-    V --&gt; DB["Stored on Paper.embedding\n(vector index for ANN search)"]</code></pre>
+    A["title + abstract"] --&gt; E["Embedder (CPU)\nEMBED_MODEL"]
+    E --&gt; S["Vector store\nnamespaces: library, feed, feed_library"]
+    S --&gt; L["Library search\n(hybrid / semantic)"]
+    S --&gt; F["Paper feed ranking"]
+    S --&gt; M["Similar papers\nPOST /search/similar, MCP"]</code></pre>
+<p>Each namespace records the model it was built with, so vectors of two models are never mixed: after an <code>EMBED_MODEL</code>
+change, search answers by keywords until the namespace is rebuilt on the CPU in the background, or until a generation
+prepared elsewhere is adopted on start (<code>scripts/vectors_export.py</code>, <code>embed_bulk.py</code> on a GPU machine,
+<code>vectors_import.py</code>; <code>vectors_rollback.py</code> goes back). The conference explorer keeps its own saved vectors and reads
+<code>CONFERENCE_EMBED_MODEL</code> first. See <a href="../../user-guide/switching-the-embedding-model/">Switching the embedding model</a> and
+<code>.specs/019_vector_store.md</code>.</p>
+<p>The optional <a href="../../user-guide/paper-feed/">paper feed</a> trains a small numpy logistic regression per user on these
+vectors (no API call) and <a href="../../user-guide/similar-search/">similar papers</a> is a nearest-neighbour search over the same
+namespaces.</p>
+<p>The older <strong><code>Paper.embedding</code></strong> (a 768-dim vector with the Neo4j index <code>paper_embeddings</code>) is produced through the
+LiteLLM embeddings API with <code>LITELLM_EMBED_MODEL</code>, which is empty by default (off). Only the knowledge chat's semantic
+tool uses it; it fails silently when unavailable.</p>
 <hr />
 <h2 id="single-paper-chat">Single-Paper Chat<a class="headerlink" href="#single-paper-chat" title="Permanent link">&para;</a></h2>
 <p>Triggered via <code>POST /papers/{id}/chat</code>.</p>
@@ -2138,13 +2275,13 @@ See <a href="../architecture/#usage-ledger">Architecture</a>.</p>
         
         
           
-          <a href="../ingestion-workflow/" class="md-footer__link md-footer__link--next" aria-label="Next: Ingestion workflow">
+          <a href="../embedding-benchmark/" class="md-footer__link md-footer__link--next" aria-label="Next: Embedding benchmark">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Ingestion workflow
+                Embedding benchmark
               </div>
             </div>
             <div class="md-footer__button md-icon">

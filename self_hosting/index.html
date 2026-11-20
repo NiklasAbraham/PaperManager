@@ -573,6 +573,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Step 3a: run on localhost">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#optional-paper-feed-and-embedding-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Optional: paper feed and embedding model
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -944,6 +959,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../user-guide/paper-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Paper feed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/similar-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Similar papers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -1069,6 +1130,52 @@
   
   <span class="md-ellipsis">
     Health
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/switching-the-embedding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Switching the embedding model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/abstract-backfill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Fill missing abstracts
     
   </span>
   
@@ -1251,6 +1358,29 @@
   
   
     <li class="md-nav__item">
+      <a href="../technical/embedding-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Embedding benchmark
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../technical/ingestion-workflow/" class="md-nav__link">
         
   
@@ -1402,6 +1532,21 @@
       Step 3a: run on localhost
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Step 3a: run on localhost">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#optional-paper-feed-and-embedding-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Optional: paper feed and embedding model
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1569,9 +1714,24 @@ has no disk to keep files on. For Drive locally, also uncomment the two <code>cr
 <p>Create your account (step 4), then open <strong>http://localhost:8080</strong>.</p>
 <ul>
 <li>Stop: <code>docker compose -f docker-compose.selfhost.yml down</code>. Your data stays in the <code>neo4j_data</code>
-  volume. <code>down -v</code> deletes it.</li>
+  volume (the graph) and the <code>paper_files</code> volume (PDFs, figures, conference datasets, and under
+  <code>/app/data</code> the embedding vectors in <code>vectors/</code> and, with the paper feed on, <code>feed/</code>). <code>down -v</code>
+  deletes both.</li>
 <li>Update: <code>git pull</code>, then run the <code>up -d --build</code> command again.</li>
 </ul>
+<h3 id="optional-paper-feed-and-embedding-model">Optional: paper feed and embedding model<a class="headerlink" href="#optional-paper-feed-and-embedding-model" title="Permanent link">&para;</a></h3>
+<p>Both are off or default unless you set them in <code>.env</code> (then <code>up -d</code> again):</p>
+<ul>
+<li><code>PAPER_FEED=true</code> switches on the <a href="../user-guide/paper-feed/">paper feed</a>, a digest of new preprints
+  ranked by your library. Its database lives in <code>PAPER_FEED_DIR</code>.</li>
+<li><code>EMBED_MODEL</code> chooses the model behind library search, the feed and
+  <a href="../user-guide/similar-search/">similar papers</a>. The default <code>BAAI/bge-small-en-v1.5</code> needs nothing
+  more; for another one, and for doing the re-embedding on a GPU machine, see
+  <a href="../user-guide/switching-the-embedding-model/">Switching the embedding model</a>.</li>
+</ul>
+<p><code>docker-compose.selfhost.yml</code> already points <code>PAPER_FEED_DIR</code> (<code>/app/data/feed</code>) and <code>VECTOR_STORE_DIR</code>
+(<code>/app/data/vectors</code>) at the <code>paper_files</code> volume, so both survive a rebuild. If you run the backend
+some other way, put both folders (and <code>CONFERENCE_DATA_DIR</code>) on a persistent disk.</p>
 <h2 id="step-3b-run-on-heroku">Step 3b: run on Heroku<a class="headerlink" href="#step-3b-run-on-heroku" title="Permanent link">&para;</a></h2>
 <p>Heroku has no free tier and no persistent disk, so the database lives on Neo4j AuraDB Free.</p>
 <ol>
@@ -1615,6 +1775,9 @@ has no disk to keep files on. For Drive locally, also uncomment the two <code>cr
 <li>Create your account (step 4), then open <code>https://&lt;APP_HOST&gt;</code>.</li>
 </ol>
 <p>To update: <code>git pull</code> from GitHub, then <code>git push heroku main</code> again.</p>
+<p>Heroku's disk is wiped at every restart. The vectors of the library search are then rebuilt on the
+CPU (search answers by keywords until that is done) and the paper feed would lose its ratings and
+fetched papers, so leave <code>PAPER_FEED</code> off there.</p>
 <h2 id="step-4-create-your-account">Step 4: create your account<a class="headerlink" href="#step-4-create-your-account" title="Permanent link">&para;</a></h2>
 <p>The account named <code>DEFAULT_USER_NAME</code> is the owner and admin. It is also the only account that
 uses the server-wide <code>ANTHROPIC_API_KEY</code>. Other users you add later enter their own key under

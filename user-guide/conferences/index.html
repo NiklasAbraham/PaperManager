@@ -18,7 +18,7 @@
         <link rel="prev" href="../knowledge-features/">
       
       
-        <link rel="next" href="../mcp-server/">
+        <link rel="next" href="../paper-feed/">
       
       
       <link rel="icon" href="../../img/favicon.svg">
@@ -1004,6 +1004,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../paper-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Paper feed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../similar-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Similar papers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../mcp-server/" class="md-nav__link">
         
   
@@ -1129,6 +1175,52 @@
   
   <span class="md-ellipsis">
     Health
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../switching-the-embedding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Switching the embedding model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../abstract-backfill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Fill missing abstracts
     
   </span>
   
@@ -1294,6 +1386,29 @@
   
   <span class="md-ellipsis">
     AI pipelines
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../technical/embedding-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Embedding benchmark
     
   </span>
   
@@ -1874,6 +1989,11 @@ their <code>library_paper_id</code>.</p>
 <td>CPU threads for embedding</td>
 </tr>
 <tr>
+<td><code>CONFERENCE_EMBED_MODEL</code></td>
+<td>empty</td>
+<td>The explorer's embedding model. Read first; <code>EMBED_MODEL</code> is used only when this is empty. Set it to the model the explorer's datasets were built with before you move the library to another one (<a href="../switching-the-embedding-model/">how</a>)</td>
+</tr>
+<tr>
 <td><code>CONFERENCE_CACHE_MAX</code></td>
 <td><code>32</code></td>
 <td>Conferences held in memory at once (20–40 MB each); searching all conferences needs every loaded one in memory</td>
@@ -1937,13 +2057,13 @@ of the paper lists and, once, the model.</p>
         
         
           
-          <a href="../mcp-server/" class="md-footer__link md-footer__link--next" aria-label="Next: MCP server (Claude)">
+          <a href="../paper-feed/" class="md-footer__link md-footer__link--next" aria-label="Next: Paper feed">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                MCP server (Claude)
+                Paper feed
               </div>
             </div>
             <div class="md-footer__button md-icon">

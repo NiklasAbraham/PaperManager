@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://niklasabraham.github.io/PaperManager/technical/architecture/">
       
       
-        <link rel="prev" href="../../user-guide/health/">
+        <link rel="prev" href="../../user-guide/abstract-backfill/">
       
       
         <link rel="next" href="../backend/">
@@ -834,6 +834,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/paper-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Paper feed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/similar-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Similar papers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -959,6 +1005,52 @@
   
   <span class="md-ellipsis">
     Health
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/switching-the-embedding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Switching the embedding model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/abstract-backfill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Fill missing abstracts
     
   </span>
   
@@ -1159,6 +1251,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#embeddings-and-the-vector-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      Embeddings and the vector store
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#key-design-decisions" class="md-nav__link">
     <span class="md-ellipsis">
       Key Design Decisions
@@ -1258,6 +1359,29 @@
   
   <span class="md-ellipsis">
     AI pipelines
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../embedding-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Embedding benchmark
     
   </span>
   
@@ -1472,6 +1596,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#embeddings-and-the-vector-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      Embeddings and the vector store
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#key-design-decisions" class="md-nav__link">
     <span class="md-ellipsis">
       Key Design Decisions
@@ -1585,6 +1718,16 @@
 <td>Full-text + filter search</td>
 </tr>
 <tr>
+<td><code>similar.py</code></td>
+<td><code>/search/similar</code></td>
+<td>Nearest papers to an abstract or to a library paper, in the library and the feed</td>
+</tr>
+<tr>
+<td><code>feed.py</code></td>
+<td><code>/feed</code></td>
+<td>Optional paper feed (404 unless <code>PAPER_FEED=true</code>, except <code>/feed/status</code>)</td>
+</tr>
+<tr>
 <td><code>graph.py</code></td>
 <td><code>/graph</code></td>
 <td>Graph visualisation data + admin Cypher query (<code>/graph/query</code>)</td>
@@ -1607,7 +1750,7 @@
 <tr>
 <td><code>backfill.py</code></td>
 <td><code>/backfill</code></td>
-<td>Bulk AI enrichment (topics, summaries, figures)</td>
+<td>Bulk enrichment (topics, summaries, figures, claims, embeddings) and missing abstracts by DOI (<code>/backfill/abstracts</code>)</td>
 </tr>
 <tr>
 <td><code>knowledge_chat.py</code></td>
@@ -1775,7 +1918,19 @@
 </tr>
 <tr>
 <td><code>embeddings.py</code></td>
-<td>Generate Ollama embeddings for semantic similarity</td>
+<td>Legacy <code>Paper.embedding</code> vector through the LiteLLM embeddings API (<code>LITELLM_EMBED_MODEL</code>, off by default)</td>
+</tr>
+<tr>
+<td><code>feed/</code></td>
+<td>Optional paper feed: arXiv / bioRxiv / medRxiv fetchers, SQLite store, per-user logistic regression, refresh thread</td>
+</tr>
+<tr>
+<td><code>similar_search.py</code></td>
+<td>Visibility-aware nearest-neighbour search over the library and feed vectors</td>
+</tr>
+<tr>
+<td><code>abstract_backfill.py</code></td>
+<td>Fills missing abstracts from OpenAlex, Semantic Scholar, arXiv and Crossref</td>
 </tr>
 <tr>
 <td><code>person_enrichment.py</code></td>
@@ -1808,6 +1963,10 @@
 <tr>
 <td><code>cypher_result.py</code></td>
 <td>Turns a Cypher result into table rows plus graph nodes and links (<code>POST /graph/query</code>)</td>
+</tr>
+<tr>
+<td><code>vectorstore/</code></td>
+<td>Vector store for library semantic search and the paper feed: namespaces with a manifest (model, dimension), atomic rebuild when the embedding model changes, numpy backend by default, optional LanceDB</td>
 </tr>
 <tr>
 <td><code>conferences/</code></td>
@@ -1968,6 +2127,30 @@ as aggregates, and keeps working when the graph is down.</p>
 </ul>
 <p>Row layout and API: <code>.specs/013_tokens.md</code>.</p>
 <hr />
+<h2 id="embeddings-and-the-vector-store">Embeddings and the vector store<a class="headerlink" href="#embeddings-and-the-vector-store" title="Permanent link">&para;</a></h2>
+<p>Everything that compares papers by meaning (library semantic search, the optional <a href="../../user-guide/paper-feed/">paper feed</a>,
+<a href="../../user-guide/similar-search/">similar papers</a>, the conference explorer) uses one CPU embedder and one vector store,
+not Neo4j.</p>
+<pre class="mermaid"><code>graph LR
+    Embedder["Embedder (CPU)&lt;br/&gt;EMBED_MODEL"] --&gt; Store[("Vector store&lt;br/&gt;VECTOR_STORE_DIR")]
+    Store --&gt; Search["Library search"]
+    Store --&gt; Feed["Paper feed&lt;br/&gt;(+ feed.sqlite)"]
+    Store --&gt; Similar["Similar papers&lt;br/&gt;/search/similar, MCP"]
+    MCP["MCP server"] --&gt;|"POST /conferences/embed"| Embedder</code></pre>
+<ul>
+<li><strong>One model setting.</strong> <code>services/vectorstore/model_config.py</code> reads <code>EMBED_MODEL</code> (default <code>BAAI/bge-small-en-v1.5</code>,
+  384 numbers per paper) and, for a model it does not know, <code>EMBED_DIM</code>, <code>EMBED_POOLING</code> and the prefixes. The conference
+  explorer keeps its own saved vectors and reads <code>CONFERENCE_EMBED_MODEL</code> first.</li>
+<li><strong>Never mixed.</strong> Each namespace (<code>library</code>, <code>feed</code>, <code>feed_library</code>) records the model it was built with. When the
+  configured model differs the namespace is stale: search falls back to keywords while it is rebuilt in the background,
+  or a generation prepared on a GPU machine is adopted on start (<code>scripts/vectors_export.py</code>, <code>embed_bulk.py</code>,
+  <code>vectors_import.py</code>; <code>vectors_rollback.py</code> goes back). See <a href="../../user-guide/switching-the-embedding-model/">Switching the embedding model</a>.</li>
+<li><strong>Backends.</strong> numpy on a memory-mapped file plus SQLite by default; LanceDB is optional (<code>VECTOR_STORE=lance</code>).</li>
+<li><strong>The MCP server loads no model.</strong> It reads the stores read-only and asks the backend for query vectors
+  (<code>POST /conferences/embed</code>, <code>PM_EMBED_URL</code>), so it needs the same <code>VECTOR_STORE_DIR</code> (and <code>PAPER_FEED_DIR</code>) as the backend.</li>
+</ul>
+<p>Developer notes: <code>.specs/019_vector_store.md</code>.</p>
+<hr />
 <h2 id="key-design-decisions">Key Design Decisions<a class="headerlink" href="#key-design-decisions" title="Permanent link">&para;</a></h2>
 <p>See the full <a href="../../decisions/">Decisions Log</a> for rationale. The key principles:</p>
 <ol>
@@ -1977,7 +2160,7 @@ as aggregates, and keeps working when the graph is down.</p>
 <li><strong>Notes as graph nodes</strong> — Notes have their own <code>@mention</code> and <code>#topic</code> relationships</li>
 <li><strong>Shared service layer</strong> — MCP tools and HTTP routers call the same <code>db/</code> and <code>services/</code> code</li>
 <li><strong>Prompts as files</strong> — All prompt templates live in <code>prompts/</code> and are loaded fresh on each call</li>
-<li><strong>Vector embeddings</strong> — Paper nodes store Ollama embeddings for semantic similarity search</li>
+<li><strong>Vector embeddings outside the graph</strong> — library search, the paper feed and similar papers read one vector store that records the embedding model of each index (default <code>BAAI/bge-small-en-v1.5</code>, CPU); the model can be switched with a rebuild or a GPU bulk job, and vectors of two models are never mixed</li>
 <li><strong>User identity</strong> — <code>User</code> nodes enable per-user conversation history and attribution</li>
 <li><strong>Ledger outside the graph</strong> — LLM usage is bookkeeping, not library content, so it lives in SQLite</li>
 </ol>
@@ -2018,7 +2201,7 @@ as aggregates, and keeps working when the graph is down.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../../user-guide/health/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Health">
+          <a href="../../user-guide/abstract-backfill/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Fill missing abstracts">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2028,7 +2211,7 @@ as aggregates, and keeps working when the graph is down.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Health
+                Fill missing abstracts
               </div>
             </div>
           </a>

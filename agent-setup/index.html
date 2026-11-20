@@ -899,6 +899,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../user-guide/paper-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Paper feed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/similar-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Similar papers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -1024,6 +1070,52 @@
   
   <span class="md-ellipsis">
     Health
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/switching-the-embedding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Switching the embedding model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/abstract-backfill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Fill missing abstracts
     
   </span>
   
@@ -1189,6 +1281,29 @@
   
   <span class="md-ellipsis">
     AI pipelines
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../technical/embedding-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Embedding benchmark
     
   </span>
   
@@ -1437,6 +1552,10 @@ server fails and an Anthropic key is set, the fast tasks retry on Claude Haiku
 (<code>AI_FALLBACK=false</code> turns that off). The model
 menus in the app show the active model by name, and Claude options appear only for users who
 have a Claude key.</p>
+<p>Two optional features stay off or at their defaults unless you ask for them: the
+<a href="../user-guide/paper-feed/">paper feed</a> (<code>PAPER_FEED=true</code>) and another
+<a href="../user-guide/switching-the-embedding-model/">embedding model</a> (<code>EMBED_MODEL</code>). Their data
+(<code>/app/data/feed</code>, <code>/app/data/vectors</code>) sits on the same <code>paper_files</code> volume as your PDFs.</p>
 <p>To change something later, edit <code>.env</code> and run
 <code>docker compose -f docker-compose.selfhost.yml up -d</code>. A colour or model change needs no rebuild.</p>
 <h2 id="without-an-agent">Without an agent<a class="headerlink" href="#without-an-agent" title="Permanent link">&para;</a></h2>

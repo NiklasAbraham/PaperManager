@@ -834,6 +834,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/paper-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Paper feed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/similar-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Similar papers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/mcp-server/" class="md-nav__link">
         
   
@@ -959,6 +1005,52 @@
   
   <span class="md-ellipsis">
     Health
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/switching-the-embedding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Switching the embedding model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/abstract-backfill/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Fill missing abstracts
     
   </span>
   
@@ -1129,6 +1221,29 @@
   
   <span class="md-ellipsis">
     AI pipelines
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../embedding-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Embedding benchmark
     
   </span>
   
@@ -1543,6 +1658,24 @@
   <a href="#suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       Suggestions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#paper-feed-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      Paper feed (optional)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#similar-papers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Similar papers
     </span>
   </a>
   
@@ -1997,6 +2130,24 @@
   <a href="#suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       Suggestions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#paper-feed-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      Paper feed (optional)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#similar-papers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Similar papers
     </span>
   </a>
   
@@ -3180,7 +3331,7 @@ saved with the answer, so reopening a conversation shows them again.</p>
 <tr>
 <td><code>POST</code></td>
 <td><code>/conferences/embed</code></td>
-<td><code>{"text"}</code> → <code>{"model", "dim", "vector"}</code>: the bge-small embedding of a text as given (the caller adds the query instruction), for MCP processes that do not load the model; 503 until it is loaded</td>
+<td><code>{"text", "document"?, "role"?}</code> → <code>{"model", "dim", "vector"}</code>: the embedding of a text as given (the caller adds the query instruction), for MCP processes that do not load the model; 503 until it is loaded. <code>"document": true</code> embeds the text the way a stored paper is embedded (document prefix, 256 tokens). <code>"role"</code> is <code>"library"</code> (default: the model set by <code>EMBED_MODEL</code>, bge-small unless changed) or <code>"conference"</code> (the explorer's model: <code>CONFERENCE_EMBED_MODEL</code> first, else <code>EMBED_MODEL</code>)</td>
 </tr>
 <tr>
 <td><code>GET</code></td>
@@ -3408,6 +3559,93 @@ calls (<code>user</code> is ignored). See <a href="../architecture/#usage-ledger
 </tbody>
 </table>
 <hr />
+<h2 id="paper-feed-optional">Paper feed (optional)<a class="headerlink" href="#paper-feed-optional" title="Permanent link">&para;</a></h2>
+<p>Only with <code>PAPER_FEED=true</code>. Otherwise every route except <code>/feed/status</code> answers 404 and <code>/feed/status</code> answers <code>{"enabled": false}</code>. Ids contain <code>:</code> and sometimes <code>/</code>; URL-encode them.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/feed/status</code></td>
+<td><code>{enabled, state (idle\|refreshing), last_refresh, next_refresh, candidates, embedded, mode, positives, quality {auc, positives, held_out}, error}</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/feed</code></td>
+<td><code>?days=&amp;skip=&amp;limit=&amp;include_rated=&amp;source=arxiv\|biorxiv\|medrxiv</code>. Ranked <code>items</code> with <code>score</code>, <code>neighbours</code>, <code>in_library</code>, <code>library_paper_id</code>, <code>my_label</code>; <code>mode</code> is <code>classifier</code>, <code>similarity</code> or <code>newest</code></td>
+</tr>
+<tr>
+<td><code>GET</code> / <code>PUT</code></td>
+<td><code>/feed/config</code></td>
+<td>Your <code>{sources, arxiv_categories (≤ 30, pattern like cs.LG), digest_days (1–14), min_score (0–1)}</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/feed/refresh</code></td>
+<td>Start a fetch now (admin, or the only user); 202, 409 while one runs</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/feed/{id}/rate</code></td>
+<td><code>{value: 1 \| -1}</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/feed/{id}/dismiss</code></td>
+<td>Label 0</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/feed/{id}/label</code></td>
+<td>Remove your label</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/feed/{id}/add</code></td>
+<td><code>{project_id?}</code>: ingest by URL, link to the project, record a thumbs-up</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="similar-papers">Similar papers<a class="headerlink" href="#similar-papers" title="Permanent link">&para;</a></h2>
+<p>Nearest papers to a text or to a library paper, by embedding similarity. Login required. Library hits respect your project visibility; feed hits (only with <code>PAPER_FEED=true</code>) carry only your own <code>my_label</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/search/similar</code></td>
+<td>Body <code>{text (20-20000 characters), k (1-50, default 10), scope (library\|feed\|both, default both), since? (YYYY-MM-DD), min_score? (-1 to 1, default 0), include_stubs? (default false)}</code>. 422 for a bad body, 404 for <code>scope=feed</code> while the feed is off (<code>both</code> then means the library). 200 <code>{available, reason, scope, mode (document\|query), total, hits, skipped, warnings?}</code>; <code>available: false</code> with a <code>reason</code> while the index is missing, still building or being rebuilt for a new embedding model. A hit: <code>{source (library\|feed), id, title, authors, year, url, score, snippet, abstract, in_library, library_paper_id, my_label, ...}</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/search/similar/{paper_id}</code></td>
+<td>The same for a library paper (<code>?k=&amp;scope=&amp;since=&amp;min_score=&amp;include_stubs=</code>), the paper itself left out; <code>mode</code> is <code>paper</code>; 404 if the paper does not exist or you may not see it</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="err">POST /search/similar</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="err">{&quot;text&quot;: &quot;Sparse attention for long documents. We study ...&quot;, &quot;k&quot;: 2, &quot;scope&quot;: &quot;library&quot;}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="err">200 {&quot;available&quot;: true, &quot;reason&quot;: null, &quot;scope&quot;: &quot;library&quot;, &quot;mode&quot;: &quot;document&quot;, &quot;k&quot;: 2, &quot;total&quot;: 2,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="err">     &quot;hits&quot;: [{&quot;source&quot;: &quot;library&quot;, &quot;id&quot;: &quot;p1&quot;, &quot;title&quot;: &quot;...&quot;, &quot;authors&quot;: [&quot;...&quot;], &quot;year&quot;: 2024,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="err">               &quot;url&quot;: &quot;https://&lt;your-host&gt;/paper/p1&quot;, &quot;score&quot;: 0.8312, &quot;snippet&quot;: &quot;...&quot;,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="err">               &quot;abstract&quot;: &quot;...&quot;, &quot;in_library&quot;: true, &quot;library_paper_id&quot;: &quot;p1&quot;, &quot;my_label&quot;: null}, ...],</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="err">     &quot;skipped&quot;: {}}</span>
+</code></pre></div>
+<hr />
 <h2 id="system-health">System health<a class="headerlink" href="#system-health" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3480,6 +3718,21 @@ calls (<code>user</code> is ignored). See <a href="../architecture/#usage-ledger
 <td><code>POST</code></td>
 <td><code>/backfill/figures</code></td>
 <td>Bulk figure extraction</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/backfill/claims</code></td>
+<td>Bulk claim extraction</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/backfill/embeddings</code></td>
+<td>Bulk legacy <code>Paper.embedding</code> generation (needs <code>LITELLM_EMBED_MODEL</code>)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/backfill/abstracts</code></td>
+<td>Fill missing abstracts by DOI from OpenAlex, Semantic Scholar, arXiv and Crossref. Body <code>{dry_run (default true), limit (1-500, default 100), include_stubs, sources, title_search}</code>; 409 while one runs; returns counts, per-source statistics and up to 50 sample ids, no titles. All <code>/backfill/*</code> routes are admin only. See <a href="../../user-guide/abstract-backfill/">Abstract backfill</a></td>
 </tr>
 </tbody>
 </table>
