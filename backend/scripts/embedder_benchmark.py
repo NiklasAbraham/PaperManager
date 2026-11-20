@@ -28,6 +28,9 @@ DATA directory (all read-only, written by an export of the library):
   cites.json        [[citing_id, cited_id], ...] between library papers
   topics.jsonl      {"id": paper id, "topics": [topic name, ...]}
   meta.json         optional: {"single_user": bool} (how the feed treats ratings; default false)
+  stubs.jsonl       optional: reference-list entries with text (id, title, abstract, summary), the extra
+                    neighbour pool of the "stubs" variant of M1
+  cites_all.json    optional: [[citing_id, cited_id], ...] over library papers and stubs together
 
 Embedded text is ``title + "\\n" + abstract[:1500]`` (abstract, else the AI summary), exactly
 what services/library_search/semantic.py ``paper_text`` produces; ``paper_parts`` below is a
@@ -158,7 +161,10 @@ def load_data(d: Path) -> dict:
     cites = json.loads((d / "cites.json").read_text())
     topics = {r["id"]: r["topics"] for r in read_jsonl(d / "topics.jsonl")}
     meta = json.loads((d / "meta.json").read_text()) if (d / "meta.json").exists() else {}
-    return {"lib": lib, "cands": cands, "cites": cites, "topics": topics, "meta": meta}
+    stubs = read_jsonl(d / "stubs.jsonl") if (d / "stubs.jsonl").exists() else []
+    cites_all = json.loads((d / "cites_all.json").read_text()) if (d / "cites_all.json").exists() else cites
+    return {"lib": lib, "cands": cands, "cites": cites, "topics": topics, "meta": meta,
+            "stubs": stubs, "cites_all": cites_all}
 
 
 # ── embedding ─────────────────────────────────────────────────────────────────
@@ -215,14 +221,17 @@ def run_embed(args, data: dict, out: Path) -> dict:
 
     lib_parts = [paper_parts(r.get("title"), r.get("abstract"), r.get("summary")) for r in data["lib"]]
     cand_parts = [paper_parts(r.get("title"), r.get("abstract"), None) for r in data["cands"]]
-    all_parts = lib_parts + cand_parts
+    stub_parts = [paper_parts(r.get("title"), r.get("abstract"), r.get("summary")) for r in data["stubs"]]
+    all_parts = lib_parts + cand_parts + stub_parts
     n_lib = len(lib_parts)
+    n_cand = len(cand_parts)
     infos: dict = {}
     for name in args.models:
         sl = slug(name)
         vdir = out / "vectors" / sl
         info_p = out / f"embed_{sl}.json"
-        if args.resume and (vdir / "library.npy").exists() and info_p.exists():
+        if args.resume and (vdir / "library.npy").exists() and info_p.exists() \
+                and (not stub_parts or (vdir / "stubs.npy").exists()):
             infos[name] = json.loads(info_p.read_text())
             print(f"[{name}] resume: vectors exist", flush=True)
             continue
@@ -287,7 +296,9 @@ def run_embed(args, data: dict, out: Path) -> dict:
                 info["peak_reserved_mb"] = round(torch.cuda.max_memory_reserved() / 2**20)
             vdir.mkdir(parents=True, exist_ok=True)
             np.save(vdir / "library.npy", vecs[:n_lib])
-            np.save(vdir / "candidates.npy", vecs[n_lib:])
+            np.save(vdir / "candidates.npy", vecs[n_lib:n_lib + n_cand])
+            if stub_parts:
+                np.save(vdir / "stubs.npy", vecs[n_lib + n_cand:])
             print(f"[{name}] dim {info['dim']} {info['papers_per_s']} papers/s "
                   f"peak {info.get('peak_alloc_mb')} MB ({used})", flush=True)
         except Exception as exc:  # noqa: BLE001 — a model that fails is skipped with the reason
@@ -312,39 +323,43 @@ def topk(sim: np.ndarray, k: int = 10) -> np.ndarray:
     return part[rows, np.argsort(-sim[rows, part], axis=1)]
 
 
-def metric_m1(X: np.ndarray, ids: list[str], cites: list, seeds: list[int], k: int = 10) -> dict:
+def metric_m1(X: np.ndarray, ids: list[str], cites: list, seeds: list[int], k: int = 10,
+              query_ids: set | None = None) -> dict:
+    """Citation-neighbour recall over a pool (rows of X). ``query_ids`` limits which pool papers are
+    queries (default: all with an edge to another pool paper); the pool is always all rows."""
     pos = {p: i for i, p in enumerate(ids)}
     nb: dict[int, set[int]] = {}
     for a, b in cites:
         if a in pos and b in pos and a != b:
             nb.setdefault(pos[a], set()).add(pos[b])
             nb.setdefault(pos[b], set()).add(pos[a])
-    q = sorted(nb)
+    q = sorted(i for i in nb if query_ids is None or ids[i] in query_ids)
     if not q:
-        return {"n": 0}
-    sim = X @ X.T
-    np.fill_diagonal(sim, -np.inf)
+        return {"n": 0, "pool": len(ids)}
+    sim = X[q] @ X.T
+    for r, i in enumerate(q):
+        sim[r, i] = -np.inf
     top = topk(sim, k)
     rec, hit, rr = [], [], []
-    for i in q:
-        found = len(nb[i] & set(top[i].tolist()))
+    for r, i in enumerate(q):
+        found = len(nb[i] & set(top[r].tolist()))
         rec.append(found / len(nb[i]))
         hit.append(found > 0)
-        # rank of the first neighbour in the full ranking
-        s = sim[i]
-        best = max(s[j] for j in nb[i])
-        rr.append(1.0 / (1 + int((s > best).sum())))
+        s_ = sim[r]
+        best = max(s_[j] for j in nb[i])
+        rr.append(1.0 / (1 + int((s_ > best).sum())))
     n = X.shape[0]
     rand = []
     for sd in seeds:
         rng = np.random.default_rng(sd)
-        r = []
+        rr_ = []
         for i in q:
             cand = rng.choice(n - 1, size=k, replace=False)
             cand = cand + (cand >= i)            # skip the paper itself
-            r.append(len(nb[i] & set(cand.tolist())) / len(nb[i]))
-        rand.append(float(np.mean(r)))
-    return {"n": len(q), "recall10": float(np.mean(rec)), "hit10": float(np.mean(hit)), "mrr": float(np.mean(rr)),
+            rr_.append(len(nb[i] & set(cand.tolist())) / len(nb[i]))
+        rand.append(float(np.mean(rr_)))
+    return {"n": len(q), "pool": n, "recall10": float(np.mean(rec)), "hit10": float(np.mean(hit)),
+            "mrr": float(np.mean(rr)), "per_query_recall": [float(x) for x in rec],
             "random_recall10": float(np.mean(rand)), "random_recall10_sd": float(np.std(rand))}
 
 
@@ -458,6 +473,8 @@ def _metric_m3(fm, ranking, pos, neg, data, lib_vecs, cand_vecs, seeds) -> dict:
         X, y, w = fm.design_matrix(sub)
         th, b = fm.fit_logreg(X, y, w)
         clean_.append(fm.auc(fm.predict(th, b, ts.pos[held]), fm.predict(th, b, ts.random_neg[rh])))
+    res["held_out_random"] = int(max(1, int(round(fm.HOLD_OUT * P))))
+    res["auc_random_per_seed"] = [float(x) for x in rand]
     res["auc_random"] = float(np.mean(rand))
     res["auc_random_sd"] = float(np.std(rand))
     res["auc_clean"] = float(np.mean(clean_))
@@ -472,6 +489,9 @@ def run_eval(args, data: dict, out: Path, infos: dict) -> dict:
     text_ids = [p for p, m in zip(ids, text_mask) if m]
     text_set = set(text_ids)
     text_cites = [e for e in data["cites"] if e[0] in text_set and e[1] in text_set]
+    # strict subset: queries that have a real abstract (not just a summary) and a citation edge in the library
+    abstract_ids = {r["id"] for r in data["lib"] if (r.get("abstract") or "").strip()}
+    stub_ids = [r["id"] for r in data["stubs"]]
     results: dict = {}
     for name in args.models:
         vdir = out / "vectors" / slug(name)
@@ -482,7 +502,12 @@ def run_eval(args, data: dict, out: Path, infos: dict) -> dict:
         r = {"m1_all": metric_m1(X, ids, data["cites"], seeds),
              "m1_text": metric_m1(X[text_mask], text_ids, text_cites, seeds),
              "m2_all": metric_m2(X, ids, data["topics"], seeds),
+             "m1_strict": metric_m1(X, ids, data["cites"], seeds, query_ids=abstract_ids),
              "m2_text": metric_m2(X[text_mask], text_ids, {p: data["topics"].get(p) for p in text_ids}, seeds)}
+        if data["stubs"] and (vdir / "stubs.npy").exists():
+            S = np.load(vdir / "stubs.npy")
+            real = set(ids)
+            r["m1_stubs"] = metric_m1(np.vstack([X, S]), ids + stub_ids, data["cites_all"], seeds, query_ids=real)
         if args.feed_code:
             try:
                 r["m3"] = metric_m3(Path(args.feed_code), data, X, C, seeds)

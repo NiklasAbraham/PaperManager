@@ -116,6 +116,7 @@ nav:
     - Frontend: technical/frontend.md
     - Data model: technical/data-model.md
     - AI pipelines: technical/ai-pipelines.md
+    - Embedding benchmark: technical/embedding-benchmark.md
     - Ingestion workflow: technical/ingestion-workflow.md
     - API reference: technical/api-reference.md
     - UI style guide: style-guide.md
