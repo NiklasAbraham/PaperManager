@@ -10,9 +10,9 @@ already on your shelf, or whether something close has shown up in the feed.
 The text can describe a paper that **does not exist**: "I am looking for work that trains a diffusion model on
 protein backbones with a fixed-length latent." The search does not need a real paper to start from.
 
-Nothing leaves your instance. The text is embedded by the same small model that powers the library's semantic
-search, running on your own server; no outside service and no language-model API is called, so it costs no
-tokens.
+Nothing leaves your instance. The text is embedded by the model that powers the library's semantic search
+(`EMBED_MODEL`, by default the small `BAAI/bge-small-en-v1.5` on your own server's CPU); no outside service and no
+language-model API is called, so it costs no tokens.
 
 ## How to use it
 
@@ -41,14 +41,15 @@ Two actions per result:
 | Scope | Looks in |
 |---|---|
 | **Library** | the papers you may see: those outside every project and those in projects you are a member of |
-| **Feed** | the candidates the feed has fetched and kept (it keeps them for 30 days by default, longer if somebody rated them) |
+| **Feed** | the feed's *candidates*, the preprints it has fetched and kept (30 days by default, longer if somebody rated them; see [Paper feed](paper-feed.md)) |
 | **Both** | both lists merged by score |
 
 Without the feed the toggle is not shown and the search runs on the library. Reference stubs (papers that only
-exist because another paper cites them) are left out, because a title alone embeds poorly.
+exist because another paper cites them, tagged `from-references`) are left out, because a title alone embeds poorly.
 
-**Published since** limits feed papers by their publication date. A library paper only has a year, so it counts
-as published on 1 January of that year; library papers without a year are left out when you set a date.
+**Published since** limits feed papers by their publication date. A library paper only has a year, so it is
+compared by year alone: with 1 October 2026 a library paper from 2026 stays in, one from 2025 goes; library papers
+without a year are left out when you set a date.
 
 ## Writing a good query
 
@@ -61,7 +62,7 @@ as published on 1 January of that year; library papers without a year are left o
   papers), so a long text is read from its start.
 - **Vary it.** Two or three wordings of the same idea show you whether the neighbours are stable.
 
-As a rough guide for the default model, a score above about **0.8** is a close match, **0.6 to 0.8** related
+As a rough guide for the default model (scores of another model sit on another scale), a score above about **0.8** is a close match, **0.6 to 0.8** related
 work, and **below 0.6** weak.
 
 ## Using it from Claude (MCP)
@@ -88,8 +89,9 @@ The page shows **The index is not ready for this search** with the reason, and t
 
 - the server has just started and is still building the index of the library (a few minutes for a large
   library; the first start after switching on semantic search takes longest),
-- the embedding model was changed (`EMBED_MODEL`) and the index is being rebuilt with it (it answers again as
-  soon as the new index is complete),
+- the embedding model was changed (`EMBED_MODEL`) and the index is being rebuilt with it, or a prepared one has
+  not been adopted yet (it answers again as soon as a complete index for the new model is in place; see
+  [Switching the embedding model](switching-the-embedding-model.md)),
 - the embedding model is still loading after a start,
 - semantic search is switched off (`LIBRARY_SEMANTIC=false`), or
 - you chose **Feed** and the feed has not embedded any papers yet.
@@ -100,8 +102,10 @@ answers.
 ## Limits
 
 - **Quality depends on the embedding model and on the abstracts you hold.** The default model is small and
-  fast; it finds topics and approaches well and subtle differences poorly. A paper in your library without an
-  abstract (or with only a title) embeds badly and will rarely be found. If the library has a summary instead
+  fast; it finds topics and approaches well and subtle differences poorly. The operator can
+  [choose a larger or scientific model](switching-the-embedding-model.md#choosing-an-embedding-model). A paper in
+  your library without an abstract (or with only a title) embeds badly and will rarely be found:
+  [fill the missing abstracts](abstract-backfill.md) of papers that have a DOI. If the library has a summary instead
   of an abstract, the summary is used.
 - **Similar is not the same.** A high score says two texts are about the same thing, not that one paper repeats
   the other. Read the abstract before deciding.
@@ -110,3 +114,9 @@ answers.
 - **Other users' papers stay hidden.** You only get papers you may see, and on a shared instance a feed paper is
   marked *In your library* only if it is among them. Your thumbs-ups and thumbs-downs from the feed are yours
   alone.
+
+## See also
+
+- [Paper feed](paper-feed.md): the new preprints that the **Feed** scope searches.
+- [Fill missing abstracts](abstract-backfill.md): gives papers without an abstract something to be found by.
+- [Switching the embedding model](switching-the-embedding-model.md): changes what "similar" means.

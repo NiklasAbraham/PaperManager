@@ -48,6 +48,8 @@ frontend/
     │   ├── kchat/           # Knowledge chat: ToolCall rows, TurnSources, FigureStrip, structure cards, copyTex, composer
     │   ├── insights/        # Shared pieces of Tokens / Reports / Suggestions / Health (BarChart, DataTable, StatRow, SuggestionChip)
     │   ├── literature/      # ExternalSearch and KeywordFeed (the two tabs of Find papers)
+    │   ├── feed/            # Paper feed: FeedSetup, FeedRow, FeedStatus, modeText.ts
+    │   ├── similar/         # Similar papers: SimilarRow, queryFromHit
     │   └── UserPicker.tsx       # Active user selector (navbar)
     │
     └── pages/
@@ -97,6 +99,8 @@ React Router v7 defines the page routes in `App.tsx`:
 | `/discover` | redirect | Goes to `/literature?tab=search` (Discover is part of Find papers) |
 | `/chat` | redirect | Goes to `/knowledge` |
 | `/reports`, `/reports/:id` | `Reports`, `ReportView` | Report list and one report |
+| `/feed` | `Feed` | Optional paper feed (nav entry only when `GET /feed/status` says `enabled`) |
+| `/similar` | `SimilarSearch` | Similar papers: nearest papers to a pasted abstract |
 | `/tokens` | `Tokens` | Usage ledger |
 | `/suggestions` | `Suggestions` | Improvement ideas |
 | `/health` | `Health` | System health (admin) |
@@ -138,6 +142,16 @@ Streams recent papers from arXiv, PubMed, and bioRxiv using keyword lists. Paper
 ### Find papers (Discover folded in)
 
 `LiteratureSearch.tsx` has two tabs: **Search** (`components/literature/ExternalSearch.tsx`: arXiv, Semantic Scholar, PubMed and bioRxiv, showing which results are already in the library) and **Feed** (`KeywordFeed.tsx`). The old Discover page is gone.
+
+### Paper feed (`Feed.tsx`) and Similar papers (`SimilarSearch.tsx`)
+
+Both sit under **Explore**. `Feed.tsx` (`/feed`, API in `api/feed.ts`) shows the setup panel until the user has chosen
+categories, then the ranked list with a status strip (`FeedStatus`, whose ranking line comes from `modeText.ts`: a
+trained model, similarity to the library, or newest first); rows are `FeedRow`. The nav entry exists only when the
+instance has the feed on: `lib/features.ts` asks `GET /feed/status` once after login. `SimilarSearch.tsx` (`/similar`,
+`api/similar.ts`) posts a title and paragraph to `POST /search/similar`, shows scope buttons only when the feed is on,
+and lists `SimilarRow`s; **Use this paper as the query** copies a hit's text into the box (`queryFromHit.ts`). Both are
+lazy-loaded.
 
 ### Tokens, Reports, Suggestions, Health
 

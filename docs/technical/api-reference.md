@@ -357,7 +357,7 @@ The Discover page was folded into **Find papers** in the frontend (`/discover` r
 | `GET` | `/conferences/catalog` | Every known conference-year with its build state, the area taxonomy, the default set |
 | `GET` | `/conferences/search/query` | Across all loaded conferences (`?q=&kind=all\|paper\|author&series=&field=&year_min=&year_max=&limit=`): `papers` (`title` matches with `title_match`, `semantic` by meaning, `title_total`, `highlight`, `corrected`), `authors` (cards with papers per conference, institutions, `identities`; `highlight`, `corrected`), `suggested` tab, `ms`. Case-insensitive |
 | `POST` | `/conferences/search/topic` | `{query, k=300, series?, field?, year_min?, year_max?, papers?}`: the k closest papers pooled over all loaded conferences (title vectors); `conferences` with `count` and `per_1k`, `trend` per series, pooled `academia` / `industry`, `areas`, `papers`, `threshold`, `skipped` |
-| `POST` | `/conferences/embed` | `{"text"}` → `{"model", "dim", "vector"}`: the bge-small embedding of a text as given (the caller adds the query instruction), for MCP processes that do not load the model; 503 until it is loaded. `{"text", "document": true}` embeds the text the way a stored paper is embedded (document prefix, 256 tokens) |
+| `POST` | `/conferences/embed` | `{"text", "document"?, "role"?}` → `{"model", "dim", "vector"}`: the embedding of a text as given (the caller adds the query instruction), for MCP processes that do not load the model; 503 until it is loaded. `"document": true` embeds the text the way a stored paper is embedded (document prefix, 256 tokens). `"role"` is `"library"` (default: the model set by `EMBED_MODEL`, bge-small unless changed) or `"conference"` (the explorer's model: `CONFERENCE_EMBED_MODEL` first, else `EMBED_MODEL`) |
 | `GET` | `/conferences/{key}/status` | Build state: `none`, `queued`, `fetching`, `normalising`, `embedding`, `ready`, `partial`, `unavailable`, `error` (+ `progress`) |
 | `POST` | `/conferences/{key}/build` | Queue a download + index (also refreshes a loaded one) |
 | `GET` | `/conferences/{key}/overview` | Counts, area mix, top universities and companies (409 while not loaded) |
@@ -492,7 +492,9 @@ POST /search/similar
 | `POST` | `/backfill/topics` | Bulk AI topic assignment |
 | `POST` | `/backfill/summary` | Bulk AI summarisation |
 | `POST` | `/backfill/figures` | Bulk figure extraction |
-| `POST` | `/backfill/abstracts` | Fill missing abstracts by DOI (dry run unless `dry_run: false`); admin only. See [Abstract backfill](../user-guide/abstract-backfill.md) |
+| `POST` | `/backfill/claims` | Bulk claim extraction |
+| `POST` | `/backfill/embeddings` | Bulk legacy `Paper.embedding` generation (needs `LITELLM_EMBED_MODEL`) |
+| `POST` | `/backfill/abstracts` | Fill missing abstracts by DOI from OpenAlex, Semantic Scholar, arXiv and Crossref. Body `{dry_run (default true), limit (1-500, default 100), include_stubs, sources, title_search}`; 409 while one runs; returns counts, per-source statistics and up to 50 sample ids, no titles. All `/backfill/*` routes are admin only. See [Abstract backfill](../user-guide/abstract-backfill.md) |
 
 ---
 

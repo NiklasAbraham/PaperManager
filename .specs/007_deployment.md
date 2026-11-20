@@ -48,6 +48,12 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=<generated>
 ```
 
+Optional features (all off or at their defaults; `docker-compose.example.yml` passes the main ones through (the directories default to `/data/feed` and `/data/vectors`), their data sits on the
+`backend_data:/data` volume): `PAPER_FEED` and `PAPER_FEED_*` (`.specs/018_paper_feed.md`), `EMBED_MODEL`, `EMBED_*`,
+`CONFERENCE_EMBED_MODEL`, `VECTOR_STORE`, `VECTOR_STORE_DIR`, `VECTOR_STORE_KEEP_GENERATIONS` (`.specs/019_vector_store.md`)
+and `ABSTRACT_BACKFILL_CONTACT` (`.specs/021_abstract_backfill.md`). The vector store and the feed database must be on a
+persistent volume; the MCP server needs the same `VECTOR_STORE_DIR` and `PAPER_FEED_DIR` as the backend for the similar-paper tools.
+
 ### 2. Build and Start
 
 ```bash

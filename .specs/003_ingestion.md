@@ -45,7 +45,7 @@ A **confirmation modal** shows the extracted metadata. You can review and overri
 2. Paper node created in Neo4j (or existing stub enriched if DOI matches)
 3. Claude Opus generates AI summary from abstract + full text
 4. Claude Haiku extracts `Claim` nodes
-5. Ollama `nomic-embed-text` generates embedding (if enabled in Settings)
+5. Legacy `Paper.embedding` generated through the LiteLLM embeddings API (only when `LITELLM_EMBED_MODEL` is set); the vector store picks the paper up on its next sync, independent of this step
 6. Authors linked as `Person` nodes; affiliation extraction runs if affiliations missing
 7. Topics suggested by Claude Haiku (3–6 title-case), linked via `ABOUT`
 8. References extracted and shown for review (S2 API → chunked LLM → parser; see Reference Import)

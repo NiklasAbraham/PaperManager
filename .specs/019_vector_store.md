@@ -133,7 +133,7 @@ semantic sync and the feed) copies it into the configured one without re-embeddi
 | `VECTOR_STORE_KEEP_GENERATIONS` | `2` | generations kept per namespace after a swap that changes the model, the live one included (`1`: none), see Bulk re-embedding |
 
 `model_config.KNOWN` lists dimension, pooling and prefixes for a few bge, e5, MiniLM, MPNet and SPECTER2
-models; anything else needs `EMBED_DIM`. Empty variables count as unset. The embedder
+models and the scientific-text `J0nasW/sciembed-full`; anything else needs `EMBED_DIM`. Empty variables count as unset. The embedder
 (`services/conferences/embedder.py`) takes model, dimension, pooling and prefixes from `model_config`. It has two
 roles: *library* (`embed`, `embed_query`, `embed_document`, `ready`; `EMBED_MODEL`: library search, feed, similar
 papers) and *conference* (`conference_embed`, `conference_embed_query`, `conference_ready`;

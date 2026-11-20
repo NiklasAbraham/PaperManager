@@ -176,6 +176,17 @@ topic is published, per conference and over the years.
 ![Conference explorer](img/screenshots/conferences.webp)
 </div>
 
+### New preprints, and papers like this abstract
+
+Switch on the optional **paper feed** and a digest of new arXiv, bioRxiv and medRxiv preprints is
+ranked for you by a small model trained on your own library; it runs on your server and nothing
+about you is sent out. **Similar papers** takes an abstract, even one for a paper that does not
+exist yet, and lists the closest papers of your library and the feed with a score.
+
+[Paper feed :octicons-arrow-right-24:](user-guide/paper-feed.md) ·
+[Similar papers :octicons-arrow-right-24:](user-guide/similar-search.md) ·
+[Switching the embedding model :octicons-arrow-right-24:](user-guide/switching-the-embedding-model.md)
+
 ---
 
 ## See it in action
@@ -215,7 +226,7 @@ More on the [project page](https://niklas-abraham.de/projects/papermanager/#tear
 
     ---
 
-    The MCP server gives Claude Desktop and Claude Code 42 tools to search, read and edit
+    The MCP server gives Claude Desktop and Claude Code 44 tools to search, read and edit
     your library.
 
     [:octicons-arrow-right-24: MCP server](user-guide/mcp-server.md)

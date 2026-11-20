@@ -104,8 +104,25 @@ docker compose -f docker-compose.selfhost.yml logs -f app      # wait for "Appli
 Create your account (step 4), then open **http://localhost:8080**.
 
 - Stop: `docker compose -f docker-compose.selfhost.yml down`. Your data stays in the `neo4j_data`
-  volume. `down -v` deletes it.
+  volume (the graph) and the `paper_files` volume (PDFs, figures, conference datasets, and under
+  `/app/data` the embedding vectors in `vectors/` and, with the paper feed on, `feed/`). `down -v`
+  deletes both.
 - Update: `git pull`, then run the `up -d --build` command again.
+
+### Optional: paper feed and embedding model
+
+Both are off or default unless you set them in `.env` (then `up -d` again):
+
+- `PAPER_FEED=true` switches on the [paper feed](user-guide/paper-feed.md), a digest of new preprints
+  ranked by your library. Its database lives in `PAPER_FEED_DIR`.
+- `EMBED_MODEL` chooses the model behind library search, the feed and
+  [similar papers](user-guide/similar-search.md). The default `BAAI/bge-small-en-v1.5` needs nothing
+  more; for another one, and for doing the re-embedding on a GPU machine, see
+  [Switching the embedding model](user-guide/switching-the-embedding-model.md).
+
+`docker-compose.selfhost.yml` already points `PAPER_FEED_DIR` (`/app/data/feed`) and `VECTOR_STORE_DIR`
+(`/app/data/vectors`) at the `paper_files` volume, so both survive a rebuild. If you run the backend
+some other way, put both folders (and `CONFERENCE_DATA_DIR`) on a persistent disk.
 
 ## Step 3b: run on Heroku
 
@@ -156,6 +173,10 @@ Heroku has no free tier and no persistent disk, so the database lives on Neo4j A
 5. Create your account (step 4), then open `https://<APP_HOST>`.
 
 To update: `git pull` from GitHub, then `git push heroku main` again.
+
+Heroku's disk is wiped at every restart. The vectors of the library search are then rebuilt on the
+CPU (search answers by keywords until that is done) and the paper feed would lose its ratings and
+fetched papers, so leave `PAPER_FEED` off there.
 
 ## Step 4: create your account
 

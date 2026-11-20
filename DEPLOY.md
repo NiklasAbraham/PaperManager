@@ -191,6 +191,12 @@ Then the everyday commands:
 | Change a setting | edit `.env`, then `docker compose -f docker-compose.selfhost.yml up -d` |
 | Update to the latest version | `git pull && docker compose -f docker-compose.selfhost.yml up -d --build` |
 
+Do not switch on the optional features unless the user asks: the paper feed (`PAPER_FEED=true`,
+[docs/user-guide/paper-feed.md](docs/user-guide/paper-feed.md)) and another embedding model
+(`EMBED_MODEL`, [docs/user-guide/switching-the-embedding-model.md](docs/user-guide/switching-the-embedding-model.md)).
+Their data goes to `/app/data/feed` and `/app/data/vectors` on the `paper_files` volume, which the compose
+file already sets up. Never delete that volume.
+
 Offer one optional extra: **connect PaperManager to their agent** through the MCP server, so the
 agent can search and annotate the library. See [docs/user-guide/mcp-server.md](docs/user-guide/mcp-server.md).
 The MCP command is `docker exec -i <app container> python mcp_server.py`. Get the container

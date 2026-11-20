@@ -165,7 +165,7 @@ Multiple `@mentions` can be combined. Each resolves independently; results are m
 When no `@mention` is present, the backend runs **hybrid retrieval**:
 
 ### Primary: Vector Similarity Search
-Your question is embedded with `nomic-embed-text` (768-dim, local Ollama) and matched against the `paper_embeddings` vector index in Neo4j using cosine similarity. Papers with `score > 0.55` are included (up to 10).
+Your question is embedded through the LiteLLM embeddings API with `LITELLM_EMBED_MODEL` (768-dim for the index; step skipped when empty) and matched against the `paper_embeddings` vector index in Neo4j using cosine similarity. Papers with `score > 0.55` are included (up to 10).
 
 ### Secondary: Recency Fallback
 The 10 most recently added papers are fetched as a fallback (fills gaps when the vector index is cold, e.g. papers uploaded before embeddings were generated).
@@ -238,7 +238,7 @@ Frontend: every `run_cypher` call appears as a collapsible step card showing the
 ### Tool: `semantic_search`
 Claude can request a vector similarity search against `paper_embeddings`.
 
-**Requires**: `nomic-embed-text` running in Ollama.
+**Requires**: `LITELLM_EMBED_MODEL` set to a 768-dim embedding model on the LiteLLM endpoint; without it the tool finds nothing and the chat falls back silently. (Library search, the feed and similar papers do not use this path; they use the vector store, `.specs/019_vector_store.md`.)
 
 **What Claude uses it for:**
 - "Find papers similar to this concept" when keyword search misses synonyms
@@ -315,13 +315,13 @@ LIMIT 20
 | Opus threshold | Settings → Knowledge Chat | Token count above which Sonnet → Opus |
 | Compaction window | Settings → Knowledge Chat | How many messages stay verbatim |
 | Extract claims on upload | Settings → Inference | Haiku extracts claims from each new paper |
-| Generate embeddings on upload | Settings → Inference | Whether nomic-embed-text runs at upload time |
+| Generate embeddings on upload | Settings → Inference | Whether the legacy `Paper.embedding` is generated at upload time (needs `LITELLM_EMBED_MODEL`) |
 
 ---
 
 ## One-Time Setup Checklist
 
-1. `ollama pull nomic-embed-text` — required for vector search
+1. Set `LITELLM_EMBED_MODEL` to a 768-dim embedding model on your LiteLLM endpoint — required for this vector search (empty = off)
 2. Restart the backend — `paper_embeddings` vector index created on startup
 3. **Settings → Library Maintenance → Generate embeddings** — backfill existing papers
 4. **Settings → Library Maintenance → Extract claims** — optional claim backfill

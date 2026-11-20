@@ -11,7 +11,8 @@ All AI calls, which models they use, and where they run in the code.
 | `claude-opus-4-6` | Anthropic | Paper summarisation, single-paper chat, knowledge chat, cross-paper synthesis, research gap analysis |
 | `claude-haiku-4-5-20251001` | Anthropic | Abstract extraction, reference extraction, topic suggestion, claim extraction, chapter summarisation, conversation compaction, figure captioning (claude-vision mode) |
 | `llama3.2:3b` | Ollama (local) | Metadata extraction (layer 2), tag suggestion, chapter detection, figure captions (default), affiliation extraction, Cypher assist, merge duplicate scan |
-| `nomic-embed-text` | Ollama (local) | 768-dim paper embedding vectors for semantic similarity search |
+| `BAAI/bge-small-en-v1.5` (default of `EMBED_MODEL`) | local, `transformers` on the CPU | Embedding vectors of titles and abstracts: library semantic search, the paper feed, similar papers, the conference explorer (see "Embeddings and the vector store") |
+| `LITELLM_EMBED_MODEL` (empty = off) | LiteLLM proxy | Legacy `Paper.embedding` vector used by the knowledge chat's semantic tool |
 
 All Anthropic calls can be routed through an enterprise Foundry gateway via `ANTHROPIC_WORK_API_KEY` + `ANTHROPIC_WORK_BASE_URL`.
 
@@ -93,16 +94,36 @@ Claims are **not** injected directly into Knowledge Chat context — Claude pull
 
 ---
 
-## Paper Embedding — `services/embeddings.py`
+## Embeddings and the vector store — `services/vectorstore/`, `services/conferences/embedder.py`
 
-Triggers: PDF upload (if enabled), `POST /backfill/embeddings`.
+No language-model API is involved. `embedder.py` loads one Hugging Face model per id (`transformers` + `torch`, CPU,
+`trust_remote_code=False`) and embeds a text with the model's document prefix, truncation at 256 tokens, CLS or mean
+pooling and L2 normalisation. The model comes from `vectorstore/model_config.py`:
 
-- Input: `title` + `abstract`
-- Model: **Ollama nomic-embed-text** (768-dim)
-- Output: vector stored on `Paper.embedding`
-- Enables vector similarity search via `paper_embeddings` index
+- `EMBED_MODEL` (default `BAAI/bge-small-en-v1.5`, 384-dim, CLS pooling); dimension, pooling and prefixes are known for
+  a few models (`KNOWN`: bge, e5, MiniLM, MPNet, SPECTER2, `J0nasW/sciembed-full`), any other model needs `EMBED_DIM`
+  (and `EMBED_POOLING`, prefixes).
+- `CONFERENCE_EMBED_MODEL` for the conference explorer's saved vectors, read first by that role; empty follows
+  `EMBED_MODEL`.
+- What is embedded for a paper: title, a newline, then the abstract (or the cleaned summary), cut to 1,500 characters
+  (`semantic.paper_text`, `TEXT_FORMAT = "title-abstract-1"`).
 
-Requires: `ollama pull nomic-embed-text`.
+Consumers: library search (`library` namespace, hybrid and semantic modes, `.specs/012_search.md`), the optional paper
+feed (`feed`, `feed_library`, and a numpy logistic regression on top, `.specs/018_paper_feed.md`), similar papers
+(`POST /search/similar`, MCP `find_similar_papers`, `papers_like`; `.specs/020_similar_search.md`) and the conference
+explorer. Each namespace stores the model it was built with and is *stale* when the configured model differs: search
+then falls back to keywords and the namespace is rebuilt in the background (or adopted from a prepared generation made
+by `scripts/vectors_export.py` -> `embed_bulk.py` on a GPU machine -> `vectors_import.py`; `vectors_rollback.py` goes
+back). Details: `.specs/019_vector_store.md`. `scripts/embedder_benchmark.py` compares models on a library.
+
+### Legacy `Paper.embedding` — `services/embeddings.py`
+
+Triggers: PDF upload when `LITELLM_EMBED_MODEL` is set, `POST /backfill/embeddings`.
+
+- Input: `title` + `abstract` (+ `summary`)
+- Model: the LiteLLM embeddings API with `LITELLM_EMBED_MODEL` (empty by default: switched off)
+- Output: vector stored on `Paper.embedding`; the Neo4j index `paper_embeddings` is declared with 768 dimensions
+- Used only by the knowledge chat's `semantic_search` tool and its retrieval step, which skip it silently when it fails
 
 ---
 

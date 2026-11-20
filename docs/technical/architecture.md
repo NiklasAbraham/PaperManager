@@ -65,11 +65,13 @@ This means every capability is available both via HTTP (for the browser) and via
 | `topics.py` | `/topics` | Topic CRUD + rename |
 | `projects.py` | `/projects` | Project CRUD + paper membership |
 | `search.py` | `/search` | Full-text + filter search |
+| `similar.py` | `/search/similar` | Nearest papers to an abstract or to a library paper, in the library and the feed |
+| `feed.py` | `/feed` | Optional paper feed (404 unless `PAPER_FEED=true`, except `/feed/status`) |
 | `graph.py` | `/graph` | Graph visualisation data + admin Cypher query (`/graph/query`) |
 | `stats.py` | `/stats` | Library statistics |
 | `cypher.py` | `/cypher` | Schema, AI assist, raw run, node delete (admin only) |
 | `export.py` | `/export` | BibTeX export |
-| `backfill.py` | `/backfill` | Bulk AI enrichment (topics, summaries, figures) |
+| `backfill.py` | `/backfill` | Bulk enrichment (topics, summaries, figures, claims, embeddings) and missing abstracts by DOI (`/backfill/abstracts`) |
 | `knowledge_chat.py` | `/knowledge-chat` | Multi-paper chat (SSE streaming) |
 | `figures.py` | `/papers/{id}/figures` | Figure extraction + image serving |
 | `bulk_import.py` | `/bulk-import` | Bulk import from BibTeX / DOI list (SSE) |
@@ -108,7 +110,10 @@ This means every capability is available both via HTTP (for the browser) and via
 | `literature_search.py` | Keyword-based search across arXiv / PubMed / bioRxiv |
 | `blog_fetcher.py` | Fetch and parse blog posts from RSS feeds / URLs |
 | `book_chapter_parser.py` | Detect chapter boundaries in PDFs (Docling + AI) |
-| `embeddings.py` | Generate Ollama embeddings for semantic similarity |
+| `embeddings.py` | Legacy `Paper.embedding` vector through the LiteLLM embeddings API (`LITELLM_EMBED_MODEL`, off by default) |
+| `feed/` | Optional paper feed: arXiv / bioRxiv / medRxiv fetchers, SQLite store, per-user logistic regression, refresh thread |
+| `similar_search.py` | Visibility-aware nearest-neighbour search over the library and feed vectors |
+| `abstract_backfill.py` | Fills missing abstracts from OpenAlex, Semantic Scholar, arXiv and Crossref |
 | `person_enrichment.py` | Enrich Person nodes with affiliation / S2 data |
 | `web_search.py` | Web search helper for research gap and synthesis endpoints |
 | `usage/` | Token ledger: SDK hooks (`hook.py`), SQLite store (`ledger.py`), price table (`pricing.py`) |
@@ -226,6 +231,36 @@ Row layout and API: `.specs/013_tokens.md`.
 
 ---
 
+## Embeddings and the vector store
+
+Everything that compares papers by meaning (library semantic search, the optional [paper feed](../user-guide/paper-feed.md),
+[similar papers](../user-guide/similar-search.md), the conference explorer) uses one CPU embedder and one vector store,
+not Neo4j.
+
+```mermaid
+graph LR
+    Embedder["Embedder (CPU)<br/>EMBED_MODEL"] --> Store[("Vector store<br/>VECTOR_STORE_DIR")]
+    Store --> Search["Library search"]
+    Store --> Feed["Paper feed<br/>(+ feed.sqlite)"]
+    Store --> Similar["Similar papers<br/>/search/similar, MCP"]
+    MCP["MCP server"] -->|"POST /conferences/embed"| Embedder
+```
+
+- **One model setting.** `services/vectorstore/model_config.py` reads `EMBED_MODEL` (default `BAAI/bge-small-en-v1.5`,
+  384 numbers per paper) and, for a model it does not know, `EMBED_DIM`, `EMBED_POOLING` and the prefixes. The conference
+  explorer keeps its own saved vectors and reads `CONFERENCE_EMBED_MODEL` first.
+- **Never mixed.** Each namespace (`library`, `feed`, `feed_library`) records the model it was built with. When the
+  configured model differs the namespace is stale: search falls back to keywords while it is rebuilt in the background,
+  or a generation prepared on a GPU machine is adopted on start (`scripts/vectors_export.py`, `embed_bulk.py`,
+  `vectors_import.py`; `vectors_rollback.py` goes back). See [Switching the embedding model](../user-guide/switching-the-embedding-model.md).
+- **Backends.** numpy on a memory-mapped file plus SQLite by default; LanceDB is optional (`VECTOR_STORE=lance`).
+- **The MCP server loads no model.** It reads the stores read-only and asks the backend for query vectors
+  (`POST /conferences/embed`, `PM_EMBED_URL`), so it needs the same `VECTOR_STORE_DIR` (and `PAPER_FEED_DIR`) as the backend.
+
+Developer notes: `.specs/019_vector_store.md`.
+
+---
+
 ## Key Design Decisions
 
 See the full [Decisions Log](../decisions.md) for rationale. The key principles:
@@ -236,6 +271,6 @@ See the full [Decisions Log](../decisions.md) for rationale. The key principles:
 4. **Notes as graph nodes** — Notes have their own `@mention` and `#topic` relationships
 5. **Shared service layer** — MCP tools and HTTP routers call the same `db/` and `services/` code
 6. **Prompts as files** — All prompt templates live in `prompts/` and are loaded fresh on each call
-7. **Vector embeddings** — Paper nodes store Ollama embeddings for semantic similarity search
+7. **Vector embeddings outside the graph** — library search, the paper feed and similar papers read one vector store that records the embedding model of each index (default `BAAI/bge-small-en-v1.5`, CPU); the model can be switched with a rebuild or a GPU bulk job, and vectors of two models are never mixed
 8. **User identity** — `User` nodes enable per-user conversation history and attribution
 9. **Ledger outside the graph** — LLM usage is bookkeeping, not library content, so it lives in SQLite

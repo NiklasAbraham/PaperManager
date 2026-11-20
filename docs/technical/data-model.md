@@ -17,6 +17,8 @@ The central entity. Every ingested paper, book, or lecture deck is a `Paper` nod
 | `year` | integer | Publication year |
 | `doi` | string | DOI if available |
 | `abstract` | string | Original abstract |
+| `abstract_source` | string | Set only by the [abstract backfill](../user-guide/abstract-backfill.md): `openalex`, `semanticscholar`, `arxiv` or `crossref`; removed again by its undo |
+| `abstract_fetched_at` | string | ISO UTC time of that backfill write (`updated_at` is not touched) |
 | `summary` | string | AI-generated summary (Claude Opus) |
 | `raw_text` | string | Full extracted PDF text (stripped from API responses) |
 | `drive_file_id` | string | Google Drive file ID for the PDF |
@@ -28,7 +30,7 @@ The central entity. Every ingested paper, book, or lecture deck is a `Paper` nod
 | `color` | string | Colour label (hex or name) |
 | `document_type` | string | `"paper"` / `"book"` / `"lecture_deck"` |
 | `venue` | string | Journal or conference name |
-| `embedding` | float[] | Ollama embedding vector (768-dim, nomic-embed-text) |
+| `embedding` | float[] | Legacy 768-dim vector from the LiteLLM embeddings API (`LITELLM_EMBED_MODEL`, empty by default: not written). Library search, the feed and similar papers use the vector store instead |
 | `created_at` | datetime | When added to the system |
 | `updated_at` | datetime | Last modification time |
 
@@ -400,7 +402,20 @@ A table extracted from a paper PDF.
 | `paper_created_at` | Range | Paper | `created_at` | Library date-added filter, newest/oldest sort |
 | `paper_year` | Range | Paper | `year` | Year filter and sort |
 | `paper_updated_at` | Range | Paper | `updated_at` | Recently updated sort |
-| `paper_embeddings` | Vector (cosine) | Paper | `embedding` | Semantic similarity (768-dim, nomic-embed-text) |
+| `paper_embeddings` | Vector (cosine) | Paper | `embedding` | Knowledge chat's semantic tool (768-dim, legacy `Paper.embedding`) |
+
+---
+
+## Stores outside Neo4j
+
+| Store | Where | Holds |
+| ----- | ----- | ----- |
+| Vector store | `VECTOR_STORE_DIR` (default `/data/vectors`), one folder per namespace: `library`, `feed`, `feed_library` | Embedding vectors of paper titles and abstracts. A namespace holds generations (`g000001`, ... and, while a model switch is prepared, `p000001`) and a `CURRENT` file naming the live one; each generation has a `manifest.json` with the model, dimension and pooling it was built with. `.specs/019_vector_store.md` |
+| Library search files | `LIBRARY_SEARCH_DIR` (default `/data/library_search`) | `emb.npy` + `meta.json`, still rewritten after a sync for the topic map |
+| Paper feed | `PAPER_FEED_DIR` (default `/data/feed`), only with `PAPER_FEED=true` | `feed.sqlite`: fetched preprints (candidates), thumbs, per-user settings and refresh runs. `.specs/018_paper_feed.md` |
+| Conference datasets | `CONFERENCE_DATA_DIR` (default `/data/conferences`) | Per-conference files and the Hugging Face model cache |
+
+All four must sit on a persistent volume; the self-hosting compose file does that.
 
 ---
 

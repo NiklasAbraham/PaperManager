@@ -16,6 +16,8 @@ The central entity. Every paper, book, or lecture deck is a `Paper` node.
 | `year` | integer | Publication year |
 | `doi` | string | DOI if available |
 | `abstract` | string | |
+| `abstract_source` | string | Set only by the abstract backfill: `openalex`, `semanticscholar`, `arxiv` or `crossref` (the service that supplied the abstract); removed again by its undo |
+| `abstract_fetched_at` | datetime string | ISO UTC time of that backfill write; `updated_at` is not touched |
 | `summary` | string | AI-generated (Claude Opus) |
 | `raw_text` | string | Full extracted PDF text (stripped from API responses) |
 | `drive_file_id` | string | Google Drive file ID for the PDF |
@@ -28,7 +30,7 @@ The central entity. Every paper, book, or lecture deck is a `Paper` node.
 | `document_type` | string | `"paper"` / `"book"` / `"lecture_deck"` / `"news_article"` |
 | `published_date` | string | ISO date `YYYY-MM-DD`; day-level precision for news articles (papers only store `year`) |
 | `venue` | string | Journal or conference name — for a news article, the outlet (e.g. "The New York Times") |
-| `embedding` | float[] | 768-dim Ollama vector (nomic-embed-text) |
+| `embedding` | float[] | Legacy 768-dim vector from the LiteLLM embeddings API (`LITELLM_EMBED_MODEL`, empty = not written); library search, feed and similar papers use the vector store instead |
 | `created_at` | datetime | |
 | `updated_at` | datetime | |
 
@@ -284,10 +286,13 @@ Paper.id, Person.id, Topic.id, Topic.name, Tag.id, Tag.name, Note.id, Project.id
 | `entity_name_search` | Fulltext, standard-folding | Person/Topic/Tag/Project(name) | `/search`, suggest |
 | `paper_text_search` | Fulltext, standard-folding, eventually consistent | Paper(venue, raw_text) | `/search` |
 | `message_search` | Fulltext | Message(content) | Conversation search |
-| `paper_embeddings` | Vector (cosine, 768-dim) | Paper(embedding) | Semantic similarity (nomic-embed-text) |
+| `paper_embeddings` | Vector (cosine, 768-dim) | Paper(embedding) | Knowledge chat's semantic tool (legacy `Paper.embedding`) |
 
-The library search's own embeddings (bge-small, 384-dim) are a file on disk, not a Neo4j
-index: `/data/library_search/emb.npy` + `meta.json`, see `.specs/012_search.md`.
+The embeddings of library search, the paper feed and similar papers are not in Neo4j: they live in the vector
+store (`VECTOR_STORE_DIR`, default `/data/vectors`, namespaces `library`, `feed`, `feed_library`; default model
+bge-small, 384-dim, `EMBED_MODEL`), see `.specs/019_vector_store.md`. The library search still rewrites
+`/data/library_search/emb.npy` + `meta.json` for the topic map (`.specs/012_search.md`). The feed's candidates, labels
+and settings are SQLite (`PAPER_FEED_DIR/feed.sqlite`, `.specs/018_paper_feed.md`), also not in Neo4j.
 
 ---
 

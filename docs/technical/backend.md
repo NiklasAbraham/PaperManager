@@ -45,7 +45,9 @@ backend/
 │   ├── stats.py             # GET /stats
 │   ├── cypher.py            # Cypher schema / assist / run / node-delete endpoints (admin only)
 │   ├── export.py            # BibTeX export
-│   ├── backfill.py          # Bulk enrichment (topics, summaries, figures)
+│   ├── backfill.py          # Bulk enrichment (topics, summaries, figures, claims, embeddings) and /backfill/abstracts
+│   ├── similar.py           # POST /search/similar, GET /search/similar/{id}
+│   ├── feed.py              # /feed/*: optional paper feed (404 unless PAPER_FEED=true)
 │   ├── knowledge_chat.py    # Multi-paper chat (SSE)
 │   ├── figures.py           # Figure extraction + image serving
 │   ├── bulk_import.py       # Bulk import (SSE stream)
@@ -81,7 +83,10 @@ backend/
 │   ├── literature_search.py # Keyword-based search across arXiv / PubMed / bioRxiv
 │   ├── blog_fetcher.py      # Fetch and parse blog posts from RSS feeds / URLs
 │   ├── book_chapter_parser.py # Detect chapter boundaries in PDFs (Docling + AI)
-│   ├── embeddings.py        # Ollama embeddings for semantic similarity
+│   ├── embeddings.py        # Legacy Paper.embedding via LiteLLM (LITELLM_EMBED_MODEL, off by default)
+│   ├── similar_search.py    # Nearest papers to a text or a paper over the library and feed vectors
+│   ├── abstract_backfill.py # Fill missing abstracts from OpenAlex / Semantic Scholar / arXiv / Crossref
+│   ├── feed/                # Optional paper feed: sources, store (feed.sqlite), model, ranking, pipeline
 │   ├── person_enrichment.py # Enrich Person nodes with affiliation / S2 data
 │   ├── web_search.py        # Web search for research gaps and synthesis
 │   ├── usage/               # Token ledger: SDK hooks, SQLite store, price table
@@ -102,7 +107,8 @@ backend/
 │   ├── tag_tools.py
 │   ├── person_tools.py
 │   ├── project_tools.py
-│   └── ai_tools.py
+│   ├── ai_tools.py
+│   └── similarity_tools.py  # find_similar_papers, papers_like
 │
 ├── tests/
 │   └── ...
@@ -153,7 +159,7 @@ Runs on startup. Creates:
 - **Uniqueness constraints** on: `Paper.id`, `Person.id`, `Topic.id`, `Topic.name`, `Tag.id`, `Tag.name`, `Note.id`, `Project.id`, `Figure.id`, `Annotation.id`, `Blog.id`, `BlogPost.id`, `User.id`, `User.name`, `Claim.id`, `Table.id`, `Conversation.id`, `Message.id`, `Venue.id`, `Report.id`, `Suggestion.id`
 - **Fulltext indexes**: `paper_search` (title, abstract, summary), `note_search` (content), `annotation_search` (highlighted_text, note), `claim_search` (text), `entity_name_search` (Person/Topic/Tag/Project name), `paper_text_search` (venue, raw_text) with the `standard-folding` analyzer (rebuilt at startup if their analyzer or fields differ; see `.specs/012_search.md`), and `message_search` (content)
 - **Range indexes** on `Paper.created_at`, `Paper.year` and `Paper.updated_at` (`paper_created_at`, `paper_year`, `paper_updated_at`), for the date, year and sort filters of the Library
-- **Vector index**: `paper_embeddings` on `Paper.embedding` (768-dim cosine, nomic-embed-text); not used by library search, which keeps its vectors in the vector store (`services/vectorstore/`, `.specs/019_vector_store.md`)
+- **Vector index**: `paper_embeddings` on `Paper.embedding` (768-dim cosine; filled only when `LITELLM_EMBED_MODEL` is set); not used by library search, which keeps its vectors in the vector store (`services/vectorstore/`, `.specs/019_vector_store.md`)
 
 ---
 
@@ -173,7 +179,10 @@ Runs on startup. Creates:
 | `literature_search.py` | Keyword-based search across arXiv, PubMed, and bioRxiv |
 | `blog_fetcher.py` | Fetch and parse blog posts from RSS feeds and URLs |
 | `book_chapter_parser.py` | Detect chapter boundaries in PDFs using Docling structure and AI |
-| `embeddings.py` | Generate Ollama (nomic-embed-text) embeddings stored on Paper nodes |
+| `embeddings.py` | Legacy embedding for `Paper.embedding` through the LiteLLM embeddings API (`LITELLM_EMBED_MODEL`, empty = off) |
+| `similar_search.py` | Find papers like a text or a paper: embeds as a document, searches the `library` and `feed` namespaces, applies the user's visibility, merges by score (`.specs/020_similar_search.md`) |
+| `abstract_backfill.py` | Fills missing abstracts of papers that have a DOI from OpenAlex, Semantic Scholar, arXiv and Crossref with a title check; `abstract_source` and `abstract_fetched_at` on the paper; used by `scripts/backfill_abstracts.py` and `POST /backfill/abstracts` (`.specs/021_abstract_backfill.md`) |
+| `feed/` | Optional paper feed, inert unless `PAPER_FEED=true`: `sources.py` arXiv and bioRxiv / medRxiv fetchers, `store.py` the SQLite sidecar (`PAPER_FEED_DIR/feed.sqlite`), `library.py` the user's signals, `model.py` numpy logistic regression, `ranking.py` the digest, `pipeline.py` the refresh thread (`.specs/018_paper_feed.md`) |
 | `person_enrichment.py` | Enrich Person nodes with affiliations and Semantic Scholar author data |
 | `web_search.py` | Web search helper used by research gaps and synthesis endpoints |
 | `usage/` | Token ledger: wraps the Anthropic and OpenAI SDK methods, attributes feature / user / paper, prices calls, stores them in SQLite (`usage.sqlite`) |
@@ -183,6 +192,19 @@ Runs on startup. Creates:
 | `library_search/cache.py` | 60 s in-process cache of ranked results per user, cleared by any non-GET request |
 | `vectorstore/` | Vector store behind library semantic search and the paper feed (see `.specs/019_vector_store.md`): one namespace per index, each with a manifest naming its embedding model and dimension, so vectors of two models are never mixed; a new model is built next to the old one and swapped in atomically; default backend is numpy on a memory-mapped file plus SQLite, LanceDB is optional (`VECTOR_STORE=lance`); `model_config.py` is the one place for `EMBED_MODEL` (and `CONFERENCE_EMBED_MODEL` for the explorer); a model switch can be prepared on a GPU machine with `scripts/vectors_export.py`, `embed_bulk.py`, `vectors_import.py` and adopted on start, rollback with `vectors_rollback.py` (`docs/user-guide/switching-the-embedding-model.md`) |
 | `conferences/` | Conference explorer (see `.specs/011_conferences.md`): `catalog.py` conference-years and sources, `sources.py` miniconf + Paper Copilot fetchers, `institutions.py` name normalisation and academia / industry, `areas.py` the 24-area taxonomy and zero-shot assignment, `embedder.py` bge-small-en-v1.5 on CPU, `store.py` build worker, on-disk datasets under `/data/conferences`, queries |
+
+---
+
+## scripts/ — operator tools
+
+Command-line tools run from the `backend/` folder (inside the container with `docker compose exec backend python scripts/...`).
+The ones added with the vector store and the abstract backfill:
+
+| Script | Purpose |
+| ------ | ------- |
+| `backfill_abstracts.py` | Fill missing abstracts by DOI; dry run by default, `--apply --report FILE`, `--undo-report FILE` ([guide](../user-guide/abstract-backfill.md)) |
+| `vectors_export.py`, `embed_bulk.py`, `vectors_import.py`, `vectors_rollback.py` | Switch the embedding model with the bulk embedding done on any GPU machine: export the texts, embed them (`embed_bulk.py` needs only torch, transformers and numpy), import as a prepared generation, roll back ([guide](../user-guide/switching-the-embedding-model.md)) |
+| `embedder_benchmark.py` | Compare embedding models on a library export: citation-neighbour recall, topic agreement, the feed's held-out AUC, throughput; offline, GPU optional |
 
 ---
 

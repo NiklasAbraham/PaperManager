@@ -44,6 +44,11 @@ server fails and an Anthropic key is set, the fast tasks retry on Claude Haiku
 menus in the app show the active model by name, and Claude options appear only for users who
 have a Claude key.
 
+Two optional features stay off or at their defaults unless you ask for them: the
+[paper feed](user-guide/paper-feed.md) (`PAPER_FEED=true`) and another
+[embedding model](user-guide/switching-the-embedding-model.md) (`EMBED_MODEL`). Their data
+(`/app/data/feed`, `/app/data/vectors`) sits on the same `paper_files` volume as your PDFs.
+
 To change something later, edit `.env` and run
 `docker compose -f docker-compose.selfhost.yml up -d`. A colour or model change needs no rebuild.
 

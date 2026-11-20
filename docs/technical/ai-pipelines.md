@@ -11,7 +11,8 @@ PaperManager uses multiple AI models for different tasks. This page documents ea
 | `claude-opus-4-6` | Anthropic | Paper summarisation, single-paper chat, knowledge chat, cross-paper synthesis, research gap analysis |
 | `claude-haiku-4-5-20251001` | Anthropic | Abstract extraction, reference extraction, topic suggestion, claim extraction, chapter summarisation, conversation compaction, figure captioning (claude-vision mode) |
 | `llama3.2:3b` | Ollama (local) | Metadata extraction (layer 2), tag suggestion, chapter detection, figure captions (default), affiliation extraction, Cypher assist, merge scan |
-| `nomic-embed-text` | Ollama (local) | Paper embedding vectors for semantic similarity search |
+| `BAAI/bge-small-en-v1.5` (default of `EMBED_MODEL`) | local, CPU (`transformers`) | Embedding vectors of titles and abstracts for library semantic search, the paper feed, similar papers and the conference explorer |
+| `LITELLM_EMBED_MODEL` (empty = off) | LiteLLM proxy | Legacy `Paper.embedding` vector used by the knowledge chat's semantic tool |
 
 All Anthropic calls can be routed through an enterprise Foundry gateway by setting `ANTHROPIC_WORK_API_KEY` and `ANTHROPIC_WORK_BASE_URL`.
 
@@ -140,16 +141,36 @@ Claim types include `"finding"`, `"method"`, `"limitation"`, `"contribution"`.
 
 ---
 
-## Paper Embedding
+## Embeddings and the vector store
 
-Triggered during upload (if enabled in settings) or via backfill.
+No language-model call is made. A local embedder (`transformers` on the CPU, `services/conferences/embedder.py`) turns
+the title and abstract of every paper (or its summary when there is no abstract) into a unit vector. The model is
+`EMBED_MODEL`, by default `BAAI/bge-small-en-v1.5` (384 numbers per paper); `services/vectorstore/model_config.py`
+holds the dimension, pooling and prefixes of the models it knows and takes `EMBED_DIM` and friends for others.
 
 ```mermaid
 flowchart LR
-    A["title + abstract"] --> O["Ollama nomic-embed-text"]
-    O --> V["768-dim embedding vector"]
-    V --> DB["Stored on Paper.embedding\n(vector index for ANN search)"]
+    A["title + abstract"] --> E["Embedder (CPU)\nEMBED_MODEL"]
+    E --> S["Vector store\nnamespaces: library, feed, feed_library"]
+    S --> L["Library search\n(hybrid / semantic)"]
+    S --> F["Paper feed ranking"]
+    S --> M["Similar papers\nPOST /search/similar, MCP"]
 ```
+
+Each namespace records the model it was built with, so vectors of two models are never mixed: after an `EMBED_MODEL`
+change, search answers by keywords until the namespace is rebuilt on the CPU in the background, or until a generation
+prepared elsewhere is adopted on start (`scripts/vectors_export.py`, `embed_bulk.py` on a GPU machine,
+`vectors_import.py`; `vectors_rollback.py` goes back). The conference explorer keeps its own saved vectors and reads
+`CONFERENCE_EMBED_MODEL` first. See [Switching the embedding model](../user-guide/switching-the-embedding-model.md) and
+`.specs/019_vector_store.md`.
+
+The optional [paper feed](../user-guide/paper-feed.md) trains a small numpy logistic regression per user on these
+vectors (no API call) and [similar papers](../user-guide/similar-search.md) is a nearest-neighbour search over the same
+namespaces.
+
+The older **`Paper.embedding`** (a 768-dim vector with the Neo4j index `paper_embeddings`) is produced through the
+LiteLLM embeddings API with `LITELLM_EMBED_MODEL`, which is empty by default (off). Only the knowledge chat's semantic
+tool uses it; it fails silently when unavailable.
 
 ---
 

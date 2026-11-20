@@ -44,11 +44,13 @@ This means every capability is available both via HTTP (browser) and via MCP too
 | `topics.py` | `/topics` | Topic CRUD + rename |
 | `projects.py` | `/projects` | Project CRUD + paper membership |
 | `search.py` | `/search` | Full-text + filtered search |
+| `similar.py` | `/search/similar` | Nearest papers to an abstract or to a library paper, in the library and the feed (`020_similar_search.md`) |
+| `feed.py` | `/feed` | Optional paper feed: digest, config, ratings, add; mounted always, answers 404 unless `PAPER_FEED=true` (`018_paper_feed.md`) |
 | `graph.py` | `/graph` | Graph visualisation data + admin Cypher query (`/graph/query`, read-only by default) |
 | `stats.py` | `/stats` | Library statistics |
 | `cypher.py` | `/cypher` | Cypher schema, AI assist, raw run, node delete (admin only; the UI is the Graph page query panel, `/cypher` redirects to `/graph?view=query`) |
 | `export.py` | `/export` | BibTeX export |
-| `backfill.py` | `/backfill` | Bulk AI enrichment (topics, summaries, figures, embeddings) |
+| `backfill.py` | `/backfill` | Bulk enrichment (topics, summaries, figures, claims, embeddings) and `POST /backfill/abstracts` (missing abstracts by DOI, `021_abstract_backfill.md`) |
 | `knowledge_chat.py` | `/knowledge-chat` | Multi-paper chat with SSE streaming |
 | `figures.py` | `/papers/{id}/figures` | Figure extraction + image serving + vision chat |
 | `bulk_import.py` | `/papers/bulk-import` | Bulk JSON import with SSE progress |
@@ -85,7 +87,12 @@ This means every capability is available both via HTTP (browser) and via MCP too
 | `literature_search.py` | Keyword-based search across arXiv / PubMed / bioRxiv |
 | `blog_fetcher.py` | Fetch and parse blog posts from RSS feeds / URLs |
 | `book_chapter_parser.py` | Detect chapter boundaries in PDFs (Docling + AI) |
-| `embeddings.py` | Generate Ollama (nomic-embed-text) embeddings |
+| `embeddings.py` | Legacy per-paper vector for `Paper.embedding` via the LiteLLM embeddings API (`LITELLM_EMBED_MODEL`, empty = off) |
+| `vectorstore/` | The vector store: one namespace per embedding index, each with a manifest naming its model; `model_config.py` is the one place for `EMBED_MODEL` (`019_vector_store.md`) |
+| `conferences/embedder.py` | The CPU embedder (default `BAAI/bge-small-en-v1.5`) behind library search, the feed, similar papers and the conference explorer |
+| `feed/` | Optional paper feed: sources, SQLite store, per-user logistic regression, refresh thread (`018_paper_feed.md`) |
+| `similar_search.py` | Visibility-aware nearest-neighbour search over the `library` and `feed` namespaces |
+| `abstract_backfill.py` | Fills missing abstracts from OpenAlex, Semantic Scholar, arXiv and Crossref |
 | `person_enrichment.py` | Enrich Person nodes with affiliations and S2 author data |
 | `web_search.py` | Web search helper for research gaps and synthesis |
 | `auth.py` | JWT generation/validation, password hashing, user auth |
@@ -123,6 +130,7 @@ Thin FastMCP wrappers that delegate to `db/queries/` and `services/`. Defined in
 - `person_tools.py` — list/create people, link to paper
 - `project_tools.py` — list/create projects, add papers
 - `ai_tools.py` — AI-powered MCP actions
+- `similarity_tools.py` — `find_similar_papers`, `papers_like` (read-only; query vectors come from the backend through `PM_EMBED_URL`)
 
 ---
 
@@ -152,6 +160,6 @@ Browser: POST /papers/upload (PDF bytes)
 5. **INVOLVES with role property** — one relationship type with a `role` property keeps workflow states flexible (new roles don't require schema changes)
 6. **Shared service layer** — MCP tools and HTTP routers call the same `db/` and `services/` code
 7. **Prompts as files** — All AI prompt templates live in `prompts/` and are loaded fresh on each call; edit without restarting
-8. **Vector embeddings on Paper nodes** — Ollama `nomic-embed-text` (768-dim) stored on `Paper.embedding`; `paper_embeddings` vector index enables semantic similarity search
+8. **Vector embeddings live in the vector store, not in the graph** — library search, the paper feed and similar papers read one store (`services/vectorstore/`) that records the model of each index and never mixes two; the default model is `BAAI/bge-small-en-v1.5` on the CPU, set with `EMBED_MODEL`. Only the older chat path still uses `Paper.embedding` (Neo4j index `paper_embeddings`, 768-dim, LiteLLM `LITELLM_EMBED_MODEL`)
 9. **Metadata source tracking** — `metadata_source` field records which extraction layer was used per paper
 10. **PDF upload is browser-only** — intentionally not exposed as an MCP tool (file upload via browser only)

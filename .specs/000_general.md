@@ -15,18 +15,20 @@ It is built for a single primary user with optional teammate/multi-user support.
 | PDF upload | Drag-drop PDF → 4-layer metadata extraction → AI summary → figures → references |
 | URL / DOI ingest | Paste arXiv, DOI, PubMed, bioRxiv URL → fetch metadata, no PDF stored |
 | Bulk import | JSON list of URLs/DOIs/titles → streaming progress |
-| Library search | Ranked search over titles, authors, topics, tags, notes, highlights, claims, full text; type-ahead; hybrid with bge-small embeddings (`.specs/012_search.md`) |
+| Library search | Ranked search over titles, authors, topics, tags, notes, highlights, claims, full text; type-ahead; optional hybrid mode with embeddings from the vector store, default model bge-small (`.specs/012_search.md`) |
 | Literature search | Query arXiv / PubMed / bioRxiv by keyword, import results |
 | Blog reader | Register RSS feeds, import posts, AI-summarise, add to projects |
 | Knowledge graph | WebGL force-graph visualisation of papers, authors, topics, tags, projects |
 | Knowledge chat | Graph-aware multi-paper Q&A with `@mention` targeting, vector search, Cypher tool |
 | Single-paper chat | Q&A over a paper's full text; also figure vision chat |
 | Cypher editor | Raw Neo4j query editor with AI assist |
-| Conference explorer | NeurIPS / ICML / ICLR / CVPR / ACL / ... by institution and by topic; data on disk, bge-small embeddings on CPU (`.specs/011_conferences.md`) |
+| Conference explorer | NeurIPS / ICML / ICLR / CVPR / ACL / ... by institution and by topic; data on disk, own saved vectors (default bge-small on CPU; `CONFERENCE_EMBED_MODEL`) (`.specs/011_conferences.md`) |
 | Paper feed | Optional (`PAPER_FEED`, off by default): daily digest of new arXiv / bioRxiv / medRxiv papers, ranked per user by a numpy logistic regression on the library's signals (`.specs/018_paper_feed.md`) |
+| Vector store | One store (`backend/services/vectorstore/`) for every embedding index: namespaces `library`, `feed`, `feed_library`, each recording the model that built it so vectors of two models are never mixed; numpy backend by default, optional LanceDB (`.specs/019_vector_store.md`) |
+| Switching the embedding model | `EMBED_MODEL` (default `BAAI/bge-small-en-v1.5`); an automatic rebuild on the CPU, or bulk embedding on any GPU machine (`scripts/vectors_export.py`, `embed_bulk.py`, `vectors_import.py`, `vectors_rollback.py`) with adoption on start and a rollback; `scripts/embedder_benchmark.py` compares models on a library (`.specs/019_vector_store.md`, `docs/user-guide/switching-the-embedding-model.md`) |
 | Similar papers | Write or paste an abstract (also one for a paper that does not exist yet) and get the nearest papers of the library and the feed with cosine scores; page `/similar`, `POST /search/similar`, MCP tools `find_similar_papers` and `papers_like` (`.specs/020_similar_search.md`) |
 | Abstract backfill | Admin tool and CLI that fill missing abstracts of papers that have a DOI from OpenAlex, Semantic Scholar, arXiv and Crossref, with a title check, dry run by default and an undo (`.specs/021_abstract_backfill.md`) |
-| MCP server | Claude Desktop integration — search, chat, annotate from Claude |
+| MCP server | Claude Desktop integration — search, chat, annotate, find similar papers from Claude (44 tools) |
 | Export | BibTeX, JSON |
 | Auth | JWT-based login, admin-managed users, rate limiting |
 
@@ -39,7 +41,8 @@ It is built for a single primary user with optional teammate/multi-user support.
 - **Neo4j Aura** — cloud graph database (free tier: 200k nodes / 400k relationships)
 - **Google Drive API** — PDF and figure storage (OAuth desktop flow)
 - **Anthropic SDK** — Claude Opus and Haiku for summaries, chat, analysis
-- **Ollama** — local LLM (`llama3.2:3b`) for metadata, tags, captions; `nomic-embed-text` for embeddings
+- **Ollama** — local LLM (`llama3.2:3b`) for metadata, tags, captions
+- **Embeddings** — `transformers` + `torch` on the CPU, default **BAAI/bge-small-en-v1.5** (384-dim, `EMBED_MODEL`) for library search, the paper feed, similar papers and the conference explorer; vectors live in the vector store (`.specs/019_vector_store.md`). The older per-paper vector on `Paper.embedding` (768-dim, Neo4j index `paper_embeddings`, used by the knowledge chat's semantic tool) comes from the LiteLLM embeddings API (`LITELLM_EMBED_MODEL`, empty = off)
 - **Docling** — PDF parsing, figure extraction, chapter detection
 - **httpx**, **FastMCP**, **Pydantic v2**
 
@@ -64,10 +67,14 @@ PaperManager/
 │   ├── config.py        Env-var settings (Pydantic)
 │   ├── mcp_server.py    MCP server entry point (separate process)
 │   ├── db/              Neo4j driver + Cypher query modules
-│   ├── routers/         FastAPI HTTP endpoints (~25 routers)
-│   ├── services/        Business logic, API clients, AI calls
+│   ├── routers/         FastAPI HTTP endpoints (~40 routers)
+│   ├── services/        Business logic, API clients, AI calls; feed/ (paper feed),
+│   │                    vectorstore/ (embedding indexes), library_search/, conferences/,
+│   │                    similar_search.py, abstract_backfill.py
 │   ├── models/          Pydantic request/response schemas
 │   ├── tools/           MCP tool definitions (FastMCP)
+│   ├── scripts/         Operator CLIs: user setup, backfill_abstracts.py, vectors_*.py,
+│   │                    embed_bulk.py, embedder_benchmark.py, ...
 │   └── prompts/         Plain-text AI prompt templates
 ├── frontend/            React + Vite SPA
 │   └── src/
@@ -160,6 +167,25 @@ RATE_LIMIT_AUTH_PATHS=/auth/login
 
 # Ollama
 OLLAMA_MODEL=llama3.2:3b
+
+# Embedding model and vector store (all optional; defaults in .specs/019_vector_store.md)
+EMBED_MODEL=BAAI/bge-small-en-v1.5      # EMBED_DIM / EMBED_POOLING / EMBED_QUERY_PREFIX / EMBED_DOC_PREFIX only for a model not in the built-in list
+CONFERENCE_EMBED_MODEL=                 # conference explorer's model; empty = follows EMBED_MODEL
+VECTOR_STORE=exact                      # or lance (needs the lancedb package)
+VECTOR_STORE_DIR=/data/vectors
+VECTOR_STORE_KEEP_GENERATIONS=2         # generations kept for a rollback after a model switch, live one included
+LITELLM_EMBED_MODEL=                    # legacy Paper.embedding via LiteLLM; empty = off
+
+# Paper feed (optional, off by default; .specs/018_paper_feed.md)
+PAPER_FEED=false
+PAPER_FEED_DIR=/data/feed
+PAPER_FEED_INTERVAL=21600
+PAPER_FEED_RETENTION_DAYS=30
+PAPER_FEED_MAX_PER_REFRESH=2000
+PAPER_FEED_CONTACT=                     # added to the User-Agent sent to arXiv / bioRxiv
+
+# Abstract backfill (.specs/021_abstract_backfill.md)
+ABSTRACT_BACKFILL_CONTACT=              # e-mail or URL for the User-Agent / mailto of OpenAlex, Crossref, ...
 
 # Corporate network (optional)
 SSL_VERIFY=true

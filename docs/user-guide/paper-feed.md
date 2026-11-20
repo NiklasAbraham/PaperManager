@@ -4,6 +4,9 @@ The **Paper feed** (**Explore → Paper feed**, `/feed`) is a digest of new prep
 and medRxiv, ranked for you by what you already keep in your library. It is **optional and off by
 default**: the menu entry does not exist until the person who runs the server switches it on.
 
+(Not to be confused with the **Feed** tab of **Explore → Find papers**, which streams recent papers for keywords
+you type; the paper feed here is chosen by arXiv category and ranked by your library.)
+
 Open the feed once a day, look at the top of the list, add what you want with one click, and tell it what
 it got wrong. Every thumbs-up and thumbs-down makes the next ranking a little better.
 
@@ -28,8 +31,11 @@ to any other server, and the feed's API answers *not found*. The other settings 
 | `PAPER_FEED_MAX_PER_REFRESH` | `2000` | Most papers fetched per source and refresh |
 | `PAPER_FEED_CONTACT` | empty | Optional contact (an address or a URL) added to the User-Agent that arXiv and bioRxiv see, so they can reach you if your instance misbehaves |
 
-The embedding model is the one the [conference explorer](conferences.md) and the library search already
-use (BAAI/bge-small, on the CPU). No GPU, no API key and no extra package is needed.
+The papers the feed has fetched are called *candidates* on this and the other pages. They are embedded with the
+same model as the library search and [similar papers](similar-search.md): `EMBED_MODEL`, by default
+`BAAI/bge-small-en-v1.5` (384 numbers per paper) on the CPU. No GPU, no API key and no extra package is needed. If
+the operator changes the model, see [Switching the embedding model](switching-the-embedding-model.md); the
+feed's ranking retrains by itself afterwards.
 
 ## Choosing what you see
 
@@ -70,19 +76,22 @@ service; this is a small local version of the same idea.
 1. Every new paper's title and abstract is turned into a list of numbers (an *embedding*) that places
    papers on similar topics close together.
 2. Your library teaches the feed what you like, and you do not have to rate anything for that. A real paper
-   you added yourself, or one that sits in one of your projects, counts as a mild "yes". Ratings and
+   with an abstract or summary that you added yourself, or that sits in one of your projects, counts as a mild
+   "yes" (a paper with neither embeds badly: [fill missing abstracts](abstract-backfill.md)). Ratings and
    bookmarks sharpen it: a paper you rated 4 or 5 stars, or bookmarked, is a clear "yes"; one you read and
    highlighted is a stronger "yes" than one that is merely kept; one you rated 1 or 2 stars is a "no". A paper
-   counts once, by its strongest sign. Reference entries that only stand for a citation do not count. Your
+   counts once, by its strongest sign. Reference stubs (papers that only exist because another paper cites them) do not count. Your
    thumbs in the feed count too.
 3. From these "yes" and "no" papers, plus a random sample of the feed's other papers as a stand-in for
    "everything else", the server trains a small model (a logistic regression) that scores how likely you
    are to want a new paper.
 4. The list is sorted by that score.
 
-**Few signals at first.** With fewer than 10 papers you kept or liked there is not enough to train a model. The
-feed then sorts by how close each paper is to the nearest paper you liked, and with none at all it shows the
-newest first. The strip tells you which of the three modes is active.
+**Few signals at first.** With fewer than 10 papers that count as a "yes" (added, in a project, rated, bookmarked, read
+or thumbs-up) there is not enough to train a model. The feed then sorts by how close each paper is to the nearest of
+those papers, and with none at all it shows the newest first. The strip tells you which of the three modes is active:
+*Ranked by a model trained on N papers from your library*, *Ranked by similarity to N paper(s) from your library (a
+model needs 10)*, or *Newest first*.
 
 **Several people on one server.** Ratings, bookmarks and reading status are stored once per paper, not per
 person. On an instance with several users they therefore only teach the feed about papers *you added*. What
@@ -111,4 +120,10 @@ paper up the same way pasting its link on the Library page does.)
   from the start at the next refresh; nothing is lost.
 - *A problem is listed under the strip.* One source failed on the last refresh (for example arXiv was
   unreachable). The other source still ran, and the next refresh tries again.
-- *The ranking looks random.* Rate a few papers. Ten likes switch the model on.
+- *The ranking looks random.* Rate a few papers. Ten papers that count as a "yes" switch the model on.
+
+## See also
+
+- [Similar papers](similar-search.md): paste an abstract and look in the library and in the feed's candidates.
+- [Switching the embedding model](switching-the-embedding-model.md): what runs behind the ranking and how to change it.
+- [Fill missing abstracts](abstract-backfill.md): papers without an abstract teach the feed less.

@@ -4,9 +4,29 @@ PaperManager turns every paper's title and abstract into a vector (an *embedding
 [paper feed](paper-feed.md) and [similar papers](similar-search.md) all compare those vectors. The default
 model is small (`BAAI/bge-small-en-v1.5`, 384 numbers per paper) and runs on the backend's CPU. A larger
 model, for example a scientific one such as `J0nasW/sciembed-full` (ModernBERT-base, 768 numbers, MIT licence),
-can place related papers closer together.
+can place related papers closer together ([which one to choose](#choosing-an-embedding-model)).
 
 **For the operator of the server.** This page is not about using the app but about changing what it runs on.
+
+## Choosing an embedding model
+
+The stock default, `BAAI/bge-small-en-v1.5` (384 numbers per paper, about 130 MB, fast on a CPU), is a good
+general-purpose choice and nothing has to be done to use it. Switching is optional.
+
+A model trained on scientific text can place related papers closer together. One example is
+`J0nasW/sciembed-full` (ModernBERT-base fine-tuned on citation contexts of scientific papers, 768 numbers per
+paper, MIT licence). Of 13 models compared on one real library it was the best for *citation-neighbour recall*
+(how many of a paper's cited and citing papers appear among its ten nearest neighbours), but by a small margin
+over the default.
+
+Any model can be measured the same way with `backend/scripts/embedder_benchmark.py`, which scores models on an
+export of your own library (citation-neighbour recall, topic agreement, the feed's held-out AUC, speed). How to
+run it and how to read the numbers is in the [embedding benchmark](../technical/embedding-benchmark.md).
+
+Treat any published ranking with care, including this one: results on one library do not transfer automatically
+to another. A different field, language, mix of abstracts and titles or library size can change the order. If the
+difference matters to you, run the benchmark on your own library before you re-embed everything. A model that
+is only a little better on paper is rarely worth hours of work.
 
 ## Why this needs a procedure
 
@@ -22,7 +42,8 @@ setting, and the old ones are kept so that you can go back.
 
 ## The five steps
 
-All commands start in the backend's environment (below: the Docker Compose service named `backend`; use
+All commands start in the backend's environment (below: the Docker Compose service named `backend`, which is `app` in
+`docker-compose.selfhost.yml`, and the persistent volume mounted at `/data`, which is `/app/data` there; use
 `python scripts/...` directly from the `backend/` folder if you run it without Docker). The export folder holds
 the text of your whole library, so it must not live in a git checkout. `vectors_export.py` refuses such a path.
 
@@ -139,3 +160,9 @@ generation, so one older one is kept per vector set (`3` keeps two, `1` keeps no
 
 Models are loaded without `trust_remote_code`: a model that needs custom code from its repository is not
 supported here. Developer notes are in `.specs/019_vector_store.md`.
+
+## See also
+
+- [Paper feed](paper-feed.md) and [similar papers](similar-search.md): the two features whose ranking changes with the model.
+- [Fill missing abstracts](abstract-backfill.md): the vectors are built from title and abstract, so do this first if many papers lack one.
+- [Conference explorer](conferences.md): keeps its own vectors, see `CONFERENCE_EMBED_MODEL` above.

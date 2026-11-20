@@ -16,8 +16,8 @@ PaperManager has no connection to the Scholar Inbox service; this is a local re-
   `{"enabled": false}`. A test proves each of these.
 - **No new dependencies.** numpy, torch, transformers and httpx are already installed. The
   classifier is plain numpy (no scikit-learn). Do not edit `requirements.txt`.
-- **No GPU needed.** Embedding uses the same bge-small CPU embedder as the conference explorer
-  and library search (`services.conferences.embedder`). A few hundred papers a day take seconds.
+- **No GPU needed.** Embedding uses the same CPU embedder and model (`EMBED_MODEL`, default bge-small) as library search
+  (`services.conferences.embedder`). A few hundred papers a day take seconds.
 - **No private data in the repository.** Nothing instance-specific in code, docs, specs, tests
   or fixtures: no real names, e-mail addresses, hosts, tokens, paths outside the repo, paper
   titles from a real library or real keyword lists. Test data is synthetic. Defaults are neutral.
@@ -50,7 +50,7 @@ SQLite, not Neo4j: candidates are ephemeral and numerous, and the Aura free tier
 
 - `candidate(id TEXT PK, source, ext_id, title, authors, abstract, published, url, doi, categories,
   fetched_at, emb BLOB)` — `id` = `arxiv:<id>` / `biorxiv:<doi>` / `medrxiv:<doi>` (medRxiv keeps its own prefix); unique on (source, ext_id). Ids may contain `/`.
-  `emb` is the old place of the 384 float32 unit vector: since the vector store (`.specs/019_vector_store.md`) the
+  `emb` is the old place of the float32 unit vector (384 numbers for the default model): since the vector store (`.specs/019_vector_store.md`) the
   vectors live in its `feed` namespace; existing blobs are migrated once and left in place, new ones are not written.
 - `label(user, candidate_id, value INTEGER, created_at)` — value 1 (up) / -1 (down) / 0 (dismissed).
   Primary key (user, candidate_id).
@@ -109,7 +109,8 @@ fetch small: nothing is fetched when no user has chosen a category.
 Embeddings: library papers come from `services.library_search.semantic` (the existing store;
 read it, do not duplicate the embedding work; if it is disabled or empty, embed the needed
 library papers with the same embedder and cache them in the feed store); candidates are embedded
-at refresh time. Same model, same 384-dim space.
+at refresh time. Same model, same space; the dimension is the configured model's (384 for the default), read from the data and
+`model_config`, never hard-coded.
 
 Why "kept": on a real library almost nothing is rated or bookmarked (the classifier never reached 10
 positives), but the library itself says a lot about what the user wants. A paper's weight is the maximum over
@@ -144,7 +145,7 @@ paper when `single_user`, otherwise only for `mine`; `kept` is separate (see abo
 
 Fit: L2-regularised logistic regression with class-weighted cross-entropy, full-batch L-BFGS
 (`scipy.optimize` is available through the existing install; if importing it fails fall back to
-plain gradient descent) or numpy Newton steps. Features are the unit embeddings (384 dims, no PCA
+plain gradient descent) or numpy Newton steps. Features are the unit embeddings (the model's dimension, 384 by default, no PCA
 needed). Standardise nothing; add a bias. Regularisation `C` default 1.0.
 
 Library vectors: the library search index first (`library.semantic_snapshot`, read-only), then the feed

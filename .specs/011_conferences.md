@@ -35,7 +35,7 @@ library title match (visibility-filtered, cached 2 min per user) and "+ Library"
   `s` session(s), `u` conference page, `f` forum / OpenReview, `nt` the site's own topic, `kw`.
   Institution rows: `n` name, `s` sector, `p` papers, `f` fractional, `a` per-area counts, `r` rank,
   `slug`.
-- `emb.npy`: float16, (papers, 384), unit rows, same order as `papers`.
+- `emb.npy`: float16, (papers, dim) with dim 384 for the default model, unit rows, same order as `papers`.
 - `emb_title.npy`: the same for the title alone, only when some paper has an abstract or
   keywords (otherwise `emb.npy` already is title-only and `Dataset.temb` is `emb`).
 - `status.json`: `state` in none / queued / fetching / normalising / embedding / ready / partial /
